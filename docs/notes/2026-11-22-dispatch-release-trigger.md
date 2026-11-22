@@ -83,13 +83,18 @@ is now the normal one; the fallback remains for a release workflow outage or a b
 - `gh workflow view` shows `release.yml` as `workflow_dispatch` only and `publish.yml` with the
   `push: tags app-beta-*` fallback, the dry-run dispatch, and `workflow_call`.
 - The live dispatch preflight passes with the two environment policies above.
-- No tag, draft, or release exists after the change. The preflight did not create one, and neither
-  workflow was dispatched.
+- A plan-only dispatch of `release.yml` at `main` (run
+  [45074716505](https://github.com/jagoda/bittern/actions/runs/45074716505)) ran the no-environment
+  preflight job, printed `preflight: ok`, and skipped the release job because the confirmation was
+  empty. It created no tag, draft, or release.
+- No tag, draft, or release exists after the change. The preflight and the plan-only dispatch
+  created none.
 
 ## What remains unproven
 
-- The first dispatch release: the preflight, the tag creation, the draft upload, the `beta` approval,
-  and the visible publish. The live environment policy is applied, but no dispatch has run.
+- The first confirmed dispatch release: the tag creation, the draft upload, the `beta` approval,
+  and the visible publish. The plan-only dispatch proved the no-environment preflight but built
+  nothing.
 - The tag-creation step's API path and the draft's five-asset check in the same run.
 - The tag-push fallback with the real `beta` approval. It was already unproven before this change.
 - The bench rollout itself. The kit install, the first update, the second update, and the rollback
