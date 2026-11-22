@@ -60,7 +60,7 @@ type Compatibility struct {
 	UpdaterMin      int64  `json:"updater_min"`
 }
 
-// Payload identifies the archive that contains the manifest and the files.
+// Payload identifies the files-only archive distributed beside the manifest and signature.
 type Payload struct {
 	Filename string `json:"filename"`
 	Size     int64  `json:"size"`

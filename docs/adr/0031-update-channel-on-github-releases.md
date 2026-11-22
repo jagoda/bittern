@@ -51,6 +51,14 @@ visible published state, so a draft can collect every asset before one publish a
 release visible (GitHub Docs, "Immutable releases", <https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases>,
 accessed 2026-11-22). That gives an atomic publish primitive without a separate pointer file.
 
+GitHub limits unauthenticated REST requests to 60 per hour per originating IP (GitHub Docs, "Rate
+limits for the REST API", <https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api>,
+accessed 2026-11-22). A conditional request that returns `304 Not Modified` avoids the primary rate
+limit only when it is correctly authorized with an `Authorization` header, so an unauthenticated
+conditional request still consumes quota (GitHub Docs, "Best practices for using the REST API",
+<https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api>,
+accessed 2026-11-22). Every device behind one NAT shares the same hourly budget.
+
 ## Decision
 
 **1. The update channel is GitHub Releases in `jagoda/bittern`.** CI publishes an application
@@ -60,11 +68,14 @@ release. A draft release is the staging container: the build uploads `manifest.j
 flip. No asset is added after publication.
 
 There is no separate pointer file, no Bittern-operated update-check endpoint, and no mutable channel
-document in the device path at this stage. The device reads the newest published release in its
-channel namespace from the public GitHub Releases listing for the repository. "Newest" is the
-highest generation in the channel namespace, not the API's publication order, so an out-of-order
-publish or a draft cannot move a device backwards. The manifest channel must still equal the device
-channel, and the signature is verified before any manifest field is trusted.
+document in the device path at this stage. The device discovers releases with
+`GET https://api.github.com/repos/jagoda/bittern/releases?per_page=100`, filters on the channel tag
+prefix, and reads the highest generation. It does not use `/releases/latest`, which is repository
+wide and not channel aware. "Newest" is the highest generation in the channel namespace, not the
+API's publication order, so an out-of-order publish or a draft cannot move a device backwards. The
+manifest channel must still equal the device channel, and the signature is verified before any
+manifest field is trusted. A rate-limited response is a retry-later state; the device must never
+report or behave as if it is up to date.
 
 **2. The channel set stays `stable` and `beta`, and beta is the only live channel until the first
 field release.** The schema already has both values, so this is no schema change and no migration.
@@ -133,8 +144,9 @@ manifest layout.
   affects update availability, although the signature still protects authenticity.
 - Immutable releases cannot be edited or withdrawn in place. A bad release needs a new generation
   and, later, a pointer or advisory mechanism to tell devices which release is withdrawn.
-- A public release listing invites traffic and scraping. The device should cache and tolerate rate
-  limits; this ADR does not add a mirror or a proxy.
+- A public release listing invites traffic and scraping. The unauthenticated request budget is 60
+  requests per hour per originating IP, so every device behind one NAT shares it. A rate limit is a
+  retry-later state, never "up to date". This ADR does not add a mirror or a proxy.
 - There is no promotion path from beta to stable yet. The first stable release needs a new generation
   and a recorded promotion process.
 - The 2 GiB per-asset limit excludes the OS image loop from this channel unchanged.
@@ -166,6 +178,7 @@ manifest layout.
 | Deferred item | Trigger |
 | --- | --- |
 | A signed pointer file | Promotion from beta to stable, withdrawal of a bad release, a security channel, a second host, or a need to represent channel state without listing releases. |
+| A signed pointer file for device discovery | The unauthenticated request budget becomes binding (a fleet behind one NAT, or more devices than the hourly budget allows). |
 | Promotion from beta to stable | The first field release. Stable stays unpublished until then. |
 | Withdrawal of a bad release | The first bad published release. Immutable assets make withdrawal a new generation plus an advisory or pointer, not an edit. |
 | A security channel | [ADR 0021](./0021-security-updates.md) is accepted, or the first security-only release is needed. |

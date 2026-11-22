@@ -44,8 +44,8 @@ unsigned test build and is labelled as such.
 
 **2. Phase two publishes on a tag.** A tag matching the application bundle scheme in
 [ADR 0031](./0031-update-channel-on-github-releases.md) creates a draft release, uploads
-`manifest.json`, `manifest.json.sig`, and `bittern-app.tar.gz`, and publishes the draft as the
-visible flip. The job runs only after the phase one checks pass.
+`manifest.json`, `manifest.json.sig`, and `bittern-app.tar.gz`, and, after the approval in point 7,
+publishes the draft as the visible flip. The job runs only after the phase one checks pass.
 
 CI test bundles are signed with a CI-only Ed25519 development key held in GitHub Actions secrets.
 That key signs test bundles only. Its public key is pinned only on bench devices, never in a release
@@ -54,6 +54,12 @@ signed on the airgapped signing machine under [ADR 0029](./0029-release-signing-
 and the signature is attached to the draft. CI never holds the release seed and cannot produce a
 signature that a field device trusts. The two key ids make the test and release paths distinguishable
 in the manifest and the update record.
+
+The two signing paths are distinct. While the project is pre-release, the beta channel uses phase
+two: CI test releases signed with the CI test key. A release that a field device trusts is assembled
+differently: CI builds the bundle and uploads it to the draft, the manifest is signed on the
+airgapped machine, the signature is attached to the same draft, and only then, after the environment
+approval, is the draft published. The CI test key and the release key never sign the same manifest.
 
 **3. Third-party actions are pinned by full commit SHA.** Every action, including first-party
 GitHub actions, uses a 40-character commit SHA rather than a version tag or branch, and the repository
@@ -75,6 +81,13 @@ a claim that CI covers the release gate.
 **6. CI must never hold the release private key, a release trust anchor, a device secret, camera
 credentials, or a publishing credential beyond the scoped GitHub token.** The only long-lived secret
 in phase two is the CI-only test key. A change that needs another secret needs its own decision.
+
+**7. Publication runs in a protected environment with maintainer approval.** The publish job runs in
+a GitHub environment named for the channel, `beta` or `stable`. The environment requires maintainer
+approval, and only the maintainer, as the environment's required reviewer, can approve. The CI test
+key secret is stored in that environment rather than at repository scope. A tag push starts the
+workflow but cannot publish on its own. An unapproved, rejected, or cancelled run leaves a draft and
+no published release; the tag may exist, but the release stays invisible until approval.
 
 ## Consequences
 
@@ -102,6 +115,9 @@ in phase two is the CI-only test key. A change that needs another secret needs i
   blocks checks and publication together.
 - Phase one cannot sign or publish, so it does not prove the release path; phase two is a separate
   risk and a separate review.
+- Publishing now needs one interactive step: the maintainer approves the protected environment after
+  the draft is complete. This is the deliberate trade for keeping a stray or compromised tag push
+  away from bench devices.
 - QEMU and hardware coverage remain outside CI, so a green CI run is not the ADR 0012 release gate.
 - A CI test release is still a published immutable release. Its tag and assets cannot be reused, so
   test tags need a clear namespace and a disposal rule.
