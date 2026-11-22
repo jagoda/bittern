@@ -147,3 +147,63 @@ func TestWaitForAddressNamesTheMissingConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestChronyCheckFileUsesTheAppArmorDirectory(t *testing.T) {
+	directory := t.TempDir()
+	original := chronyCheckDir
+	chronyCheckDir = directory
+	t.Cleanup(func() { chronyCheckDir = original })
+
+	staged := filepath.Join(t.TempDir(), "chrony.conf")
+	content := "bindaddress 10.77.0.1\n"
+	if err := os.WriteFile(staged, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	path, cleanup, err := chronyCheckFile(staged)
+	if err != nil {
+		t.Fatalf("chronyCheckFile: %v", err)
+	}
+	if filepath.Dir(path) != directory {
+		t.Fatalf("check path = %q, want a file in %q", path, directory)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != content {
+		t.Fatalf("check file content = %q, want %q", data, content)
+	}
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("check file still exists after cleanup: %v", err)
+	}
+}
+
+func TestChronyCheckFileFallsBackWhenTheDirectoryIsNotWritable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write to a read-only directory")
+	}
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(directory, 0o700) })
+	original := chronyCheckDir
+	chronyCheckDir = directory
+	t.Cleanup(func() { chronyCheckDir = original })
+
+	staged := filepath.Join(t.TempDir(), "chrony.conf")
+	if err := os.WriteFile(staged, []byte("bindaddress 10.77.0.1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	path, cleanup, err := chronyCheckFile(staged)
+	if err != nil {
+		t.Fatalf("chronyCheckFile: %v", err)
+	}
+	defer cleanup()
+	if path != staged {
+		t.Fatalf("check path = %q, want the staged file %q", path, staged)
+	}
+}

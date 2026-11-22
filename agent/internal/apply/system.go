@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -347,11 +348,19 @@ func (s *ExecSystem) timeout() time.Duration {
 	return 30 * time.Second
 }
 
+// chronyCheckDir is the directory the Debian chronyd AppArmor profile allows
+// chronyd to read. A test points it at a directory whose write permission it
+// controls.
+var chronyCheckDir = "/etc/chrony"
+
 // chronyCheckFile returns a path the Debian chronyd AppArmor profile can read.
 // The profile allows /etc/chrony but not the apply staging tree, so the check
 // runs against a temporary copy in that directory and removes it afterwards.
+// A non-root caller, such as the test suite, cannot write there. It validates
+// the staged file directly, because the check needs a readable configuration
+// and not the AppArmor workaround that the root appliance needs.
 func chronyCheckFile(staged string) (string, func(), error) {
-	directory := "/etc/chrony"
+	directory := chronyCheckDir
 	if info, err := os.Stat(directory); err != nil || !info.IsDir() {
 		return staged, func() {}, nil
 	}
@@ -360,6 +369,9 @@ func chronyCheckFile(staged string) (string, func(), error) {
 		return "", func() {}, fmt.Errorf("read staged chrony config: %w", err)
 	}
 	temp, err := os.CreateTemp(directory, ".bittern-check-*.conf")
+	if errors.Is(err, fs.ErrPermission) {
+		return staged, func() {}, nil
+	}
 	if err != nil {
 		return "", func() {}, fmt.Errorf("create chrony check file: %w", err)
 	}

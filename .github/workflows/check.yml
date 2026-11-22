@@ -1,0 +1,120 @@
+# CI phase one, per ADR 0032 and BIT-042. The workflow runs the same offline
+# `make check` target a developer runs, then builds the current POC payload as
+# an unsigned test artifact. It uses no secrets, holds no write permission, and
+# publishes nothing. QEMU and hardware tests stay on the local or bench path.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# One run per ref. A new push cancels the older run on the same branch or pull
+# request instead of leaving it to finish against a superseded commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: read the repository and nothing else. Phase two adds
+# contents: write to its publish job only.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: make check
+    # The image is named instead of using the floating ubuntu-latest alias, so a
+    # runner image change arrives as a reviewed commit rather than a silent
+    # migration. Ubuntu 24.04 is the current GA LTS image and carries the
+    # toolchain the checks expect: make, Python 3, tar, and the rest of a
+    # standard build environment.
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing pushes in this workflow, so keep the job token out of
+          # .git/config for the later steps.
+          persist-credentials: false
+
+      - name: Set up Go from agent/go.mod
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          # The toolchain version is read from the module file, which declares
+          # go 1.27.4, instead of being repeated in this file. The workflow
+          # cannot drift from the repository's pinned Go version.
+          go-version-file: agent/go.mod
+          # The module is under agent/, so the default cache key path misses
+          # go.sum and setup-go warns that it cannot restore the cache.
+          cache-dependency-path: agent/go.sum
+
+      # The two packages make check needs beyond the Python standard library,
+      # matching the Debian package list in schema/README.md. apt is used rather
+      # than pip because the runner's Python is externally managed (PEP 668) and
+      # pip would need --break-system-packages to install into it.
+      - name: Install the Python schema packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-yaml python3-jsonschema
+
+      # The runner image installs chronyd, and the distribution AppArmor profile
+      # confines it to reading /etc/chrony. The render and first-boot checks
+      # hand chronyd the rendered config from a temporary tree, so the profile
+      # needs read access to that tree. The rule is added through the profile's
+      # own local include; the profile stays in enforce mode and only the
+      # validator's read path is widened.
+      - name: Let the chrony validator read the rendered config
+        run: |
+          printf '%s\n' '/tmp/Test*/** r,' \
+            | sudo tee -a /etc/apparmor.d/local/usr.sbin.chronyd >/dev/null
+          sudo apparmor_parser -r /etc/apparmor.d/usr.sbin.chronyd
+
+      # The repository's own target, so CI and a developer keep one definition
+      # of green and a failure names the same check and file. The individual
+      # checks stay inside the Makefile and are not split into workflow steps.
+      - name: Run make check
+        run: make check
+
+  build:
+    name: unsigned test build
+    # No artifact is produced when the checks fail.
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from agent/go.mod
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: agent/go.mod
+
+      # The bundle packer and make beta-payload do not exist yet, so this builds
+      # the target that does exist: the POC payload tarball holding the bittern
+      # and bitternd binaries, the units, and the packaging scripts. It is a
+      # test build, not a release payload. The app bundle artifact arrives with
+      # the bundle packer in BIT-042 phase two.
+      - name: Build the POC payload
+        run: make poc-payload
+
+      - name: Record what the artifact is
+        run: |
+          printf '%s\n' \
+            '### Unsigned test build' \
+            '' \
+            'This artifact is an unsigned test build of the current POC payload. It is not' \
+            'a release payload: it is unsigned, unpublished, and no device should trust it.' \
+            'The app bundle artifact arrives with the bundle packer in BIT-042 phase two.' \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the unsigned test build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bittern-poc-unsigned-test-build
+          path: build/payload/bittern-poc-*.tar.gz
+          if-no-files-found: error
+          # A test build is worth a review or a bench download, not long
+          # storage.
+          retention-days: 5
