@@ -88,10 +88,10 @@ a CI run uses its own `created` value and therefore its own manifest digest.
 
 | Asset | Size | SHA-256 |
 | --- | --- | --- |
-| `bittern-app.tar.gz` | 9883538 | `4d8e468730ccd96bb23a253cbfd968d9ce98eb2459b455bdc925bfc9c545e90c` |
-| `manifest.json` | 834 | `58acb8b619a3a1095f7bf28780e8288ecaa1d9d6a0805bc5841535e01d28765c` |
-| `bittern-beta-kit.tar.gz` | 9769149 | `bdc8e00c35c0c636cb78a8203bdbc1d4aeed70f1beaf74062f0c61e98f044373` |
-| `SHA256SUMS` | 90 | `3c5a74198edd64360accca3aaab4d756db6e9e5bb7a58f6de920198f55b9eea5` |
+| `bittern-app.tar.gz` | 9883537 | `310bb6dce89c3b9231578fff1ff9a5d431ba280d131e421616a2ad41865e46a4` |
+| `manifest.json` | 834 | `d9177de719fad1946e25df31acc6fdfbb6d1f51181f4402770a1793b1989710b` |
+| `bittern-beta-kit.tar.gz` | 9769126 | `a076ee7044b4c2499d78bce2f558e611d484b3589a964b06b576d4c4974dd432` |
+| `SHA256SUMS` | 90 | `133dd0e9421035416d6c1147231cb61833fa18a7f45f4964abfa8777bbadf7ea` |
 
 The manifest lists `usr/bin/bittern` and `usr/bin/bitternd`, mode 0755, with their per-file digests.
 The kit verifies with `sha256sum -c SHA256SUMS`, and its internal checksums verify every member. The
@@ -99,12 +99,13 @@ kit contains no manifest, no signature, and no release anchor.
 
 ## CI registration and check run
 
-The change was committed as `b4a2411`, fast-forwarded onto `main`, and pushed. The check workflow
-run [45050966145](https://github.com/jagoda/bittern/actions/runs/45050966145) is green: `make check`
-passed in 1m19s and the unsigned test build completed in 34s. `gh workflow list` shows `publish`
-active, and `gh workflow view publish.yml --ref main --yaml` returns the workflow instead of a 404,
-so GitHub accepted the workflow file. No tag was pushed, so the tag job, the environment approval,
-the signature step, the draft upload, and the draft-to-published flip did not run.
+The implementation was committed as `b4a2411` and the documentation follow-ups as `c4d0212`,
+`c9ca429`, and `1184a26`. `main` was fast-forwarded to `1184a26` and pushed. Check workflow run
+[45051739634](https://github.com/jagoda/bittern/actions/runs/45051739634) for `1184a26` is green.
+`gh workflow list` shows `publish` active, and `gh workflow view publish.yml --ref main --yaml`
+returns the workflow instead of a 404, so GitHub accepted the workflow file. No tag was pushed, so
+the tag job, the environment approval, the signature step, the draft upload, and the
+draft-to-published flip did not run.
 
 ## Tests
 
