@@ -5823,22 +5823,26 @@ class UpdateScenario(FirstbootScenario):
             f"is {self.versions[1]}, no activation pointer and no committed update state"
         )
 
-    def stage_update_sources(self) -> None:
+    def stage_update_source(self, name: str) -> None:
+        archive = self.staged[name]
         self.appliance.ssh(
             f"sudo -n install -d -m 0755 -o root -g root {UPDATE_INCOMING}", timeout=30
         )
-        for name, archive in self.staged.items():
-            remote = f"/tmp/{name}.tar.gz"
-            self.appliance.scp_to(archive, remote, timeout=180)
-            self.appliance.ssh(
-                "set -eu; "
-                f"sudo -n rm -rf {UPDATE_INCOMING}/{name}; "
-                f"sudo -n tar -xzf {remote} -C {UPDATE_INCOMING}; "
-                f"sudo -n chown -R root:root {UPDATE_INCOMING}/{name}; "
-                f"sudo -n test -f {UPDATE_INCOMING}/{name}/manifest.json; "
-                f"sudo -n rm -f {remote}",
-                timeout=180,
-            )
+        remote = f"/tmp/{name}.tar.gz"
+        self.appliance.scp_to(archive, remote, timeout=180)
+        self.appliance.ssh(
+            "set -eu; "
+            f"sudo -n rm -rf {UPDATE_INCOMING}/{name}; "
+            f"sudo -n tar -xzf {remote} -C {UPDATE_INCOMING}; "
+            f"sudo -n chown -R root:root {UPDATE_INCOMING}/{name}; "
+            f"sudo -n test -f {UPDATE_INCOMING}/{name}/manifest.json; "
+            f"sudo -n rm -f {remote}",
+            timeout=180,
+        )
+
+    def stage_update_sources(self) -> None:
+        for name in self.staged:
+            self.stage_update_source(name)
 
     def run_update(self, name: str, timeout: float = 900) -> subprocess.CompletedProcess[str]:
         source = f"{UPDATE_INCOMING}/{name}"
@@ -6075,6 +6079,9 @@ class UpdateScenario(FirstbootScenario):
         invocation = self.service_invocations(("bitternd.service",)).get("bitternd.service", "")
         if not invocation:
             raise HarnessError("cannot read the bitternd.service InvocationID before rejection")
+        # A committed install removes its incoming source, so re-stage the
+        # generation 1 bundle before offering it again for the downgrade check.
+        self.stage_update_source("g1")
         evidence = [
             self.assert_rejection(
                 "tampered-payload",
