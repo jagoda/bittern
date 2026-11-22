@@ -106,29 +106,29 @@ not collapse the two.
 ## QEMU run
 
 `make qemu-update GO=/usr/local/go/bin/go` ran on 2026-11-22 under KVM and exited 0. The log
-directory is `build/qemu/logs/update-20261122-135636/`. The run used source commit
-`ad05cefd245b044920a1e6a7da43aefede94a567` and ephemeral key id starting `d569f6b2bef5a878`.
+directory is `build/qemu/logs/update-20261122-140606/`. The run used source commit
+`a2ebdad92744c8b2f01cb0daccbdb875b0d71ecc` and ephemeral key id starting `8aa69274b8b9cd80`.
 
 | Phase | Result | Seconds |
 | --- | --- | --- |
-| Update assets | pass | 16.5 |
-| Guests, first cold boot and baseline snapshot | pass | 139.6 |
-| Beta kit install | pass | 23.7 |
-| Platform, rotation anchor, absent image store, beta channel | pass | 2.5 |
-| First boot | pass | 9.3 |
-| Factory baseline | pass | 0.8 |
-| Generation 1 install | pass | 6.8 |
-| Generation 2 update | pass | 4.2 |
-| Generation 3 health rollback | pass | 5.2 |
-| Three rejections | pass | 8.8 |
-| Final history, config digest and image-store assertions | pass | 2.6 |
+| Update assets | pass | 17.4 |
+| Guests and baseline snapshot restore | pass | 5.5 |
+| Beta kit install | pass | 26.5 |
+| Platform, rotation anchor, absent image store, beta channel | pass | 2.4 |
+| First boot | pass | 10.3 |
+| Factory baseline | pass | 0.9 |
+| Generation 1 install | pass | 7.4 |
+| Generation 2 update | pass | 4.0 |
+| Generation 3 health rollback | pass | 3.8 |
+| Three rejections | pass | 9.2 |
+| Final history, config digest and image-store assertions | pass | 2.7 |
 | Log hygiene | pass | 0.2 |
 
 The baseline and the first bundle came from the same commit and reported different versions:
 
 ```text
 $ GET /api/version
-{"baseline": true, "status_schema": 1, "version": "0.0.0-factory-ad05cefd245b"}
+{"baseline": true, "status_schema": 1, "version": "0.0.0-factory-a2ebdad92744"}
 $ bittern update status
 committed: no update state
 ```
@@ -137,13 +137,13 @@ The version change and rollback:
 
 ```text
 $ journalctl -u bitternd.service (daemon.start)
-... "version":"0.0.0-beta.1-ad05cefd245b" ...
+... "version":"0.0.0-beta.1-a2ebdad92744" ...
 $ bittern update install /var/lib/bittern/update/incoming/g2
-update: committed operation 20261122T185956Z-g000001-5e06d041
+update: committed operation 20261122T190717Z-g000001-ca3c522b
 $ journalctl -u bitternd.service (daemon.start)
-... "version":"0.0.0-beta.2-ad05cefd245b" ...
+... "version":"0.0.0-beta.2-a2ebdad92744" ...
 $ bittern update install /var/lib/bittern/update/incoming/g3
-update: rolled-back operation 20261122T190000Z-g000002-5dce7749
+update: rolled-back operation 20261122T190721Z-g000002-294aff97
   failed step: health
   reason: health.bundle-integrity: file.extra: the extracted file usr/bin/post-activation-marker is not in the manifest
   rollback: rolled-back, restored generation 2
@@ -152,15 +152,15 @@ update: rolled-back operation 20261122T190000Z-g000002-5dce7749
 The three rejections:
 
 ```text
-update: rejected operation 20261122T190005Z-g000002-8a804aa9
+update: rejected operation 20261122T190725Z-g000002-3b5965f3
   failed step: verify-payload
-  reason: $.payload.sha256: payload.digest: payload digest d304b19f... does not match the manifest digest 5fb49105...
+  reason: $.payload.sha256: payload.digest: payload digest 7762e2c3... does not match the manifest digest 09944e0e...
 
-update: rejected operation 20261122T190008Z-g000002-0f5b4caa
+update: rejected operation 20261122T190728Z-g000002-d0f5f258
   failed step: verify-manifest
-  reason: $: signature.invalid: the signature does not verify with signer d569f6b2...
+  reason: $: signature.invalid: the signature does not verify with signer 8aa69274...
 
-update: rejected operation 20261122T190011Z-g000002-707da355
+update: rejected operation 20261122T190731Z-g000002-82dca82f
   failed step: verify-manifest
   reason: $.generation: generation.rollback: generation 1 is not greater than the committed generation 2
 ```
