@@ -1,9 +1,10 @@
 # Update transaction specification: BIT-009 slice one
 
 - Date: 2026-11-22
-- Status: slice zero specification for
+- Status: slice zero specification and slice two design delta for
   [BIT-009](../plan/implementation-plan.md#bit-009-app-bundle-update-transaction-with-rollback).
-  No implementation code, systemd unit, workflow, UI or packer is part of this note.
+  Section 15 is the slice two design delta. No implementation code, systemd unit, workflow, UI or
+  packer is part of this note.
 - Related: [ADR 0008](../adr/0008-updates-rollback-and-reset.md),
   [ADR 0029](../adr/0029-release-signing-and-key-custody.md),
   [ADR 0030](../adr/0030-ab-from-the-first-image.md),
@@ -512,9 +513,9 @@ mode other than 0600 is a hard failure; the engine does not unlink it.
 The existing apply operation manager's mutex is in-process only. It serializes UI operations inside
 `bitternd` and does not exclude a separate helper process. The update lock is the cross-process
 authority. Slice one does not change the apply transaction or its mutex; slice two makes apply take
-the same file lock before it writes, so an apply and an update cannot overlap. Until then, slice one
-is not wired to a production caller and the only tests are in-process. The question of extracting a
-shared lock package is in section 14.
+the same file lock before it writes, so an apply and an update cannot overlap. Section 15 extracts the
+shared lock package and records the apply change. Until then, slice one is not wired to a production
+caller and the only tests are in-process.
 
 ## 11. Idempotency
 
@@ -686,13 +687,285 @@ as the model, not as a shared implementation.
 | --- | --- | --- | --- |
 | How is the Frigate database snapshot taken while ADR 0008 requires the backup before the stop? | Online SQLite backup before the stop; filesystem snapshot before the stop; stop first and change ADR 0008 with a superseding ADR. | Keep the ADR order and use an online SQLite backup before `stop-frigate`; if no SQLite driver is available, ship the `DataSnapshot` interface and a test fake in slice one and the real adapter in slice two. | Online SQLite backup before the stop. It keeps the Accepted backup order and gives a consistent copy without a quiesce. Do not reorder the steps. Prove restore in slice three. |
 | Is there a check-now path before OQ-12 decides automatic checking? | No check-now in slice one; a local-file check that only reads a directory; a GitHub check-now action. | No check-now. Slice one installs from a local directory only and does not decide when a device checks. | No check-now. OQ-12 owns the automatic policy, and a check-now path before the channel client exists would be a second, unreviewed update trigger. |
-| Does slice one refactor the apply lock into a shared package? | Extract a shared `internal/oplock` now and change apply; add a minimal `flock` in `internal/update` now and extract it in slice two; leave apply alone and use a systemd conflict only. | Add the minimal `flock` in `internal/update` now; do not touch `apply` in slice one. | Minimal `flock` in `internal/update` now. Extract the shared package in slice two when apply must take the same lock. This keeps slice one out of the running daemon. |
-| Where is the platform generation provider registered? | Image metadata file read by the helper; installer fingerprint file under `/var/lib/bittern`; compile-time constant. | Define the `PlatformProvider` interface in `internal/update` and use a test provider in slice one. Register the production provider in the slice-two helper. | Interface now, production registration in the slice-two helper, reading root-owned image metadata at a path the image ADR fixes. The path is not chosen in this note. |
+| Does slice one refactor the apply lock into a shared package? | Extract a shared `internal/oplock` now and change apply; add a minimal `flock` in `internal/update` now and extract it in slice two; leave apply alone and use a systemd conflict only. | Add the minimal `flock` in `internal/update` now; do not touch `apply` in slice one. | Minimal `flock` in `internal/update` now. Extract the shared package in section 15 when apply must take the same lock. This keeps slice one out of the running daemon. |
+| Where is the platform generation provider registered? | Image metadata file read by the helper; installer fingerprint file under `/var/lib/bittern`; compile-time constant. | Define the `PlatformProvider` interface in `internal/update` and use a test provider in slice one. Register the production provider in the slice-two helper. | Interface now, production registration in the slice-two helper, reading root-owned image metadata. Section 15 fixes the provisional path and the fail-closed rules. |
 | Does the bundle carry systemd units and scripts, or application files only? | Application files only; application files plus units installed by the helper; a separate signed unit payload. | Application files only in slice one. The fixed launcher and units are installed by the image or the slice-two helper. | Application files only. A unit change is an OS image update under ADR 0030, or a separately specified unit payload later. Do not let the app bundle write `/etc/systemd/system` without that decision. |
 | Who persists the pending `appliance.yaml` migration? | The update engine writes `/etc` (violates the `/var/lib/bittern` boundary); the slice-two agent reads the pending file and persists it after commit; a separate config apply transaction runs after commit. | The engine writes the pending file under `/var/lib/bittern/update/<operation-id>/`; slice one leaves it unused; slice two's agent persists it after commit. | The slice-two agent persists it after commit. This keeps the write boundary and makes rollback before commit a pending-file delete. |
+
+## 15. Slice two: production wiring
+
+- Date: 2026-11-22
+- Status: design delta for BIT-009 slice two, written before the implementation. It records every
+  new interface, path, format, and behaviour that slice one deliberately left open.
+- Related: the same ADRs and notes as the header, plus [docs/status.md](../status.md) for the status
+  contract.
+
+Slice one is a library with test seams. Nothing calls it, nothing starts it after a reboot, and every
+live adapter is a fake. Slice two wires it to the appliance without changing the transaction order,
+the verification order, the rollback order, or the `/var/lib/bittern` write boundary.
+
+### What this slice fixes
+
+| Slice one gap | Slice two fix |
+| --- | --- |
+| No production caller | A fixed `bittern-update.service` runs `bittern update helper`. The helper takes no arguments, reads one 0600 request record, runs one transaction, and exits. |
+| The request is a test driver argument | `/var/lib/bittern/update/request.json` is the only input. The agent writes it, starts the unit, follows the journal, and reads the history. |
+| `PlatformProvider` is a test fake | `FilePlatformProvider` reads `/usr/lib/bittern/platform.json`, which must be root-owned and is never read from `appliance.yaml`. |
+| `UnitSystem` is a test fake | `ExecSystem` delegates stop, start, and probes to `apply.ExecSystem` and the existing `apply.ProbeUnit` and `apply.ProbeHTTP` kinds, including `apply.FrigateHealthProbe()`. |
+| `ImageEnsurer` is a test fake | `DockerImageEnsurer` uses the existing `frigateimage.Ensure` path with the pinned reference and digest. |
+| `DataSnapshot` is a test fake | `SQLiteSnapshot` invokes the `sqlite3` command line `.backup` and `.restore` commands. No Go SQLite driver is added. |
+| The status `updates` section is a placeholder | `updates.current_generation` and `updates.base` read `/var/lib/bittern/update/state.json`. |
+| Apply and update could overlap | `internal/oplock` is the shared cross-process lock. Apply takes it before its first write and update takes it for the whole transaction. Read-only status does not take it. |
+
+### The request record
+
+The request record is the only input to the helper. Its path is fixed:
+
+`/var/lib/bittern/update/request.json`
+
+| Property | Rule |
+| --- | --- |
+| Directory | `/var/lib/bittern/update`, mode 0755, root-owned. |
+| File | Regular file, no symlink, owner `0`, mode exactly 0600. Any other mode or owner is a hard rejection. |
+| Writer | The agent writes it atomically: a temporary file in the same directory, `fsync`, `rename`, then `fsync` the directory. |
+| Reader | The helper reads it once, before it takes the transaction lock. It never accepts a path, a flag, an environment variable, or an argument for it. |
+| Lifetime | It is removed when the transaction has no journal after the attempt. It is kept while a journal remains, so a cut resumes from the same request. It is kept on `ErrBusy` so a retry is possible. |
+| Secrets | It contains no secret. The source path is not a credential; the manifest signature is the trust input. |
+
+The format is one strict JSON object, schema 1. Unknown fields, trailing data, a relative source
+path, a symlink source, and an unknown source kind are rejected.
+
+```json
+{
+  "schema_version": 1,
+  "request_id": "20261122T120000Z-1a2b3c4d",
+  "source": "local-file",
+  "source_path": "/var/lib/bittern/update/incoming/20261122T120000Z-1a2b3c4d",
+  "requested_at": "2026-11-22T12:00:00Z"
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `schema_version` | `1`. A higher or lower value is rejected. |
+| `request_id` | `YYYYMMDDTHHMMSSZ-<8 lowercase hex>`. It identifies the request, not the transaction. The transaction operation id is still generated by the engine. |
+| `source` | `local-file` in this slice. A future `github-release` value needs a channel client and a new spec section. |
+| `source_path` | Absolute, cleaned, existing directory, not a symlink. The engine still verifies every manifest, signature, payload, and file digest. |
+| `requested_at` | RFC 3339 UTC. It is recorded for support, not used as a trust input. |
+
+The request is not a journal. A request with no journal is a pending start; a request with a journal
+is a resume of that journal. A request never carries a generation, a channel, a key, a digest, or a
+verification result.
+
+### The helper unit contract
+
+The unit is `agent/packaging/bittern-update.service`. It is fixed, installed by the preparation
+kit, enabled for the next boot, and started explicitly by the agent.
+
+| Unit property | Value and reason |
+| --- | --- |
+| `Type` | `oneshot`. One transaction, then exit. |
+| `ExecStart` | `/usr/bin/bittern update helper`. The subcommand accepts no arguments. |
+| Environment | No `Environment=`, no `EnvironmentFile=`, no `%i`, `%n`, `%j`, no variable expansion, no user-supplied property. The fixed paths are compiled into the helper. |
+| `ConditionPathExists` | `/var/lib/bittern/update/request.json`. A boot with no request skips the unit. A boot with a request resumes the interrupted transaction. |
+| Ordering | `After=local-fs.target`, `Before=bitternd.service`. A resumed transaction owns the agent restart. |
+| User | `root` and group `root`. The transaction writes the state root and restarts units. |
+| `UMask` | `0077`. Every metadata file still sets its documented mode explicitly. |
+| Timeout | `TimeoutStartSec=2h`, above the 60 minute image budget, the 5 minute health gate, and the stop bounds. A timeout is a process cut; the journal resumes it. |
+| Restart | `Restart=no`. A failed transaction is not retried in a loop; the request and journal decide the next start. |
+| Writable paths | `ReadWritePaths=/var/lib/bittern`. `/etc` stays read-only, which keeps the live config write with the agent. |
+| Sandbox | `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`, `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectKernelLogs`, `ProtectControlGroups`, `ProtectClock`, `ProtectHostname`, `RestrictNamespaces`, `RestrictRealtime`, `RestrictSUIDSGID`, `LockPersonality`, `MemoryDenyWriteExecute`, `RemoveIPC`, `NoNewPrivileges=true`, `SystemCallArchitectures=native`, `SystemCallFilter=@system-service`. |
+| Capabilities | An empty `CapabilityBoundingSet`. The helper runs `systemctl` as a D-Bus client, `docker` through the socket, and `sqlite3` on regular files; it needs no capability. |
+| Devices | `PrivateDevices` is not enabled. The base fingerprint reads `/dev/dri` and `/sys/firmware` as evidence. |
+| Address families | `AF_UNIX`, `AF_INET`, `AF_INET6`. Docker uses the socket, Frigate health uses loopback HTTP, and no netlink socket is needed. |
+
+`bittern update helper` rejects any argument and any environment-derived path. It reads the request
+record, the same inputs the transaction already reads (`appliance.yaml`, the trust stores, the
+active journal, the committed state, the bundle source), and nothing else. The unit does not run a
+shell, a script, or a command assembled from the request.
+
+### How the agent hands work to it
+
+`bittern update install <source>` is a root CLI path. It is not a UI route and the daemon does not
+start it. The sequence is:
+
+1. Validate `<source>` as an absolute, existing, non-symlink directory.
+2. Take the shared operation lock non-blocking. If it is held, print that another operation is
+   running and exit without writing a request.
+3. Read the active journal. A journal with a different `source_path` is a refusal, not a second
+   transaction. A journal with the same path is a resume and may reuse or recreate the request.
+4. With no journal, write a new request or reuse a matching pending request. A request with a
+   different source is a refusal.
+5. Release the shared lock, then start the fixed unit with `systemctl start --no-block`. Releasing
+   is required because the helper takes the same lock for the whole transaction. The lock check in
+   step 2 is advisory; the helper's acquisition is authoritative.
+6. Follow the journal: print each new `next_step`, `last_completed_step`, candidate generation, and
+   phase transition once. Release the terminal, then read the newest history record.
+7. Exit 0 only for `committed`. A `rejected`, `failed`, `rolled-back`, or `state-unknown` result
+   exits non-zero and prints the failing step and the redacted reason.
+
+`bittern update status` is read-only, takes no lock, and prints the committed generation, the active
+journal, and the newest history result. `bittern update cancel` removes a request that has no
+journal; it refuses while a journal exists. Neither command is exposed in the UI.
+
+A start that fails before the helper runs removes a request the command created itself, so a boot
+with no operation does not retry forever. A request that a resume reused is kept. The helper removes
+the request when the transaction ends with no journal, except on `ErrBusy`, where the request stays
+for an explicit retry.
+
+### Platform provider registration
+
+`FilePlatformProvider` reads one root-owned metadata file at the fixed provisional path:
+
+`/usr/lib/bittern/platform.json`
+
+```json
+{"schema_version": 1, "generation": 1}
+```
+
+| Rule | Failure |
+| --- | --- |
+| Regular file, no symlink, owner `0`, not group- or other-writable. Mode 0644 or 0444 is accepted. | `platform.type`, `platform.owner`, `platform.mode` |
+| Strict JSON, schema 1, integer generation `>= 0`, no trailing data. | `platform.parse`, `platform.schema`, `platform.generation` |
+| Missing file | `platform.missing`; the error names the path and says the image must write it. The update is refused at `preflight`. |
+
+The provider returns `Platform{Generation: <value>, Source: "image-metadata"}`. The source label is
+fixed by the provider, not taken from the file. The engine freezes it in the journal and state, and
+the compatibility check uses only that value. The provider never reads the OS generation from
+`appliance.yaml`, an environment variable, or a unit property.
+
+The path is under `/usr/lib/bittern`, next to the image trust store in
+[ADR 0029](../adr/0029-release-signing-and-key-custody.md), so it is image-owned and read-only. It
+is provisional until the image ADR fixes the metadata layout under
+[ADR 0030](../adr/0030-ab-from-the-first-image.md); changing it is one constant and one test. The
+provider is registered in the helper, not in `bitternd`, so the daemon cannot supply a platform
+value and the transaction cannot be started with a caller-chosen one.
+
+### Database snapshot adapter
+
+`SQLiteSnapshot` implements `DataSnapshot` with the SQLite command line tool. No Go SQLite driver is
+added, so the agent keeps its current dependency set and does not acquire a second SQLite build.
+
+| Operation | Command | Bounds |
+| --- | --- | --- |
+| Create | `/usr/bin/sqlite3 <live-db> ".backup '<destination>'"` | Tool path fixed and absolute; 5 minute default timeout; destination under the backup directory. |
+| Restore | `/usr/bin/sqlite3 <live-db> ".restore '<snapshot>'"` | Tool path fixed and absolute; 5 minute default timeout; the engine stops Frigate before this step. |
+
+The `.backup` command uses SQLite's online backup API, not a file copy. It produces a consistent
+snapshot while Frigate is running, which is what the ADR 0008 backup order requires: the backup step
+is before `stop-frigate` and the transaction does not need to quiesce the database to get a valid
+copy. The restore removes stale `-wal`, `-shm`, and `-journal` sidecars before `.restore`, so a
+pre-stop WAL cannot replay over the restored image.
+
+The live database is `<recording mount point>/frigate.db`, which is the same media path the renderer
+mounts at `/media/frigate`. A missing live database is a `snapshot.database` rejection before any
+live change, not a silent empty backup. A missing tool is a `snapshot.sqlite-missing` rejection that
+names `/usr/bin/sqlite3` and says the preparation kit must install it. A relative or caller-supplied
+tool path is rejected; the adapter never resolves `sqlite3` through `PATH`, for the same reason the
+base collector does not resolve `docker` through `PATH`.
+
+The preparation kit must install `sqlite3`. This slice updates the package list in
+`packaging/install.sh` and `image/packages.txt`; the beta kit inherits the same list when BIT-042
+phase two builds it. A device missing the package fails the `backup-data` step before `stop-frigate`
+and records a rejection, so it never updates without a database backup.
+
+### Status contract
+
+The `updates` section reports the committed transaction state from
+`/var/lib/bittern/update/state.json`:
+
+```json
+{
+  "state": "ok",
+  "current_slot": null,
+  "current_generation": 3,
+  "base": {
+    "debian_version": "13.1",
+    "kernel": "6.12.0-amd64",
+    "docker_version": "27.3.1",
+    "devices": ["/dev/dri/renderD128"],
+    "firmware": ["/sys/firmware/efi"]
+  }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `current_slot` | Always null in this slice. [ADR 0030](../adr/0030-ab-from-the-first-image.md) leaves the OS slot to the image work; the app transaction never claims one. |
+| `current_generation` | The committed app bundle generation from `state.json`, or null when no state exists. It is not `render.generation`, which is the configuration generation. |
+| `base` | The base fingerprint frozen at the last commit, or null when no state exists. It is recorded evidence, not a trust input. |
+
+The section state is `ok` when `state.json` exists and `unknown` when it does not. A failed or
+interrupted transaction leaves the previous committed state in place, so the section keeps reporting
+that generation; the journal is not part of this section. The overall `updating` state stays a
+daemon lifecycle state and is not set by this slice, because the agent does not host the update
+worker.
+
+The field name changes from the slice zero placeholder `generation` to `current_generation`. The old
+field was never populated by a release, no deployed reader exists, and the new name removes the
+ambiguity with `render.generation`. [docs/status.md](../status.md) is updated in the same change.
+
+### The shared operation lock
+
+`agent/internal/oplock` is the single cross-process lock. The path stays
+`/var/lib/bittern/update/lock`, so the slice zero path table is unchanged. `oplock.Path(stateRoot)`
+is the only constructor and both transactions use it.
+
+| Caller | When it takes the lock | Behaviour on contention |
+| --- | --- | --- |
+| Apply | Before its first write, including the generation directory and journal. It holds it for the whole apply or rollback. | `ErrBusy`; no file is written and no unit is touched. |
+| Update | Before reading the journal for a new transaction or a resume. It holds it through rollback, prune, and finish. | `ErrBusy`; the request is kept and the CLI reports another operation is running. |
+| Status, history, inspection | Never. | Not applicable. |
+
+The file rules are unchanged: `O_CREAT|O_RDWR|O_CLOEXEC|O_NOFOLLOW`, mode 0600, regular file, owner
+matching the effective uid, exclusive non-blocking `flock`. A file without a holder is not stale. A
+symlink, wrong mode, wrong owner, or non-regular file is a hard failure and is never repaired. The
+apply change is only the lock acquisition and its placement before the first write; the apply plan,
+journal, generations, rollback, and health gate are unchanged.
+
+### Test evidence required by this slice
+
+| Case | What it proves |
+| --- | --- |
+| Request round trip and strict decode | The fixed format is read exactly, and unknown fields or trailing data are rejected. |
+| Request mode 0600 | A request at 0644 or any other mode is rejected before a transaction can start. |
+| Request while a journal exists | A second request is refused, writes nothing, and does not start the unit. |
+| Helper from a request | The helper runs one transaction from the request, logs progress, and leaves the history record. |
+| Helper resume source | A resume uses the journal's `source_path`, not a changed request path. |
+| Request removal | A final transaction removes the request; a busy or journalled one keeps it. |
+| Platform provider | A valid root-owned file supplies the generation; missing, wrong-owner, writable, symlink, and malformed files fail closed. |
+| SQLite snapshot | `.backup` and `.restore` are invoked with the fixed absolute tool and the expected paths; a missing tool names `sqlite3`; sidecars are removed before restore. |
+| Docker image | The pinned reference and digest and the step timeout reach the existing ensure path. |
+| Apply and update contend | Both processes contend on the same lock path and both return `ErrBusy`. |
+| Status probe | A committed `state.json` reports `current_generation` and `base`; a missing state reports unknown. |
+| Unit contract | The checked-in unit has the fixed command, no environment or template expansion, and the documented sandbox. |
+| Preparation kit | The POC installer and the provisional image package list both name `sqlite3`. |
+
+### Differences from the slice zero specification
+
+| Difference | Reason |
+| --- | --- |
+| `updates.generation` is named `updates.current_generation`. | The placeholder was never populated and the new name distinguishes the bundle generation from `render.generation`. No released reader exists. |
+| The journal gains `source_path`. | A resume must read the source the transaction started from, even if the request record was replaced. |
+| The platform metadata path is fixed to `/usr/lib/bittern/platform.json`. | The provider needs a concrete path to fail closed on. It is provisional until the image ADR fixes the layout, and it is one constant to change. |
+| The request record and helper unit are new artifacts. | Slice zero deliberately left the production entry point open; section 15 is that decision. |
+| Apply takes the shared lock. | This is the slice zero recommendation in section 10, now implemented. The apply transaction's plan and behaviour are unchanged apart from refusing to overlap another operation. |
+| The database adapter uses the `sqlite3` CLI. | ADR 0029 and the project rule forbid a new dependency without an ADR. The CLI backup is a consistent online copy; the cost is that the preparation kit must install `sqlite3`. |
+
+### Out of scope
+
+- The GitHub Releases channel client, release listing, tag parsing, and rate-limit handling.
+- The UI update card, progress page, result page, and history view.
+- The QEMU update scenario, database restore evidence, camera evidence, and real storage power loss.
+- The BIT-042 phase two bundle packer and the publication workflow.
+- The OS image, the A/B mechanism, the platform metadata writer, and the release key ceremony.
+- Any write to `/etc` by the update transaction. The agent still owns the live config write and the
+  pending migration it may persist after commit.
 
 ## Verification
 
 `make link-check` and `make style-check` pass for this note. No code, workflow, systemd unit, packer,
-or UI change is part of this slice. The note is slice zero in
+or UI change is part of slice zero. Slice two implementation and its named tests are described in
+section 15 and are recorded in a dated slice two note when they land. The note is slice zero and the
+slice two design delta in
 [BIT-009](../plan/implementation-plan.md#bit-009-app-bundle-update-transaction-with-rollback).
