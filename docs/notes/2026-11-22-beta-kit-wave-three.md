@@ -80,8 +80,9 @@ rejection, and a `state-unknown` rollback omit it because no generation was rest
 The CLI prints the restored generation only when it is present.
 
 **Tests.** `TestUpdateCommittedHistoryOmitsRestoredGeneration` decodes the raw record and requires
-the key to be absent. The QEMU scenario checks every non-rollback record and keeps the existing
-assertion that the rolled-back record restores generation 2.
+the key to be absent. `TestManualRollbackWithoutABaselineOrPreviousBundleRejects` requires a
+pre-live rejection to omit it. The QEMU scenario checks every non-rollback record and keeps the
+existing assertion that the rolled-back record restores generation 2.
 
 ## F5. The factory baseline is not a published bundle
 
@@ -106,44 +107,48 @@ not collapse the two.
 ## QEMU run
 
 `make qemu-update GO=/usr/local/go/bin/go` ran on 2026-11-22 under KVM and exited 0. The log
-directory is `build/qemu/logs/update-20261122-140606/`. The run used source commit
-`a2ebdad92744c8b2f01cb0daccbdb875b0d71ecc` and ephemeral key id starting `8aa69274b8b9cd80`.
+directory is `build/qemu/logs/update-20261122-141748/`. The run used source commit
+`68161f5c808f01edd925e1ddfd0b9c02ce3ba802` and ephemeral key id starting `123521e7e558b712`.
 
 | Phase | Result | Seconds |
 | --- | --- | --- |
-| Update assets | pass | 17.4 |
-| Guests and baseline snapshot restore | pass | 5.5 |
-| Beta kit install | pass | 26.5 |
-| Platform, rotation anchor, absent image store, beta channel | pass | 2.4 |
-| First boot | pass | 10.3 |
+| Update assets | pass | 16.9 |
+| Guests and baseline snapshot restore | pass | 5.1 |
+| Beta kit install | pass | 23.6 |
+| Platform, rotation anchor, absent image store, beta channel | pass | 2.0 |
+| First boot | pass | 9.4 |
 | Factory baseline | pass | 0.9 |
-| Generation 1 install | pass | 7.4 |
+| Generation 1 install | pass | 7.8 |
 | Generation 2 update | pass | 4.0 |
-| Generation 3 health rollback | pass | 3.8 |
-| Three rejections | pass | 9.2 |
-| Final history, config digest and image-store assertions | pass | 2.7 |
+| Generation 3 health rollback | pass | 3.9 |
+| Three rejections | pass | 9.4 |
+| Final history, config digest and image-store assertions | pass | 2.6 |
 | Log hygiene | pass | 0.2 |
 
 The baseline and the first bundle came from the same commit and reported different versions:
 
 ```text
 $ GET /api/version
-{"baseline": true, "status_schema": 1, "version": "0.0.0-factory-a2ebdad92744"}
+{"baseline": true, "status_schema": 1, "version": "0.0.0-factory-68161f5c808f"}
 $ bittern update status
-committed: no update state
+committed: generation 0 (kit baseline, no active bundle)
+running: baseline (no active bundle)
+last check: never
+operation: none
+last result: none
 ```
 
 The version change and rollback:
 
 ```text
 $ journalctl -u bitternd.service (daemon.start)
-... "version":"0.0.0-beta.1-a2ebdad92744" ...
+... "version":"0.0.0-beta.1-68161f5c808f" ...
 $ bittern update install /var/lib/bittern/update/incoming/g2
-update: committed operation 20261122T190717Z-g000001-ca3c522b
+update: committed operation 20261122T191854Z-g000001-c4d000b5
 $ journalctl -u bitternd.service (daemon.start)
-... "version":"0.0.0-beta.2-a2ebdad92744" ...
+... "version":"0.0.0-beta.2-68161f5c808f" ...
 $ bittern update install /var/lib/bittern/update/incoming/g3
-update: rolled-back operation 20261122T190721Z-g000002-294aff97
+update: rolled-back operation 20261122T191858Z-g000002-19d0f5a5
   failed step: health
   reason: health.bundle-integrity: file.extra: the extracted file usr/bin/post-activation-marker is not in the manifest
   rollback: rolled-back, restored generation 2
@@ -152,15 +157,15 @@ update: rolled-back operation 20261122T190721Z-g000002-294aff97
 The three rejections:
 
 ```text
-update: rejected operation 20261122T190725Z-g000002-3b5965f3
+update: rejected operation 20261122T191903Z-g000002-b672f462
   failed step: verify-payload
-  reason: $.payload.sha256: payload.digest: payload digest 7762e2c3... does not match the manifest digest 09944e0e...
+  reason: $.payload.sha256: payload.digest: payload digest 965a2d33... does not match the manifest digest 5057ce6e...
 
-update: rejected operation 20261122T190728Z-g000002-d0f5f258
+update: rejected operation 20261122T191906Z-g000002-d1654b7e
   failed step: verify-manifest
-  reason: $: signature.invalid: the signature does not verify with signer 8aa69274...
+  reason: $: signature.invalid: the signature does not verify with signer 123521e7...
 
-update: rejected operation 20261122T190731Z-g000002-82dca82f
+update: rejected operation 20261122T191908Z-g000002-83fb4d4d
   failed step: verify-manifest
   reason: $.generation: generation.rollback: generation 1 is not greater than the committed generation 2
 ```

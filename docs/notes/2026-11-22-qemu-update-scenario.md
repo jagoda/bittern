@@ -244,5 +244,5 @@ KVM path is fast enough for repeated local runs. TCG remains unmeasured.
   `build/qemu/logs/update-20261122-133856/`.
 - `make qemu-test` passed on 2026-11-22; cold boot 81.8 s, snapshot 6.1 s, suite 34.4 s.
 - The kit-only rerun is in [the wave three note](2026-11-22-beta-kit-wave-three.md). It passed with
-  exit 0 and log `build/qemu/logs/update-20261122-140606/`.
+  exit 0 and log `build/qemu/logs/update-20261122-141748/`.
 - `make check`, `go vet ./...` and `gofmt -l` pass.
