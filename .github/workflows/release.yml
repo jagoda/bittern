@@ -99,10 +99,11 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/publish.yml
-    # A called workflow receives no secrets implicitly. The draft job's
-    # beta-draft environment resolves the CI test key from this name; the
-    # publish job does not use that environment and never reads it.
-    secrets: inherit
+    # A called workflow receives no secrets implicitly. Pass the CI test key
+    # name so the draft job's beta-draft environment can resolve it; the publish
+    # job does not use that environment and never reads it.
+    secrets:
+      BITTERN_CI_SIGNING_KEY: ${{ secrets.BITTERN_CI_SIGNING_KEY }}
     with:
       tag: ${{ needs.preflight.outputs.tag }}
       generation: ${{ needs.preflight.outputs.generation }}
