@@ -93,9 +93,13 @@ readable path changed.
 | [main run](https://github.com/jagoda/bittern/actions/runs/45035992353) | `push` | `d2f0ce7` | success | 2m19s |
 
 The [first failing run](https://github.com/jagoda/bittern/actions/runs/45034908292) is kept for the
-record. The branch run is the pull request run on the final commit, and the main run started when
-`main` was fast-forwarded to the same commit. The check job took 1m1s on the branch run, and the
-build job 31s.
+record. The branch run is the pull request run on the commit that introduced the workflow, and the
+main run started when `main` was fast-forwarded to the same commit. The check job took 1m1s on the
+branch run, and the build job 31s.
+
+A follow-up commit, `80e4803`, pointed the build job's Go cache key at `agent/go.sum` so the second
+`setup-go` step stops logging a cache annotation. Its
+[main run](https://github.com/jagoda/bittern/actions/runs/45036651733) is green with no annotations.
 
 ## What phase one does not cover
 
