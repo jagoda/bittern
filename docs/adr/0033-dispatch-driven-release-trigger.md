@@ -146,8 +146,10 @@ never moved.
   a tag without a visible release, and the next attempt must use a new generation.
 - The fallback tag path can still burn a generation if the build or signature fails after the tag
   is pushed. That is why it is the fallback.
-- The dispatch runs at `main`, so the checked commit is the dispatch commit. A push during the run
-  fails the preflight; the maintainer dispatches again rather than tagging a moving head.
+- The dispatch runs at `main`, so the checked commit is the dispatch commit. A push after the
+  dispatch does not move the release: the tag points at the commit the preflight checked. The
+  preflight refuses if the head moved before it ran, so the maintainer dispatches again rather
+  than releasing a head without a green run.
 - The `beta` approval remains one interactive step after the draft is complete.
 
 ### Follow-ups
