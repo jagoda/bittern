@@ -12,6 +12,13 @@
 # environment. beta-draft has no required reviewer because it publishes
 # nothing; it scopes the key to tag-triggered runs on this repository.
 # QEMU and hardware tests stay outside CI.
+#
+# A workflow_dispatch run is the dry run. It validates the supplied tag with the
+# same Go parser, runs the same checks, builds the same assets, signs the
+# manifest with the CI test key, verifies the signature against the shipped
+# anchor, and prints the five asset digests. It creates no tag, no draft, and no
+# release and uploads nothing. The tag push trigger remains the only publish
+# path; a dispatch that would publish is refused before any check runs.
 name: publish
 
 on:
@@ -20,6 +27,20 @@ on:
     # with the Go parser before any check or release build can run.
     tags:
       - 'app-beta-*'
+  # The dry run validates a tag before it exists, so it cannot be the tag push
+  # trigger. The inputs are read only by a dispatch; a push never reads them.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Application bundle tag to validate
+        required: true
+        type: string
+        default: app-beta-000001
+      dry_run:
+        description: Run every step except creating or publishing a release
+        required: true
+        type: boolean
+        default: true
 
 # One run per tag, and never cancel a run that may be waiting for approval.
 concurrency:
@@ -38,6 +59,8 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       generation: ${{ steps.parse.outputs.generation }}
+      tag: ${{ steps.select.outputs.tag }}
+      dry_run: ${{ steps.select.outputs.dry_run }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,16 +73,84 @@ jobs:
           go-version-file: agent/go.mod
           cache-dependency-path: agent/go.sum
 
+      # Exactly one tag source is chosen. A push must carry the literal tag ref
+      # it was triggered by, and its tag is never taken from an input. A
+      # dispatch has no tag ref, so its tag comes from the input and is then
+      # validated by the same parser. A dispatch at a tag ref would be a second
+      # tag path and is refused.
+      - name: Select the tag from the event
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -eu
+          case "$EVENT_NAME" in
+            push)
+              case "$REF" in
+                refs/tags/app-beta-*) ;;
+                *)
+                  printf 'the publish push trigger requires a refs/tags/app-beta-* ref, not %s\n' "$REF" >&2
+                  exit 1
+                  ;;
+              esac
+              tag="$REF_NAME"
+              dry_run=false
+              ;;
+            workflow_dispatch)
+              case "$REF" in
+                refs/tags/*)
+                  printf 'workflow_dispatch must run from a branch ref, not %s\n' "$REF" >&2
+                  exit 1
+                  ;;
+              esac
+              tag="$INPUT_TAG"
+              case "$INPUT_DRY_RUN" in
+                true)
+                  dry_run=true
+                  ;;
+                false)
+                  printf 'workflow_dispatch is the dry-run path; push %s to publish\n' "$tag" >&2
+                  exit 1
+                  ;;
+                *)
+                  printf 'the dry_run input is %s, not true or false\n' "$INPUT_DRY_RUN" >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
+            *)
+              printf 'the publish workflow does not run on the %s event\n' "$EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+          case "$tag" in
+            app-beta-*) ;;
+            *)
+              printf 'the tag %s is outside the app-beta-* namespace\n' "$tag" >&2
+              exit 1
+              ;;
+          esac
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+          printf 'dry_run=%s\n' "$dry_run" >> "$GITHUB_OUTPUT"
+          printf 'selected tag: %s\n' "$tag"
+          printf 'dry run: %s\n' "$dry_run"
+
       # The first command that can fail is the repository's own tag parser. It
       # rejects uppercase hex, five or seven characters, an empty suffix, a
       # non-hex character, and generation zero. No release asset is built before
       # this passes.
       - name: Parse the tag with the repository rule
         id: parse
+        env:
+          TAG: ${{ steps.select.outputs.tag }}
         run: |
           set -eu
           make bittern-release
-          generation="$(agent/bin/bittern-release tag "$GITHUB_REF_NAME")"
+          generation="$(agent/bin/bittern-release tag "$TAG")"
           printf 'generation=%s\n' "$generation" >> "$GITHUB_OUTPUT"
 
   checks:
@@ -78,7 +169,11 @@ jobs:
     runs-on: ubuntu-24.04
     # beta-draft holds the CI test key and has no required reviewer, so the
     # draft exists before the beta approval. It uses the same app-beta-* tag
-    # policy as beta. The approval gate is beta on the publish job.
+    # policy as beta. The approval gate is beta on the publish job. The dry run
+    # decodes the same key and therefore runs in this environment too; a
+    # dispatch at a branch ref needs that ref admitted for the run, and the
+    # tag-only policy is restored afterwards. The dry-run note records that
+    # one-off procedure; the steady state stays tag-only.
     environment:
       name: beta-draft
     permissions:
@@ -184,9 +279,46 @@ jobs:
             build/assets/manifest.json.sig \
             --trust-dir "$RUNNER_TEMP/beta-trust"
 
+      # The dry run stops before anything leaves the runner. The signature has
+      # been verified, and the five names below are the exact bytes the draft
+      # job would upload. The output is also the run's step summary so the
+      # maintainer can copy it into the run record.
+      - name: Print the dry-run result
+        if: needs.tag.outputs.dry_run == 'true'
+        env:
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          set -eu
+          manifest_field() {
+            python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' \
+              build/assets/manifest.json "$1"
+          }
+          generation="$(manifest_field generation)"
+          channel="$(manifest_field channel)"
+          source_commit="$(manifest_field source_commit)"
+          summary="$RUNNER_TEMP/dry-run-summary.md"
+          {
+            printf '### Publish dry run: %s\n\n' "$TAG"
+            printf 'No tag, draft, release, or upload was created.\n\n'
+            printf -- '- Manifest generation: %s\n' "$generation"
+            printf -- '- Manifest channel: %s\n' "$channel"
+            printf -- '- Manifest source commit: %s\n' "$source_commit"
+            printf -- '- Generated at: %s\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '| Asset | SHA-256 |\n| --- | --- |\n'
+            (cd build/assets && sha256sum \
+              manifest.json \
+              manifest.json.sig \
+              bittern-app.tar.gz \
+              bittern-beta-kit.tar.gz \
+              SHA256SUMS) | awk '{printf "| `%s` | `%s` |\n", $2, $1}'
+          } > "$summary"
+          cat "$summary"
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Write the release notes
         env:
           TAG_GENERATION: ${{ needs.tag.outputs.generation }}
+          TAG: ${{ needs.tag.outputs.tag }}
         run: |
           set -eu
           {
@@ -194,7 +326,7 @@ jobs:
             printf -- '- Channel: beta\n'
             printf -- '- Generation: %s\n' "$TAG_GENERATION"
             printf -- '- Source commit: %s\n' "$GITHUB_SHA"
-            printf -- '- Tag: %s\n\n' "$GITHUB_REF_NAME"
+            printf -- '- Tag: %s\n\n' "$TAG"
             printf 'Assets:\n'
             printf -- '- manifest.json\n'
             printf -- '- manifest.json.sig\n'
@@ -207,14 +339,16 @@ jobs:
           } > "$RUNNER_TEMP/release-notes.md"
 
       - name: Create the draft release with exactly five assets
+        if: needs.tag.outputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
         run: |
           set -eu
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$TAG" \
             --draft \
             --verify-tag \
-            --title "$GITHUB_REF_NAME" \
+            --title "$TAG" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
             build/assets/manifest.json \
             build/assets/manifest.json.sig \
@@ -223,11 +357,13 @@ jobs:
             build/assets/SHA256SUMS
 
       - name: Confirm the draft carries exactly the five assets
+        if: needs.tag.outputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
         run: |
           set -eu
-          actual="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | LC_ALL=C sort)"
+          actual="$(gh release view "$TAG" --json assets --jq '.assets[].name' | LC_ALL=C sort)"
           expected="$(printf '%s\n' \
             manifest.json \
             manifest.json.sig \
@@ -239,10 +375,30 @@ jobs:
             exit 1
           fi
 
+      # The dry run created no tag and no release. Fail closed if either one is
+      # already there, because the dry run validates a tag before it is pushed
+      # and must never be confused with a published generation.
+      - name: Confirm the dry run created no tag and no release
+        if: needs.tag.outputs.dry_run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          set -eu
+          if gh release view "$TAG" --json isDraft >/dev/null 2>&1; then
+            printf 'a release named %s exists; a dry run validates a tag that does not exist yet\n' "$TAG" >&2
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            printf 'tag %s exists; a dry run validates a tag that does not exist yet\n' "$TAG" >&2
+            exit 1
+          fi
+          printf 'confirmed: no tag and no release named %s\n' "$TAG"
+
       # The publish job has no build action. Record the uploaded asset digests
       # here so that job can prove the draft still carries exactly these bytes
       # before the visible flip. Base64 keeps the job output on one line.
-      - name: Record the draft asset digests
+      - name: Record the signed asset digests
         id: record
         run: |
           set -eu
@@ -256,7 +412,11 @@ jobs:
 
   publish:
     name: publish the verified draft
-    needs: draft
+    # A dry run never reaches the approval gate, and the tag push is the only
+    # path that does. The branch policy on beta would refuse a dispatch anyway;
+    # the explicit condition keeps the run from waiting on it.
+    needs: [tag, draft]
+    if: needs.tag.outputs.dry_run == 'false'
     runs-on: ubuntu-24.04
     # The beta environment carries the required reviewer and the app-beta-*
     # tag policy. The draft already exists, so an unapproved run leaves it in

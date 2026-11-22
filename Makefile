@@ -49,7 +49,7 @@ help:
 	@printf '%s\n' \
 		'Bittern repository tasks:' \
 		'' \
-		'  make check       Run every local check (link, schema, style, design, bundle, test)' \
+		'  make check       Run every local check (link, schema, style, design, bundle, release, test)' \
 		'  make schema      Validate the schema example and fixture suite' \
 		'  make link-check  Check Markdown links and component READMEs' \
 		'  make style-check Check Markdown style rules' \
@@ -111,6 +111,7 @@ check:
 	$(PYTHON) tests/cleanup/test_cleanup.py || status=1; \
 	$(PYTHON) tests/storage/test_storage_setup.py || status=1; \
 	$(PYTHON) tests/checks/unit_enablement.py || status=1; \
+	$(PYTHON) tests/checks/release_asset_names.py || status=1; \
 	$(SUBMAKE) version-check || status=1; \
 	$(SUBMAKE) test || status=1; \
 	exit $$status
