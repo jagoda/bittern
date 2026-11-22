@@ -1,14 +1,17 @@
 # Beta payload, preparation kit, and tag publish workflow
 
 - Date: 2026-11-22
-- Status: implementation note. The bundle packer, `make beta-payload`, and the tag-driven publish
-  workflow landed. No tag was created and no release was published. The QEMU update scenario and the
+- Status: implementation note. The bundle packer, `make beta-payload`, the tag-driven publish
+  workflow, and its `workflow_dispatch` dry run landed. The dry run ran green on 2026-11-22 and
+  created no tag, draft, or release. The tag-triggered path, the QEMU update scenario, and the
   production offline signing ceremony remain open.
 - Related: [ADR 0031](../adr/0031-update-channel-on-github-releases.md),
   [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md),
   [ADR 0029](../adr/0029-release-signing-and-key-custody.md),
   [BIT-042](../plan/implementation-plan.md#bit-042-release-channel-and-ci-pipeline),
   [BIT-009](../plan/implementation-plan.md#bit-009-app-bundle-update-transaction-with-rollback),
+  [dry run and bench rollout](2026-11-22-beta-dry-run-and-bench-rollout.md),
+  [beta bench rollout](../runbooks/beta-bench-rollout.md),
   [update transaction specification](2026-11-22-update-transaction-spec.md),
   [channel, CI, and publication](2026-11-22-channel-ci-and-publication.md),
   [packer](../../agent/cmd/bittern-release/pack.go),
@@ -115,8 +118,12 @@ The implementation was committed as `b4a2411` and the documentation follow-ups a
 [45051739634](https://github.com/jagoda/bittern/actions/runs/45051739634) for `1184a26` is green.
 `gh workflow list` shows `publish` active, and `gh workflow view publish.yml --ref main --yaml`
 returns the workflow instead of a 404, so GitHub accepted the workflow file. No tag was pushed, so
-the tag job, the environment approval, the signature step, the draft upload, and the
-draft-to-published flip did not run.
+the real tag ref, the `beta-draft` tag policy, the `beta` environment approval, the draft upload,
+and the draft-to-published flip did not run. The `workflow_dispatch` dry run now exercises the tag
+selection, the parser, the checks, the signature with the real CI test key, and the anchor
+verification; it ran green as run
+[45064681803](https://github.com/jagoda/bittern/actions/runs/45064681803) on 2026-11-22 and created
+nothing. See [the dry run note](2026-11-22-beta-dry-run-and-bench-rollout.md).
 
 ## Tests
 
@@ -140,12 +147,15 @@ generation zero, the stable namespace, and a trailing separator.
 
 ## What remains unproven
 
-- No tag was created and no release was published. The publish workflow has not run end to end.
-  `gh workflow view` accepts the workflow syntax; that is not evidence that the signature, draft,
-  asset check, or environment approval path works on a real run.
-- The new CI test key has not been used in a workflow run. The local manifest is unsigned, and the
-  packer tests sign a temporary manifest with a generated test key. The `beta-draft` secret's decoded
-  key id and the anchor equality are checked by the workflow, not by this local run. The first CI
+- No tag was created and no release was published. The tag-triggered publish path has not run end
+  to end. The `workflow_dispatch` dry run proved the tag selection and parser, `make check`, the
+  payload and kit build, the manifest, the CI test key decode and id match, the signature, and the
+  verification against the shipped anchor. It skipped the draft creation and upload, the `beta`
+  approval, and the visible publish, so those steps remain unproven. The first tag is the only proof
+  of the full path. See [the dry run note](2026-11-22-beta-dry-run-and-bench-rollout.md).
+- The CI test key was used in the dry run: the decoded seed's key id matched the manifest
+  `signing.key_id` and the signature verified against `packaging/trust/beta-ci.pub`. The tag path
+  still has to prove the key under the `beta-draft` tag policy and the `beta` approval. The first CI
   test key was retired before any device carried its anchor, so no re-seeding was required.
 - The QEMU update scenario from BIT-009 slice three is still the release gate. A valid update, an
   invalid signature, a digest mismatch, a downgrade, and a rollback have not been exercised against

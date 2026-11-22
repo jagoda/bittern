@@ -184,7 +184,7 @@ The maintainer fixed this order in session on 2026-11-22. It is recorded in
 | 1 | Decisions: ADR 0031, ADR 0032, the OQ-34 answer, and OQ-35. No release or workflow is produced. | This change |
 | 2 | CI phase one: `make check` on push and pull request, plus an unsigned bundle workflow artifact, with no secrets, no publishing, and SHA-pinned actions. | BIT-042 |
 | 3 | BIT-009 slice one: the update transaction core, the provider-supplied platform generation, the `/var/lib/bittern` write boundary, the base fingerprint, and the test-key path. The manifest, verifier and signing tool are already present. | BIT-009 |
-| 4 | Bundle packer with publish on tag: build the files-only payload and the beta preparation kit with `make beta-payload`, create the draft release, upload `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`, `bittern-beta-kit.tar.gz`, and `SHA256SUMS`, and publish the draft after approval. The CI test key signs CI bundles only; a production release still uses the offline signature from ADR 0029. Landed on 2026-11-22 with the packer, kit, and workflow; no release has been published. | BIT-042 phase two |
+| 4 | Bundle packer with publish on tag: build the files-only payload and the beta preparation kit with `make beta-payload`, create the draft release, upload `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`, `bittern-beta-kit.tar.gz`, and `SHA256SUMS`, and publish the draft after approval. The CI test key signs CI bundles only; a production release still uses the offline signature from ADR 0029. Landed on 2026-11-22 with the packer, kit, and workflow; no release has been published. The `workflow_dispatch` dry run ran green on 2026-11-22 (run [45064681803](https://github.com/jagoda/bittern/actions/runs/45064681803)) and created no tag, draft, or release. The tag-triggered path with the real `beta` approval remains unproven until the first tag. | BIT-042 phase two |
 | 5 | BIT-009 slice three: the QEMU update scenario with a valid update, an invalid signature, a digest mismatch, a downgrade, and a rollback against the published fixture on the local or bench QEMU path. QEMU stays outside CI until the KVM question is measured. | BIT-009 acceptance |
 
 1. **BIT-019 setup token QR.** Landed on 2026-11-17; the USB token copy is gone from every setup
@@ -1299,11 +1299,22 @@ and checksums as `bittern-beta-unsigned-test-build` with five-day retention.
 [`.github/workflows/publish.yml`](../../.github/workflows/publish.yml) runs on an `app-beta-*` tag,
 validates the exact tag rule with the Go parser before any check or build, signs the manifest with
 the `beta-draft` environment CI test key, creates a draft with exactly the five release assets, and
-publishes it after the protected `beta` environment approval. `make beta-payload` supersedes
+publishes it after the protected `beta` environment approval. It also has a `workflow_dispatch` dry
+run that validates the supplied tag with the same parser, runs the same checks, decodes and uses the
+same CI test key, verifies against the shipped anchor, prints the five asset digests, and creates no
+tag, draft, or release. The dry run ran green on 2026-11-22 (run
+[45064681803](https://github.com/jagoda/bittern/actions/runs/45064681803)); the tag-triggered path
+with the real `beta` approval is still unproven. The five release asset names are checked against
+ADR 0031, the device client, the packer, and the Makefile by
+[`tests/checks/release_asset_names.py`](../../tests/checks/release_asset_names.py) in `make check`.
+The maintainer sequence is [the beta bench rollout](../runbooks/beta-bench-rollout.md).
+`make beta-payload` supersedes
 `make poc-payload`. The packer, kit, tag parser, and workflow are not release evidence: no tag was
-created, no release was published, and the QEMU update scenario remains step 5. Details, the
-compatibility rule, and the unproven paths are in
-[the phase two note](../notes/2026-11-22-beta-payload-and-publish.md). Green phase one runs are
+created, no release was published, and the dry run created nothing. The QEMU update scenario remains
+step 5. Details, the compatibility rule, and the unproven paths are in
+[the phase two note](../notes/2026-11-22-beta-payload-and-publish.md) and
+[the dry run and bench rollout note](../notes/2026-11-22-beta-dry-run-and-bench-rollout.md). Green
+phase one runs are
 [the branch run](https://github.com/jagoda/bittern/actions/runs/45035805336) and
 [the main run](https://github.com/jagoda/bittern/actions/runs/45035992353). The first phase one run
 exposed a chrony check defect that only appears on a host with an AppArmor-confined chronyd; it is

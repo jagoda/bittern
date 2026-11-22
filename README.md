@@ -32,9 +32,12 @@ release has been published. CI phase one is running under
 `main` and on every pull request, then builds the unsigned application payload, manifest, beta
 preparation kit, and checksums as a test artifact. The tag-driven
 [`publish.yml`](.github/workflows/publish.yml) builds the same assets, signs the manifest with the
-CI test key, and publishes a beta draft after the protected `beta` environment approval. The release
-channel is decided in [ADR 0031](docs/adr/0031-update-channel-on-github-releases.md) and no release
-is live. The sequence of work to reach a first appliance release is in
+CI test key, and publishes a beta draft after the protected `beta` environment approval. A
+`workflow_dispatch` dry run validates the tag, runs the checks, signs and verifies the manifest, and
+prints the five asset digests without creating a tag, draft, or release. The release channel is
+decided in [ADR 0031](docs/adr/0031-update-channel-on-github-releases.md) and no release is live. The
+first maintainer sequence is [the beta bench rollout](docs/runbooks/beta-bench-rollout.md). The
+sequence of work to reach a first appliance release is in
 [the implementation plan](docs/plan/implementation-plan.md). Facts about Frigate are dated
 2026-11-14 and sourced in [the Frigate assessment](docs/research/frigate-assessment.md).
 

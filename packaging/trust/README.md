@@ -43,6 +43,14 @@ The environment policy and the ADR 0031 tag scheme must change together. A chang
 without the other either blocks a valid tag at deploy time or permits a tag the ADR does not
 define.
 
+A `workflow_dispatch` dry run runs at a branch ref, so the tag-only policy refuses the draft job
+before it can read the key. The dry run on 2026-11-22 added a temporary `main` branch policy to
+`beta-draft`, ran, deleted the policy, and verified that both environments list only
+`tag app-beta-*` again. That is a named exception for a maintainer-run dry run, not the steady
+state, and it must not be left in place. The procedure, the risk window, and the durable follow-up
+are in
+[the dry run note](../../docs/notes/2026-11-22-beta-dry-run-and-bench-rollout.md#the-environment-policy-exception-for-the-dry-run).
+
 ## Threat model for the key
 
 The environment gate is a ref gate, not an actor gate. `beta-draft` has one protection rule, the
