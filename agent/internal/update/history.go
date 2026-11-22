@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"bittern.invalid/agent/internal/release"
@@ -155,4 +156,34 @@ func readHistory(directory, operationID string) (*History, error) {
 		return nil, err
 	}
 	return &record, nil
+}
+
+// ReadHistory returns one history record by operation id. The id is checked
+// against the operation id grammar before it is used as a file name.
+func ReadHistory(stateRoot, operationID string) (*History, error) {
+	if !operationIDPattern.MatchString(operationID) {
+		return nil, errorf("history.operation-id", "the operation id %q is not a valid operation id", operationID)
+	}
+	options := normalizeOptions(Options{StateRoot: stateRoot})
+	return readHistory(options.paths().history, operationID)
+}
+
+// LatestHistory returns the newest history record by operation id byte order,
+// or nil when no record exists. History is support input, not trust input.
+func LatestHistory(stateRoot string) (*History, error) {
+	options := normalizeOptions(Options{StateRoot: stateRoot})
+	directory := options.paths().history
+	names, err := historyFiles(directory)
+	if err != nil {
+		return nil, err
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	sort.Strings(names)
+	name := names[len(names)-1]
+	if !strings.HasSuffix(name, ".json") {
+		return nil, errorf("history.name", "the history file %s does not end in .json", name)
+	}
+	return readHistory(directory, strings.TrimSuffix(name, ".json"))
 }

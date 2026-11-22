@@ -12,6 +12,7 @@ import (
 
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/frigateimage"
+	"bittern.invalid/agent/internal/oplock"
 	"bittern.invalid/agent/internal/redact"
 	"bittern.invalid/agent/internal/render"
 )
@@ -106,6 +107,14 @@ func (e redactedError) Error() string { return e.message }
 func (e redactedError) Unwrap() error { return e.cause }
 
 func apply(cfg *config.Config, options Options, redactor, secretRedactor *redact.Redactor) (Result, error) {
+	// Apply and update take the same cross-process lock before either writes.
+	// The in-process operation manager cannot exclude a separate helper.
+	lock, err := oplock.Acquire(oplock.Path(options.StateRoot))
+	if err != nil {
+		return Result{}, fmt.Errorf("apply: acquire the operation lock: %w", err)
+	}
+	defer func() { _ = lock.Release() }()
+
 	if err := os.MkdirAll(options.StateRoot, 0o755); err != nil {
 		return Result{}, fmt.Errorf("apply: create state root: %w", err)
 	}

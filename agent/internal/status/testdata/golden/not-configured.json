@@ -83,8 +83,19 @@
     },
     "updates": {
       "state": "ok",
-      "current_slot": "a",
-      "generation": 7
+      "current_slot": null,
+      "current_generation": 7,
+      "base": {
+        "debian_version": "13.1",
+        "kernel": "6.12.0-amd64",
+        "docker_version": "27.3.1",
+        "devices": [
+          "/dev/dri/renderD128"
+        ],
+        "firmware": [
+          "/sys/firmware/efi"
+        ]
+      }
     },
     "reset": {
       "state": "ok",

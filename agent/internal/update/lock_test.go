@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"bittern.invalid/agent/internal/apply"
+	"bittern.invalid/agent/internal/oplock"
 )
 
 func TestUpdateLockContentionReturnsBusy(t *testing.T) {
@@ -18,7 +21,7 @@ func TestUpdateLockContentionReturnsBusy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = lock.release() }()
+	defer func() { _ = lock.Release() }()
 	source := env.writeValidBundle(t, 1)
 	_, err = env.install(t, source)
 	if !errors.Is(err, ErrBusy) {
@@ -81,4 +84,28 @@ func TestUpdateLockRejectsWrongMode(t *testing.T) {
 	}
 	_, err := env.install(t, env.writeValidBundle(t, 1))
 	requireRule(t, err, "lock.mode")
+}
+
+func TestApplyAndUpdateContendOnTheSameOperationLock(t *testing.T) {
+	env := newTestEnv(t)
+	p := env.options.paths()
+	if got, want := oplock.Path(env.stateRoot), p.lock; got != want {
+		t.Fatalf("shared lock path = %s, update lock path = %s", got, want)
+	}
+	lock, err := oplock.Acquire(oplock.Path(env.stateRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Release() }()
+
+	cfg, _, err := loadConfig(env.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := apply.Apply(cfg, apply.Options{StateRoot: env.stateRoot, LiveRoot: t.TempDir()}); !errors.Is(err, oplock.ErrBusy) {
+		t.Fatalf("apply under contention = %v, want oplock.ErrBusy", err)
+	}
+	if _, err := env.install(t, env.writeValidBundle(t, 1)); !errors.Is(err, oplock.ErrBusy) {
+		t.Fatalf("update under contention = %v, want oplock.ErrBusy", err)
+	}
 }

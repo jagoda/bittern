@@ -72,11 +72,14 @@ func Install(options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	defer func() { _ = lock.release() }()
+	defer func() { _ = lock.Release() }()
 
 	journal, err := readJournal(p.journal)
 	if err != nil {
 		return Result{}, err
+	}
+	if journal != nil && options.SourcePath != "" && journal.SourcePath != "" && journal.SourcePath != options.SourcePath {
+		return Result{}, errorf("journal.source-mismatch", "the journal started from %s, not %s", journal.SourcePath, options.SourcePath)
 	}
 	if journal != nil {
 		cfg, _, err := loadConfig(options.ConfigPath)
@@ -185,6 +188,7 @@ func newJournal(options Options, p paths, now time.Time) (*Journal, error) {
 		Phase:                  PhaseInstall,
 		State:                  StateRunning,
 		Source:                 options.Source.Name(),
+		SourcePath:             firstNonEmpty(options.SourcePath, sourcePath(options.Source)),
 		Channel:                channel,
 		PreviousGeneration:     previous,
 		PreviousManifestSHA256: state.CommittedManifestSHA256,
@@ -193,6 +197,22 @@ func newJournal(options Options, p paths, now time.Time) (*Journal, error) {
 		CreatedAt:              now.Format(time.RFC3339),
 		UpdatedAt:              now.Format(time.RFC3339),
 	}, nil
+}
+
+func sourcePath(source Source) string {
+	if locator, ok := source.(interface{ SourcePath() string }); ok {
+		return locator.SourcePath()
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 var operationIDPattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}Z-g[0-9]{6,}-[0-9a-f]{8}$`)
@@ -417,6 +437,7 @@ func (r *runner) execute(start int) (Result, error) {
 		if err := writeJournal(r.paths.journal, r.journal); err != nil {
 			return r.result(ResultFailed, err), err
 		}
+		r.logf("update: step %s (%d/%d) started", step.Key, index+1, len(r.journal.Steps))
 		if r.options.BeforeStep != nil {
 			if err := r.options.BeforeStep(step); err != nil {
 				if errors.Is(err, ErrPowerLoss) {
@@ -445,6 +466,7 @@ func (r *runner) execute(start int) (Result, error) {
 		if err := writeJournal(r.paths.journal, r.journal); err != nil {
 			return r.result(ResultFailed, err), err
 		}
+		r.logf("update: step %s completed", step.Key)
 	}
 	return r.finishedResult()
 }
@@ -468,6 +490,12 @@ func (r *runner) finishedResult() (Result, error) {
 		return result, fmt.Errorf("update: %s failed: %s", r.journal.FailedStep, r.redactor.String(failure))
 	default:
 		return r.result(ResultCommitted, nil), nil
+	}
+}
+
+func (r *runner) logf(format string, args ...any) {
+	if r.options.Logger != nil {
+		r.options.Logger(format, args...)
 	}
 }
 
@@ -505,6 +533,7 @@ func (r *runner) result(status string, cause error) Result {
 
 func (r *runner) fail(step Step, cause error) (Result, error) {
 	failure := r.redactor.String(cause.Error())
+	r.logf("update: step %s failed: %s", step.Key, failure)
 	if r.journal.Phase == PhaseRollback {
 		r.journal.State = StateRollbackFailed
 		r.journal.RollbackFailedStep = step.Key
@@ -865,4 +894,18 @@ func Inspect(stateRoot string) (State, *Journal, error) {
 		return State{}, nil, err
 	}
 	return state, journal, nil
+}
+
+// Committed returns the committed state and whether state.json exists. A
+// missing state file is not an error; it means no update has been committed.
+func Committed(stateRoot string) (State, bool, error) {
+	options := normalizeOptions(Options{StateRoot: stateRoot})
+	return readState(options.paths().state)
+}
+
+// ActiveJournal returns the active transaction journal, or nil when no
+// transaction is in progress. It is a read-only inspection and takes no lock.
+func ActiveJournal(stateRoot string) (*Journal, error) {
+	options := normalizeOptions(Options{StateRoot: stateRoot})
+	return readJournal(options.paths().journal)
 }

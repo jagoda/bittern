@@ -535,7 +535,7 @@ func TestUpdateLockContentionCreatesNoStateRootPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = lock.release() }()
+	defer func() { _ = lock.Release() }()
 	_, err = env.install(t, env.writeValidBundle(t, 1))
 	if !errors.Is(err, ErrBusy) {
 		t.Fatalf("contended install error = %v, want ErrBusy", err)

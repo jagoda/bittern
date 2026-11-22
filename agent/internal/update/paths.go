@@ -34,6 +34,7 @@ type paths struct {
 	staging       string
 	updateRoot    string
 	lock          string
+	request       string
 	journal       string
 	state         string
 	history       string
@@ -66,6 +67,7 @@ func (o Options) paths() paths {
 		staging:       filepath.Join(root, "app", "staging"),
 		updateRoot:    filepath.Join(root, "update"),
 		lock:          filepath.Join(root, "update", "lock"),
+		request:       filepath.Join(root, "update", requestFileName),
 		journal:       filepath.Join(root, "update", "journal.json"),
 		state:         filepath.Join(root, "update", "state.json"),
 		history:       filepath.Join(root, "update", "history"),

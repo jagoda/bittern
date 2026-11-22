@@ -12,6 +12,7 @@
   [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md),
   [BIT-009 recon](2026-11-21-bit009-update-recon.md),
   [channel, CI, and publication](2026-11-22-channel-ci-and-publication.md),
+  [update engine slice two](2026-11-22-update-engine-slice-two.md),
   [status contract](../status.md), [architecture](../architecture.md).
 
 This note is the specification an implementer works from without re-deciding the engine. It is
@@ -768,7 +769,7 @@ kit, enabled for the next boot, and started explicitly by the agent.
 | `ExecStart` | `/usr/bin/bittern update helper`. The subcommand accepts no arguments. |
 | Environment | No `Environment=`, no `EnvironmentFile=`, no `%i`, `%n`, `%j`, no variable expansion, no user-supplied property. The fixed paths are compiled into the helper. |
 | `ConditionPathExists` | `/var/lib/bittern/update/request.json`. A boot with no request skips the unit. A boot with a request resumes the interrupted transaction. |
-| Ordering | `After=local-fs.target`, `Before=bitternd.service`. A resumed transaction owns the agent restart. |
+| Ordering | `After=local-fs.target bittern-first-boot.service bitternd.service`. A resumed transaction owns the agent restart and does not race first-boot provisioning. It must not be `Before=bitternd.service`: the transaction starts the agent itself, and an ordering dependency in the other direction would deadlock that start. |
 | User | `root` and group `root`. The transaction writes the state root and restarts units. |
 | `UMask` | `0077`. Every metadata file still sets its documented mode explicitly. |
 | Timeout | `TimeoutStartSec=2h`, above the 60 minute image budget, the 5 minute health gate, and the stop bounds. A timeout is a process cut; the journal resumes it. |
@@ -966,6 +967,6 @@ journal, generations, rollback, and health gate are unchanged.
 
 `make link-check` and `make style-check` pass for this note. No code, workflow, systemd unit, packer,
 or UI change is part of slice zero. Slice two implementation and its named tests are described in
-section 15 and are recorded in a dated slice two note when they land. The note is slice zero and the
-slice two design delta in
+section 15 and recorded in [the slice two note](2026-11-22-update-engine-slice-two.md). The note is
+slice zero and the slice two design delta in
 [BIT-009](../plan/implementation-plan.md#bit-009-app-bundle-update-transaction-with-rollback).

@@ -42,6 +42,10 @@ type Builder struct {
 // the production probes, except for an intentionally nil Hardware probe.
 func New(configPath string, options Options) *Builder {
 	defaults := DefaultProbes()
+	stateRoot := options.StateRoot
+	if stateRoot == "" {
+		stateRoot = "/var/lib/bittern"
+	}
 	probes := options.Probes
 	if probes.Config == nil {
 		probes.Config = defaults.Config
@@ -62,7 +66,7 @@ func New(configPath string, options Options) *Builder {
 		probes.Network = defaults.Network
 	}
 	if probes.Updates == nil {
-		probes.Updates = defaults.Updates
+		probes.Updates = &UpdateStateProbe{StateRoot: stateRoot}
 	}
 	if probes.Reset == nil {
 		probes.Reset = defaults.Reset
@@ -75,10 +79,6 @@ func New(configPath string, options Options) *Builder {
 	now := options.Now
 	if now == nil {
 		now = time.Now
-	}
-	stateRoot := options.StateRoot
-	if stateRoot == "" {
-		stateRoot = "/var/lib/bittern"
 	}
 	return &Builder{
 		configPath: configPath,
@@ -532,11 +532,12 @@ func interfaceSection(role string, observation InterfaceObservation, reasons *[]
 
 func buildUpdates(observation UpdateObservation) UpdatesSection {
 	section := UpdatesSection{
-		State:       SectionUnknown,
-		CurrentSlot: observation.Slot,
-		Generation:  observation.Generation,
+		State:             SectionUnknown,
+		CurrentSlot:       observation.Slot,
+		CurrentGeneration: observation.Generation,
+		Base:              observation.Base,
 	}
-	if observation.Known && observation.Slot != nil && observation.Generation != nil {
+	if observation.Known && observation.Generation != nil {
 		section.State = SectionOK
 	}
 	return section
@@ -663,6 +664,17 @@ func (b *Builder) redactDocument(document *Document) {
 	if document.Sections.Updates.CurrentSlot != nil {
 		value := redactor.String(*document.Sections.Updates.CurrentSlot)
 		document.Sections.Updates.CurrentSlot = &value
+	}
+	if base := document.Sections.Updates.Base; base != nil {
+		base.DebianVersion = redactor.String(base.DebianVersion)
+		base.Kernel = redactor.String(base.Kernel)
+		base.DockerVersion = redactor.String(base.DockerVersion)
+		for index := range base.Devices {
+			base.Devices[index] = redactor.String(base.Devices[index])
+		}
+		for index := range base.Firmware {
+			base.Firmware[index] = redactor.String(base.Firmware[index])
+		}
 	}
 	if document.Sections.Reset.Level != nil {
 		value := redactor.String(*document.Sections.Reset.Level)

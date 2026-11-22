@@ -12,10 +12,11 @@ any machine that cannot be reinstalled.
 
 | File | Purpose |
 | --- | --- |
-| `bittern` | Operator CLI: `detect`, `render`, `first-boot`, `setup-token --qr` |
+| `bittern` | Operator CLI: `detect`, `render`, `first-boot`, `setup-token --qr`, `image`, `update` |
 | `bitternd` | Status API and TLS wizard daemon |
 | `bittern-first-boot.service` | Oneshot provisioning unit |
 | `bittern-image-prewarm.service` | Background prewarm of the pinned recording-software image |
+| `bittern-update.service` | Fixed app bundle update worker; reads the 0600 request record and exits |
 | `bitternd.service` | Status and UI daemon unit |
 | `install.sh` | Checksum-verified POC installer |
 | `cleanup.sh` | Idempotent test-device cleanup, not the product reset |
@@ -45,17 +46,18 @@ does not install packages or claim success. It never writes a public resolver.
 A dry run prints the planned bootstrap actions and changes nothing.
 
 `install.sh` installs `docker.io`, `docker-cli`, `docker-compose`, `nftables`,
-`dnsmasq`, `chrony`, `curl`, `ca-certificates`, `systemd-resolved`, and
-`qrencode` with `--no-install-recommends`. Debian 13 splits the Docker CLI
+`dnsmasq`, `chrony`, `curl`, `ca-certificates`, `systemd-resolved`, `qrencode`, and
+`sqlite3` with `--no-install-recommends`. Debian 13 splits the Docker CLI
 (`/usr/bin/docker`) into `docker-cli`, which `docker.io` only recommends, so
 `docker-cli` is listed explicitly. The installer checks both `/usr/bin/docker` and
-`/usr/bin/docker-compose`, and checks that `qrencode` is on `PATH`, after the
-package step.
+`/usr/bin/docker-compose`, and checks that `qrencode` and `sqlite3` are on `PATH`, after the
+package step. The update database backup fails closed without `sqlite3`.
 
 The installer enables every unit it installs in one verified step after the packages and unit files
 are in place: `docker.service`, `nftables.service`, `systemd-networkd.service`,
 `systemd-resolved.service`, `dnsmasq.service`, `chrony.service`,
-`bittern-first-boot.service`, `bittern-image-prewarm.service`, and `bitternd.service`. It clears failed state, enables each unit,
+`bittern-first-boot.service`, `bittern-image-prewarm.service`, `bittern-update.service`, and
+`bitternd.service`. It clears failed state, enables each unit,
 checks `systemctl is-enabled`, and stops with a clear error naming the reboot consequence. It does
 not rely on the Debian package postinst for dnsmasq or chrony. The rendered
 `bittern-frigate.service` does not exist until the first camera apply, so apply owns its enablement

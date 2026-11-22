@@ -1,11 +1,12 @@
 // Package update implements the signed application bundle update transaction.
 //
-// Slice one is the engine core. It verifies a signed manifest and payload,
-// stages an immutable bundle, backs up configuration and data, stops and
-// starts services through an injected System, moves the activation pointer,
-// runs a bounded health gate, commits or rolls back, and records history. All
-// writes are under the state root. It has no production entry point, no
-// systemd helper, no network source, and no SQLite adapter.
+// The engine verifies a signed manifest and payload, stages an immutable
+// bundle, backs up configuration and data, stops and starts services through an
+// injected System, moves the activation pointer, runs a bounded health gate,
+// commits or rolls back, and records history. All writes are under the state
+// root. Production wiring is the fixed bittern-update.service helper, which
+// reads one request record and runs one transaction with the real systemd,
+// Docker, platform metadata, and sqlite3 adapters in this package.
 package update
 
 import (
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"bittern.invalid/agent/internal/apply"
+	"bittern.invalid/agent/internal/oplock"
 	"bittern.invalid/agent/internal/release"
 )
 
@@ -29,8 +31,8 @@ const UpdaterVersion int64 = 1
 // is left exactly as the transaction had written it.
 var ErrPowerLoss = errors.New("simulated power loss")
 
-// ErrBusy is returned when another process holds the cross-process lock.
-var ErrBusy = errors.New("another update operation is running")
+// ErrBusy is returned when another process holds the shared operation lock.
+var ErrBusy = oplock.ErrBusy
 
 // Transaction phases.
 const (
@@ -188,8 +190,8 @@ type SnapshotInfo struct {
 	Size   int64
 }
 
-// DataSnapshot is the Frigate database backup adapter. Slice one ships only a
-// test fake.
+// DataSnapshot is the Frigate database backup adapter. SQLiteSnapshot is the
+// production implementation; tests use fakes.
 type DataSnapshot interface {
 	Create(destination string) (SnapshotInfo, error)
 	Restore(snapshot string) error
@@ -242,6 +244,7 @@ type Journal struct {
 	Phase                   string `json:"phase"`
 	State                   string `json:"state"`
 	Source                  string `json:"source"`
+	SourcePath              string `json:"source_path,omitempty"`
 	Channel                 string `json:"channel"`
 	CandidateGeneration     int64  `json:"candidate_generation"`
 	CandidateVersion        string `json:"candidate_version"`
@@ -374,6 +377,7 @@ type Options struct {
 	ConfigPath       string
 	FrigateConfig    string
 	Source           Source
+	SourcePath       string
 	TrustStore       *release.TrustStore
 	TrustImageDir    string
 	TrustRotationDir string

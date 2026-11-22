@@ -220,7 +220,7 @@
     <dt>Installed version</dt>
     <dd>{{if .Status.Sections.Updates.CurrentSlot}}{{ptrString .Status.Sections.Updates.CurrentSlot}}{{else}}Not reported{{end}}</dd>
     <dt>Update</dt>
-    <dd>{{if .Status.Sections.Updates.Generation}}Installed{{else}}Not checked{{end}}</dd>
+    <dd>{{if .Status.Sections.Updates.CurrentGeneration}}Installed{{else}}Not checked{{end}}</dd>
   </dl>
 </section>
 
@@ -305,7 +305,7 @@
     <dt>Installed version slot</dt>
     <dd>{{ptrString .Status.Sections.Updates.CurrentSlot}}</dd>
     <dt>Update generation</dt>
-    <dd>{{ptrInt64 .Status.Sections.Updates.Generation}}</dd>
+    <dd>{{ptrInt64 .Status.Sections.Updates.CurrentGeneration}}</dd>
     <dt>Reset state</dt>
     <dd><code>{{.Status.Sections.Reset.State}}</code></dd>
     <dt>Reset level</dt>

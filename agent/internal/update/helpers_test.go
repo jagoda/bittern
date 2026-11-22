@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"bittern.invalid/agent/internal/apply"
+	"bittern.invalid/agent/internal/oplock"
 	"bittern.invalid/agent/internal/release"
 )
 
@@ -530,6 +531,13 @@ func requireRule(t *testing.T, err error, want string) {
 	if errors.As(err, &releaseError) {
 		if releaseError.Rule != want {
 			t.Fatalf("rule = %s, want %s (%v)", releaseError.Rule, want, err)
+		}
+		return
+	}
+	var lockError *oplock.Error
+	if errors.As(err, &lockError) {
+		if lockError.Rule != want {
+			t.Fatalf("rule = %s, want %s (%v)", lockError.Rule, want, err)
 		}
 		return
 	}

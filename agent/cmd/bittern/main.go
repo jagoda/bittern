@@ -35,6 +35,10 @@ const usage = `usage:
   bittern setup-token [--qr] [--state-root DIR] [--config-root DIR] [--auth-state PATH]
   bittern image status [--state-path PATH]
   bittern image prewarm [--state-path PATH]
+  bittern update install SOURCE [--no-follow]
+  bittern update status [--state-root DIR]
+  bittern update cancel [--state-root DIR]
+  bittern update helper
 `
 
 var (
@@ -81,6 +85,11 @@ func main() {
 	case "image":
 		if err := runImage(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "bittern image:", err)
+			os.Exit(1)
+		}
+	case "update":
+		if err := runUpdate(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "bittern update:", err)
 			os.Exit(1)
 		}
 	default:

@@ -1489,11 +1489,13 @@ INSTALL_ENABLED_UNITS = (
     "chrony.service",
     "bittern-first-boot.service",
     "bittern-image-prewarm.service",
+    "bittern-update.service",
     "bitternd.service",
 )
 BITTERN_UNITS = (
     "bittern-first-boot.service",
     "bittern-image-prewarm.service",
+    "bittern-update.service",
     "bitternd.service",
     "bittern-frigate.service",
 )

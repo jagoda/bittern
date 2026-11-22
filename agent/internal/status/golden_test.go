@@ -12,7 +12,7 @@ import (
 	"bittern.invalid/agent/internal/apply"
 )
 
-var update = flag.Bool("update", false, "regenerate status golden files")
+var updateGolden = flag.Bool("update", false, "regenerate status golden files")
 
 func TestGoldenStatusDocuments(t *testing.T) {
 	healthy := healthyProbes(t)
@@ -66,7 +66,7 @@ func TestGoldenStatusDocuments(t *testing.T) {
 			}
 			data = append(data, '\n')
 
-			if *update {
+			if *updateGolden {
 				if err := os.MkdirAll(filepath.Dir(testCase.golden), 0o755); err != nil {
 					t.Fatal(err)
 				}

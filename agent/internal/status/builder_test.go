@@ -91,8 +91,14 @@ func healthyProbes(t *testing.T) Probes {
 		Updates: UpdateProbeFunc(func(context.Context) UpdateObservation {
 			return UpdateObservation{
 				Known:      true,
-				Slot:       stringPointer("a"),
 				Generation: func() *int64 { value := int64(7); return &value }(),
+				Base: &UpdatesBase{
+					DebianVersion: "13.1",
+					Kernel:        "6.12.0-amd64",
+					DockerVersion: "27.3.1",
+					Devices:       []string{"/dev/dri/renderD128"},
+					Firmware:      []string{"/sys/firmware/efi"},
+				},
 			}
 		}),
 		Reset: ResetProbeFunc(func(context.Context) ResetObservation {

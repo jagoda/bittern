@@ -40,7 +40,6 @@ func testBuilder(t *testing.T) *status.Builder {
 	cameras := 1
 	free := uint64(1 << 40)
 	members := 1
-	slot := "a"
 	generation := int64(7)
 	level := "configuration"
 	completed := now.Add(-time.Hour)
@@ -80,7 +79,17 @@ func testBuilder(t *testing.T) *status.Builder {
 				}
 			}),
 			Updates: status.UpdateProbeFunc(func(context.Context) status.UpdateObservation {
-				return status.UpdateObservation{Known: true, Slot: &slot, Generation: &generation}
+				return status.UpdateObservation{
+					Known:      true,
+					Generation: &generation,
+					Base: &status.UpdatesBase{
+						DebianVersion: "13.1",
+						Kernel:        "6.12.0-amd64",
+						DockerVersion: "27.3.1",
+						Devices:       []string{"/dev/dri/renderD128"},
+						Firmware:      []string{"/sys/firmware/efi"},
+					},
+				}
 			}),
 			Reset: status.ResetProbeFunc(func(context.Context) status.ResetObservation {
 				return status.ResetObservation{Known: true, Level: &level, CompletedAt: &completed}

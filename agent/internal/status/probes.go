@@ -19,6 +19,7 @@ import (
 	"bittern.invalid/agent/internal/frigateimage"
 	"bittern.invalid/agent/internal/hardware"
 	"bittern.invalid/agent/internal/render"
+	"bittern.invalid/agent/internal/update"
 )
 
 // ConfigObservation is the result of loading and validating appliance.yaml.
@@ -178,11 +179,13 @@ type NetworkProbeFunc func(context.Context) NetworkObservation
 // Probe calls f.
 func (f NetworkProbeFunc) Probe(ctx context.Context) NetworkObservation { return f(ctx) }
 
-// UpdateObservation is the current OS slot and bundle generation.
+// UpdateObservation is the committed app bundle generation and base
+// fingerprint.
 type UpdateObservation struct {
 	Known      bool
 	Slot       *string
 	Generation *int64
+	Base       *UpdatesBase
 	LastError  string
 }
 
@@ -298,7 +301,7 @@ func DefaultProbes() Probes {
 		FrigateImage: &LocalFrigateImageProbe{},
 		Storage:      &FileStorageProbe{},
 		Network:      SystemNetworkProbe{},
-		Updates:      UnavailableUpdateProbe{},
+		Updates:      &UpdateStateProbe{StateRoot: "/var/lib/bittern"},
 		Reset:        UnavailableResetProbe{},
 		Hardware:     DetectionHardwareProbe{},
 	}
@@ -706,13 +709,48 @@ func probeInterface(ctx context.Context, name string) InterfaceObservation {
 	return observation
 }
 
-// UnavailableUpdateProbe reports an explicit unknown until BIT-009 implements
-// the update transaction and a persistent current-generation record.
-type UnavailableUpdateProbe struct{}
+// UpdateStateProbe reads the committed update state from the state root. A
+// missing state file is an explicit unknown, not a zero generation.
+type UpdateStateProbe struct {
+	StateRoot string
+}
 
-// Probe returns no update evidence.
-func (UnavailableUpdateProbe) Probe(context.Context) UpdateObservation {
-	return UpdateObservation{LastError: "update state is not implemented in this build"}
+// Probe returns the committed generation and base fingerprint, or unknown when
+// no update has committed.
+func (p *UpdateStateProbe) Probe(ctx context.Context) UpdateObservation {
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			return UpdateObservation{LastError: ctx.Err().Error()}
+		default:
+		}
+	}
+	state, present, err := update.Committed(p.StateRoot)
+	if err != nil {
+		return UpdateObservation{LastError: err.Error()}
+	}
+	if !present {
+		return UpdateObservation{}
+	}
+	generation := state.CommittedGeneration
+	observation := UpdateObservation{Known: true, Generation: &generation}
+	observation.Base = updateBase(state.Base)
+	return observation
+}
+
+func updateBase(base update.Base) *UpdatesBase {
+	if base.DebianVersion == "" && base.Kernel == "" && base.DockerVersion == "" && len(base.Devices) == 0 && len(base.Firmware) == 0 {
+		return nil
+	}
+	devices := append([]string{}, base.Devices...)
+	firmware := append([]string{}, base.Firmware...)
+	return &UpdatesBase{
+		DebianVersion: base.DebianVersion,
+		Kernel:        base.Kernel,
+		DockerVersion: base.DockerVersion,
+		Devices:       devices,
+		Firmware:      firmware,
+	}
 }
 
 // UnavailableResetProbe reports an explicit unknown until BIT-010 implements

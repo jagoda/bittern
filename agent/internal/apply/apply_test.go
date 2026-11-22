@@ -15,6 +15,7 @@ import (
 
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/frigateimage"
+	"bittern.invalid/agent/internal/oplock"
 	"bittern.invalid/agent/internal/render"
 )
 
@@ -1695,5 +1696,21 @@ func assertContainsText(t *testing.T, text string, wants ...string) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text does not contain %q: %s", want, text)
 		}
+	}
+}
+
+func TestApplyRefusesWhenTheSharedOperationLockIsHeld(t *testing.T) {
+	root := t.TempDir()
+	lock, err := oplock.Acquire(oplock.Path(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Release() }()
+	_, err = Apply(&config.Config{}, Options{StateRoot: root})
+	if !errors.Is(err, oplock.ErrBusy) {
+		t.Fatalf("apply under contention = %v, want oplock.ErrBusy", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "journal.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("contended apply wrote a journal: %v", statErr)
 	}
 }

@@ -203,12 +203,23 @@ type InterfaceSection struct {
 	LastError string  `json:"last_error"`
 }
 
-// UpdatesSection reports the current OS slot and bundle generation. Both are
-// null until the update transaction in BIT-009 implements them.
+// UpdatesSection reports the committed app bundle generation and the base
+// fingerprint. The OS slot stays null until the image work claims it.
 type UpdatesSection struct {
-	State       SectionState `json:"state"`
-	CurrentSlot *string      `json:"current_slot"`
-	Generation  *int64       `json:"generation"`
+	State             SectionState `json:"state"`
+	CurrentSlot       *string      `json:"current_slot"`
+	CurrentGeneration *int64       `json:"current_generation"`
+	Base              *UpdatesBase `json:"base"`
+}
+
+// UpdatesBase is the base fingerprint recorded by the update transaction. It
+// is recorded evidence, not a trust input.
+type UpdatesBase struct {
+	DebianVersion string   `json:"debian_version"`
+	Kernel        string   `json:"kernel"`
+	DockerVersion string   `json:"docker_version"`
+	Devices       []string `json:"devices"`
+	Firmware      []string `json:"firmware"`
 }
 
 // ResetSection reports the last completed reset. Both fields are null until

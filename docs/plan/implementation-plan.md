@@ -2040,8 +2040,13 @@ landed on 2026-11-22 as the `agent/internal/update` package, with `engine.go`, `
 `verify.go`, `lock.go`, `source.go`, and the section 13 named cases in `powercut_test.go`,
 `rejection_test.go`, `lock_test.go`, `idempotency_test.go`, `no_live_write_test.go`, and
 `migration_test.go`. The evidence and the specification differences are recorded in
-[the slice one note](../notes/2026-11-22-update-engine-slice-one.md). The canonical manifest,
-verifier and offline `bittern-release` tool exist. Slice one was step 3 in the
+[the slice one note](../notes/2026-11-22-update-engine-slice-one.md). Slice two production wiring
+landed on 2026-11-22: the fixed `bittern-update.service`, the 0600 request record, the
+`bittern update install` handoff, the real platform, systemd, Docker and `sqlite3` adapters, the
+status `updates` section, and the shared `internal/oplock`. Its evidence and limits are in
+[the slice two note](../notes/2026-11-22-update-engine-slice-two.md); the GitHub Releases channel
+client and the UI update card remain open in slice two. The canonical manifest, verifier and offline
+`bittern-release` tool exist. Slice one was step 3 in the
 [release work order](#release-work-order-2026-11-22), after CI phase one, and the QEMU update
 scenario is slice three and step 5. The release path still waits for ADR 0029 acceptance and the key
 ceremony.

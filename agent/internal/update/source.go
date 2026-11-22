@@ -12,6 +12,11 @@ import (
 // Name returns the stable source label recorded in the journal and history.
 func (s LocalSource) Name() string { return "local-file" }
 
+// SourcePath returns the local directory a transaction started from. The
+// journal records it so a resume reads the same source after a request record
+// is replaced or removed.
+func (s LocalSource) SourcePath() string { return s.Dir }
+
 // LoadManifest reads manifest.json and the detached signature files from the
 // local directory. It performs no network access and bounds every read.
 func (s LocalSource) LoadManifest() ([]byte, []byte, map[string][]byte, error) {

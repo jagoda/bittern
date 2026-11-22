@@ -1,0 +1,53 @@
+# Fixed app bundle update worker. The agent writes /var/lib/bittern/update/request.json and starts
+# this unit. The unit takes no arguments, no environment file, and no user-controlled property; the
+# helper reads the request record and exits. The POC payload installs it and the image keeps it.
+[Unit]
+Description=Bittern app bundle update
+Documentation=file:/usr/share/doc/bittern/README.md
+After=local-fs.target bittern-first-boot.service bitternd.service
+ConditionPathExists=/var/lib/bittern/update/request.json
+RequiresMountsFor=/etc/bittern /var/lib/bittern
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bittern update helper
+TimeoutStartSec=2h
+Restart=no
+User=root
+Group=root
+UMask=0077
+StateDirectory=bittern
+
+# The transaction writes only under /var/lib/bittern. /etc stays read-only so the live
+# appliance.yaml write remains the agent's responsibility.
+ReadWritePaths=/var/lib/bittern
+
+# The helper needs to see /dev/dri and /sys/firmware for the read-only base fingerprint, so
+# PrivateDevices is deliberately absent. It runs systemctl as a D-Bus client, docker through the
+# socket, and sqlite3 on regular files, so it needs no capability.
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+NoNewPrivileges=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

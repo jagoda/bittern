@@ -645,11 +645,11 @@ func writeChecksums(directory string) ([]byte, error) {
 	sort.Strings(names)
 	var builder strings.Builder
 	for _, name := range names {
-		digest, _, err := hashFile(filepath.Join(directory, filepath.FromSlash(name)))
+		digest, _, err := hashFileDigest(filepath.Join(directory, filepath.FromSlash(name)))
 		if err != nil {
 			return nil, err
 		}
-		builder.WriteString(digest)
+		builder.WriteString(hex.EncodeToString(digest[:]))
 		builder.WriteString("  ")
 		builder.WriteString(name)
 		builder.WriteByte('\n')

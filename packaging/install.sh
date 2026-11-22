@@ -15,7 +15,7 @@ set -eu
 # systemd-resolved is absent. The POC payload must install the resolver and let
 # it take its DNS servers from the lan0 DHCP lease; do not hard-code a public
 # resolver.
-PACKAGES='docker.io docker-cli docker-compose nftables dnsmasq chrony curl ca-certificates systemd-resolved qrencode'
+PACKAGES='docker.io docker-cli docker-compose nftables dnsmasq chrony curl ca-certificates systemd-resolved qrencode sqlite3'
 RESOLV_CONF=/etc/resolv.conf
 RESOLV_CONF_BACKUP=/etc/resolv.conf.bittern-poc.bak
 RESOLVED_STUB_RESOLV_CONF='../run/systemd/resolve/stub-resolv.conf'
@@ -160,6 +160,7 @@ verify_payload() {
         bitternd \
         bittern-first-boot.service \
         bittern-image-prewarm.service \
+        bittern-update.service \
         bitternd.service \
         install.sh \
         cleanup.sh \
@@ -192,6 +193,8 @@ install_packages() {
     if [ "$DRY_RUN" -eq 0 ]; then
         command -v qrencode >/dev/null 2>&1 ||
             die "the qrencode command is missing after package installation; the setup QR would not work"
+        command -v sqlite3 >/dev/null 2>&1 ||
+            die "the sqlite3 command is missing after package installation; the update database backup would fail"
     fi
 }
 
@@ -681,6 +684,9 @@ unit_reboot_consequence() {
         bittern-image-prewarm.service)
             printf '%s' "The recording software would not download in the background, so the first camera apply would have to start and wait for the download."
             ;;
+        bittern-update.service)
+            printf '%s' "An interrupted update would not resume after reboot."
+            ;;
         bitternd.service)
             printf '%s' "The status API and UI would not start after reboot."
             ;;
@@ -754,6 +760,7 @@ enable_units() {
     enable_unit chrony.service
     enable_unit bittern-first-boot.service
     enable_unit bittern-image-prewarm.service
+    enable_unit bittern-update.service
     enable_unit bitternd.service
 }
 
@@ -931,6 +938,10 @@ install_files() {
         "$SCRIPT_DIR/bittern-image-prewarm.service" \
         /etc/systemd/system/bittern-image-prewarm.service ||
         die "could not install bittern-image-prewarm.service"
+    run install -o root -g root -m 0644 \
+        "$SCRIPT_DIR/bittern-update.service" \
+        /etc/systemd/system/bittern-update.service ||
+        die "could not install bittern-update.service"
     run install -o root -g root -m 0644 \
         "$SCRIPT_DIR/bitternd.service" \
         /etc/systemd/system/bitternd.service ||

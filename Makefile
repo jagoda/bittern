@@ -147,6 +147,7 @@ poc-payload: assets
 		-o "$(abspath $(PAYLOAD_STAGE))/bitternd" ./cmd/bitternd); \
 	install -m 0644 agent/packaging/bittern-first-boot.service "$$stage/bittern-first-boot.service"; \
 	install -m 0644 agent/packaging/bittern-image-prewarm.service "$$stage/bittern-image-prewarm.service"; \
+	install -m 0644 agent/packaging/bittern-update.service "$$stage/bittern-update.service"; \
 	install -m 0644 agent/packaging/bitternd.service "$$stage/bitternd.service"; \
 	install -m 0755 packaging/install.sh "$$stage/install.sh"; \
 	install -m 0755 packaging/cleanup.sh "$$stage/cleanup.sh"; \
@@ -156,7 +157,7 @@ poc-payload: assets
 		-e 's/@PAYLOAD_COMMIT_SHORT@/$(PAYLOAD_COMMIT_SHORT)/g' \
 		packaging/README-payload.md > "$$stage/README.md"; \
 	(cd "$$stage" && \
-		sha256sum bittern bitternd bittern-first-boot.service bittern-image-prewarm.service bitternd.service install.sh cleanup.sh storage-setup.sh README.md > SHA256SUMS); \
+		sha256sum bittern bitternd bittern-first-boot.service bittern-image-prewarm.service bittern-update.service bitternd.service install.sh cleanup.sh storage-setup.sh README.md > SHA256SUMS); \
 	tar_file="$$archive.tar"; \
 	rm -f "$$tar_file" "$$archive"; \
 	tar --sort=name --mtime="@$(PAYLOAD_EPOCH)" --owner=0 --group=0 --numeric-owner \
