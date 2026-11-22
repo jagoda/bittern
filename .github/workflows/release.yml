@@ -5,10 +5,15 @@
 # checked commit only after the build and signature succeed, creates the draft,
 # and publishes it after the beta environment approval.
 #
-# The optional confirm input is the tag printed by make release-preflight. An
-# empty confirmation runs the preflight only and builds nothing, so the
-# maintainer can see the plan in the run summary. A confirmation that does not
-# match the computed tag fails the preflight before any build.
+# The dry_run input defaults to true. The default dispatch runs the preflight,
+# calls publish.yml with dry_run true and create_tag false, runs the checks and
+# the signing step, and creates no tag, draft, or release. It is the proof of
+# the real call path before a publish dispatch.
+#
+# The optional confirm input is the tag printed by make release-preflight. A
+# publish dispatch sets dry_run false and must also supply that tag in confirm.
+# A mismatched confirmation fails the preflight, and an empty one skips the
+# release job. A dry-run dispatch does not need it.
 #
 # The tag push path remains in publish.yml as the fallback. It is not started by
 # this workflow, and a tag created here is never pushed through the tag path.
@@ -25,10 +30,15 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: Tag printed by make release-preflight; empty runs the plan only
+        description: Tag printed by make release-preflight; required to publish
         required: false
         type: string
         default: ""
+      dry_run:
+        description: Run the real call path and signing with no tag, draft, or release
+        required: true
+        type: boolean
+        default: true
 
 # One release at a time. Two runs must not compute the same generation, and a
 # run waiting for the beta approval must not be cancelled.
@@ -79,9 +89,13 @@ jobs:
   release:
     name: build, tag, draft, publish
     needs: preflight
-    # An empty confirmation is a plan-only dispatch. A non-empty confirmation
-    # must equal the computed tag; the preflight already failed if it does not.
-    if: needs.preflight.result == 'success' && inputs.confirm == needs.preflight.outputs.tag
+    # The default dry_run=true dispatch calls the reusable publish workflow so
+    # the called path, its conditions, and the signing step run with no tag or
+    # release. A publish dispatch must also confirm the tag the preflight
+    # printed; the preflight already failed a mismatched confirmation.
+    if: >-
+      needs.preflight.result == 'success' &&
+      (inputs.dry_run || inputs.confirm == needs.preflight.outputs.tag)
     permissions:
       contents: write
     uses: ./.github/workflows/publish.yml
@@ -89,5 +103,5 @@ jobs:
       tag: ${{ needs.preflight.outputs.tag }}
       generation: ${{ needs.preflight.outputs.generation }}
       commit: ${{ needs.preflight.outputs.commit }}
-      create_tag: true
-      dry_run: false
+      create_tag: ${{ inputs.dry_run == false }}
+      dry_run: ${{ inputs.dry_run }}

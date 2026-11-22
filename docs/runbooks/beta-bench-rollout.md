@@ -2,10 +2,11 @@
 
 - Date: 2026-11-22
 - Status: maintainer checklist for the first two published beta generations. The release workflow
-  dispatch is the normal path and the tag push is the fallback. The publish workflow dry run is
-  green, and both `beta-draft` and `beta` now admit the `main` branch and the `app-beta-*` tag, so the
-  dispatch preflight passes. Neither publish path has been run against a published release. The
-  `beta` approval remains unproven until the first release is approved
+  dispatch is the normal path and the tag push is the fallback. The release workflow defaults to a
+  dry-run call that exercises the called publish workflow and the signing step without creating a
+  tag, draft, or release. Both `beta-draft` and `beta` admit the `main` branch and the
+  `app-beta-*` tag, so the dispatch preflight passes. Neither publish path has been run against a
+  published release. The `beta` approval remains unproven until the first release is approved
 - Bench: Debian 13 (trixie) amd64, minimal, one management NIC on the house LAN, camera NIC
   unplugged, local console attached
 - Payload: the published `bittern-beta-kit.tar.gz` and the `app-beta-000001` and `app-beta-000002`
@@ -20,6 +21,7 @@
   [beta payload and publish note](../notes/2026-11-22-beta-payload-and-publish.md),
   [dry run and bench rollout note](../notes/2026-11-22-beta-dry-run-and-bench-rollout.md),
   [dispatch release trigger note](../notes/2026-11-22-dispatch-release-trigger.md),
+  [release call path note](../notes/2026-11-22-release-call-path.md),
   [update channel and manual rollback note](../notes/2026-11-22-update-channel-check-and-manual-rollback.md),
   [beta kit README](../../packaging/README-beta-kit.md),
   [BIT-009](../plan/implementation-plan.md#bit-009-app-bundle-update-transaction-with-rollback),
@@ -102,7 +104,11 @@ Record the run as you go:
 ## Dispatch generation 1
 
 The release workflow computes the generation, builds and signs, creates the tag, stages the draft,
-and waits for the `beta` approval. Do not create the tag by hand on this path.
+and waits for the `beta` approval. The same release job first runs the call path as a dry run with
+`dry_run` true, which is the default. The dry run runs the preflight, the called `validate tag`,
+`checks and unsigned test build`, and `sign and stage draft` jobs, and skips `publish the verified
+draft`. It creates no tag, draft, or release. Only then dispatch with `dry_run` false to publish. Do
+not create the tag by hand on this path.
 
 ```sh
 cd /path/to/bittern
@@ -110,7 +116,31 @@ git switch main
 git pull --ff-only
 git status --short        # must be empty
 make release-preflight    # prints app-beta-000001 and the next action
-gh workflow run release.yml --ref main -f confirm=app-beta-000001
+gh workflow run release.yml --ref main
+sleep 5
+run_id="$(gh run list --workflow release.yml --event workflow_dispatch --limit 1 \
+  --json databaseId --jq '.[0].databaseId')"
+test -n "$run_id"
+gh run view "$run_id" --json jobs,url
+```
+
+Expected: the `release preflight`, `validate tag`, `checks and unsigned test build`, and
+`sign and stage draft` jobs pass. The `sign and stage draft` job runs `Sign the manifest with the CI
+test key` and `Verify the signature with the CI test anchor`. The `publish the verified draft` job is
+skipped. No tag, draft, or release exists after the run.
+
+```sh
+git ls-remote --tags origin
+gh release list
+```
+
+Expected: both commands print nothing. If either lists the computed tag or release, stop: the dry
+run did not stay dry, and record the finding before any further dispatch.
+
+Then dispatch the publish path with the tag the preflight printed:
+
+```sh
+gh workflow run release.yml --ref main -f dry_run=false -f confirm=app-beta-000001
 sleep 5
 run_id="$(gh run list --workflow release.yml --event workflow_dispatch --limit 1 \
   --json databaseId --jq '.[0].databaseId')"
@@ -262,11 +292,27 @@ git push origin main
 ```
 
 Run the preflight on the new `main` head. It refuses while the check run for that exact commit is
-still running, and it computes the next generation from the published releases:
+still running, and it computes the next generation from the published releases. Run the same two
+dispatches as generation 1: first the default dry run, then the publish dispatch with `dry_run`
+false and the printed tag in `confirm`.
 
 ```sh
 make release-preflight    # prints app-beta-000002 and the next action
-gh workflow run release.yml --ref main -f confirm=app-beta-000002
+gh workflow run release.yml --ref main
+sleep 5
+run_id="$(gh run list --workflow release.yml --event workflow_dispatch --limit 1 \
+  --json databaseId --jq '.[0].databaseId')"
+test -n "$run_id"
+gh run view "$run_id" --json jobs,url
+git ls-remote --tags origin app-beta-000002
+gh release view app-beta-000002
+```
+
+Expected: the dry run is green through `sign and stage draft`, skips `publish the verified draft`,
+and creates no tag or release. The last two commands must both fail with not found. Then publish:
+
+```sh
+gh workflow run release.yml --ref main -f dry_run=false -f confirm=app-beta-000002
 sleep 5
 run_id="$(gh run list --workflow release.yml --event workflow_dispatch --limit 1 \
   --json databaseId --jq '.[0].databaseId')"

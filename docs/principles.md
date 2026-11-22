@@ -1,6 +1,6 @@
 # Principles
 
-- Last reviewed: 2026-11-21
+- Last reviewed: 2026-11-22
 - Process: [Findings and principles process](notes/2026-11-15-findings-and-principles-process.md),
   [engineering quality](engineering/README.md)
 - Applies to: every finding and every change, as recorded in [AGENTS.md](../AGENTS.md) and the
@@ -37,7 +37,7 @@ tracker.
 | EN-3 | A regression test starts from the state that failed in the field, and says so | Reboot failures, field parity |
 | EN-4 | The second occurrence of a defect class triggers an audit of the class | Network path notes, reboot failures |
 | EN-5 | A planned-case matrix proves the plan runs; adversarial state proves the invariants | Update engine audit |
-| OP-1 | A repeated manual bridge becomes an idempotent script | GK41 manual bridges, BIT-016 |
+| OP-1 | A repeated manual bridge becomes an idempotent script whose dry run covers the real path | GK41 manual bridges, BIT-016, release call path |
 | SEC-1 | A secret has one storage location and a redaction test | ADR 0010, camera credential tests |
 | RES-1 | External facts are dated and sourced before they are relied on | Frigate assessment, AGENTS rule |
 
@@ -457,25 +457,35 @@ does not apply gets a one-line reason in the review.
 
 ## Operations
 
-### OP-1 A repeated manual bridge becomes an idempotent script
+### OP-1 A repeated manual bridge becomes an idempotent script whose dry run covers the real path
 
-- Date: 2026-11-15
+- Date: 2026-11-15; revised 2026-11-22
 - Rule: A procedure that runs more than once ships as a checked-in idempotent script with a plan or
   dry run, safety checks, end-state verification, and explicit confirmation for destructive actions.
   The runbook states preconditions, invokes the script, and verifies the result. A repeated manual
-  bridge is a defect, not a procedure.
+  bridge is a defect, not a procedure. A dry run or test mode must execute the same branches and
+  conditions as the real mode with only the irreversible steps disabled. A dry run that exercises a
+  different branch proves nothing about the branch that matters.
 - Evidence: The [GK41 hardware run](notes/2026-11-15-gk41-hardware-run.md) manual bridges table records
   repeated cleanup, conffile restore, network, and DNS steps. [BIT-016](plan/implementation-plan.md#bit-016-poc-test-device-cleanup-script)
   replaces the cleanup bridge with [packaging/cleanup.sh](../packaging/cleanup.sh), and
   [BIT-017](plan/implementation-plan.md#bit-017-resolver-installation-and-first-boot-dns) and
   [BIT-018](plan/implementation-plan.md#bit-018-first-boot-rename-address-gate-and-rollback-journal)
-  remove the network and DNS bridges.
-- Do: Run `packaging/cleanup.sh --yes`, which plans every change, restores the stock conffiles,
-  verifies the clean state, and fails instead of claiming success.
-- Don't: Keep a runbook list of `rm`, `systemctl disable`, and package restores that the operator
-  repeats on every clean install.
-- Check: [tests/cleanup/test_cleanup.py](../tests/cleanup/test_cleanup.py) runs in `make check`, and
-  the QEMU firstboot and clean-network scenarios verify the install path.
+  remove the network and DNS bridges. The [release call path note](notes/2026-11-22-release-call-path.md)
+  records a publish dry run that took the direct `workflow_dispatch` branch while the real release
+  called the reusable workflow, so the `workflow_call` branch was never tested. The fix makes one
+  input-driven path serve the call and the dry run.
+- Do: Run `release.yml` with `dry_run=true` so the called publish workflow, its conditions, and the
+  signing step run with no tag or release, then run the real dispatch. Run
+  `packaging/cleanup.sh --yes`, which plans every change, restores the stock conffiles, verifies the
+  clean state, and fails instead of claiming success.
+- Don't: Call a dry run proof when it took a different branch from the real path, or keep a runbook
+  list of `rm`, `systemctl disable`, and package restores that the operator repeats on every clean
+  install.
+- Check: The [beta bench rollout](runbooks/beta-bench-rollout.md) requires the dry-run call path
+  before the publish dispatch, and
+  [tests/cleanup/test_cleanup.py](../tests/cleanup/test_cleanup.py) runs in `make check`. The QEMU
+  firstboot and clean-network scenarios verify the install path.
 
 ## Security
 

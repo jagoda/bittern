@@ -1,17 +1,19 @@
 # CI phase two, per ADR 0031, ADR 0032, and ADR 0033. There are three paths:
 #
 # - A manual dispatch of release.yml (ADR 0033) runs the release preflight,
-#   computes the next generation, and calls this workflow with that tag. This
-#   workflow runs the phase one checks, builds the unsigned assets, signs the
-#   manifest with the CI-only test key, creates the tag at the checked commit,
-#   and uploads exactly the five release assets to a draft. The tag is created
-#   only after the build and signature succeed.
+#   computes the next generation, and calls this workflow. The default
+#   dry_run=true call runs the same checks, build, and signature and creates no
+#   tag, draft, or release. The dry_run=false call creates the tag at the
+#   checked commit and uploads exactly the five release assets to a draft. The
+#   tag is created only after the build and signature succeed.
 # - A push of an app-beta-* tag is the fallback path. The tag exists before the
 #   run, so this workflow validates it, builds, signs, and creates the draft
 #   against the existing tag. It does not compute the generation.
-# - A workflow_dispatch of this workflow is the dry run. It validates the tag,
-#   builds and signs the same bytes, verifies the signature, prints the five
-#   asset digests, and creates no tag, draft, or release.
+# - A workflow_dispatch of this workflow with dry_run=true is the standalone
+#   dry run. It validates the supplied tag, builds and signs the same bytes,
+#   verifies the signature, prints the five asset digests, and creates no tag,
+#   draft, or release. A direct dispatch cannot publish because it never
+#   supplies create_tag.
 #
 # The draft job runs in beta-draft, which scopes the CI test key to the ref and
 # holds no required reviewer. The publish job runs in the protected beta
@@ -36,7 +38,8 @@ on:
     tags:
       - 'app-beta-*'
   # The dry run validates a tag before it exists, so it cannot be the tag push
-  # trigger. The inputs are read only by a dispatch; a push never reads them.
+  # trigger. A direct dispatch supplies only the tag and dry_run inputs; it
+  # never supplies create_tag, so it can only run the dry run.
   workflow_dispatch:
     inputs:
       tag:
@@ -49,9 +52,10 @@ on:
         required: true
         type: boolean
         default: true
-  # The release workflow calls this workflow with the tag and generation the
-  # preflight computed. create_tag is true only on that path; the tag push
-  # fallback already has its tag, and the dry run never creates one.
+  # The release workflow calls this workflow with the tag, generation, and
+  # commit the preflight computed. create_tag is true only on its publish path;
+  # its dry-run call sets dry_run true and create_tag false. The tag push
+  # fallback already has its tag, and a dry run never creates one.
   workflow_call:
     inputs:
       tag:
@@ -95,6 +99,7 @@ jobs:
     outputs:
       generation: ${{ steps.parse.outputs.generation }}
       tag: ${{ steps.select.outputs.tag }}
+      commit: ${{ steps.select.outputs.commit }}
       dry_run: ${{ steps.select.outputs.dry_run }}
       create_tag: ${{ steps.select.outputs.create_tag }}
     steps:
@@ -109,100 +114,79 @@ jobs:
           go-version-file: agent/go.mod
           cache-dependency-path: agent/go.sum
 
-      # Exactly one tag source is chosen. A push must carry the literal tag ref
-      # it was triggered by, and its tag is never taken from an input. A
-      # dispatch has no tag ref, so its tag comes from the input and is then
-      # validated by the same parser. A dispatch at a tag ref would be a second
-      # tag path and is refused.
-      - name: Select the tag from the event
+      # A push has no tag input, so its tag is the literal tag ref that started
+      # the run and is never taken from an input. Every other run is input
+      # driven: a direct dispatch or the release workflow calling this one. The
+      # event name is not used because a reusable workflow sees the caller's
+      # event, so workflow_call is indistinguishable from the direct dispatch
+      # that started the caller. The selected action is explicit: dry_run=true
+      # creates nothing, dry_run=false with create_tag=true is the publish
+      # path, and a tag input with dry_run=false but create_tag=false is
+      # refused.
+      - name: Select the tag, commit, and release action
         id: select
         env:
-          EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
           REF_NAME: ${{ github.ref_name }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
-          INPUT_GENERATION: ${{ inputs.generation }}
           INPUT_COMMIT: ${{ inputs.commit }}
           INPUT_CREATE_TAG: ${{ inputs.create_tag }}
+          WORKFLOW_SHA: ${{ github.sha }}
         run: |
           set -eu
-          case "$EVENT_NAME" in
-            push)
-              case "$REF" in
-                refs/tags/app-beta-*) ;;
-                *)
-                  printf 'the publish push trigger requires a refs/tags/app-beta-* ref, not %s\n' "$REF" >&2
-                  exit 1
-                  ;;
-              esac
-              tag="$REF_NAME"
-              dry_run=false
-              create_tag=false
-              ;;
-            workflow_dispatch)
-              case "$REF" in
-                refs/tags/*)
-                  printf 'workflow_dispatch must run from a branch ref, not %s\n' "$REF" >&2
-                  exit 1
-                  ;;
-              esac
-              tag="$INPUT_TAG"
-              case "$INPUT_DRY_RUN" in
-                true)
-                  dry_run=true
-                  ;;
-                false)
-                  printf 'workflow_dispatch is the dry-run path; push %s to publish\n' "$tag" >&2
-                  exit 1
-                  ;;
-                *)
-                  printf 'the dry_run input is %s, not true or false\n' "$INPUT_DRY_RUN" >&2
-                  exit 1
-                  ;;
-              esac
-              create_tag=false
-              ;;
-            workflow_call)
-              case "$REF" in
-                refs/heads/main) ;;
-                *)
-                  printf 'the reusable release path requires refs/heads/main, not %s\n' "$REF" >&2
-                  exit 1
-                  ;;
-              esac
-              tag="$INPUT_TAG"
-              case "$INPUT_DRY_RUN" in
-                true) dry_run=true ;;
-                false) dry_run=false ;;
-                *)
-                  printf 'the dry_run input is %s, not true or false\n' "$INPUT_DRY_RUN" >&2
-                  exit 1
-                  ;;
-              esac
-              case "$INPUT_CREATE_TAG" in
-                true) create_tag=true ;;
-                false) create_tag=false ;;
-                *)
-                  printf 'the create_tag input is %s, not true or false\n' "$INPUT_CREATE_TAG" >&2
-                  exit 1
-                  ;;
-              esac
-              if [ "$create_tag" = "true" ] && [ "$dry_run" = "true" ]; then
-                printf 'a reusable run cannot create a tag in a dry run\n' >&2
+          if [ -z "$INPUT_TAG" ]; then
+            case "$REF" in
+              refs/tags/app-beta-*) ;;
+              *)
+                printf 'a publish run without a tag input requires a refs/tags/app-beta-* ref, not %s\n' "$REF" >&2
                 exit 1
-              fi
-              if [ "$INPUT_COMMIT" != "$GITHUB_SHA" ]; then
-                printf 'the preflight commit %s does not equal the workflow commit %s\n' \
-                  "$INPUT_COMMIT" "$GITHUB_SHA" >&2
+                ;;
+            esac
+            tag="$REF_NAME"
+            commit="$WORKFLOW_SHA"
+            dry_run=false
+            create_tag=false
+          else
+            case "$REF" in
+              refs/heads/*) ;;
+              *)
+                printf 'a publish run with a tag input requires a branch ref, not %s\n' "$REF" >&2
                 exit 1
-              fi
-              ;;
-            *)
-              printf 'the publish workflow does not run on the %s event\n' "$EVENT_NAME" >&2
+                ;;
+            esac
+            tag="$INPUT_TAG"
+            case "$INPUT_DRY_RUN" in
+              true) dry_run=true ;;
+              false) dry_run=false ;;
+              *)
+                printf 'the dry_run input is %s, not true or false\n' "$INPUT_DRY_RUN" >&2
+                exit 1
+                ;;
+            esac
+            case "$INPUT_CREATE_TAG" in
+              ''|false) create_tag=false ;;
+              true) create_tag=true ;;
+              *)
+                printf 'the create_tag input is %s, not true or false\n' "$INPUT_CREATE_TAG" >&2
+                exit 1
+                ;;
+            esac
+            if [ "$dry_run" = "true" ] && [ "$create_tag" = "true" ]; then
+              printf 'a dry run cannot create a tag\n' >&2
               exit 1
-              ;;
-          esac
+            fi
+            if [ "$dry_run" = "false" ] && [ "$create_tag" != "true" ]; then
+              printf 'a run with a tag input publishes only when create_tag is true; a direct dispatch is the dry-run path\n' >&2
+              exit 1
+            fi
+            if [ -n "$INPUT_COMMIT" ] && [ "$INPUT_COMMIT" != "$WORKFLOW_SHA" ]; then
+              printf 'the input commit %s does not equal the workflow commit %s\n' \
+                "$INPUT_COMMIT" "$WORKFLOW_SHA" >&2
+              exit 1
+            fi
+            commit="${INPUT_COMMIT:-$WORKFLOW_SHA}"
+          fi
           case "$tag" in
             app-beta-*) ;;
             *)
@@ -211,31 +195,34 @@ jobs:
               ;;
           esac
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+          printf 'commit=%s\n' "$commit" >> "$GITHUB_OUTPUT"
           printf 'dry_run=%s\n' "$dry_run" >> "$GITHUB_OUTPUT"
           printf 'create_tag=%s\n' "$create_tag" >> "$GITHUB_OUTPUT"
           printf 'selected tag: %s\n' "$tag"
+          printf 'selected commit: %s\n' "$commit"
           printf 'dry run: %s\n' "$dry_run"
           printf 'create tag: %s\n' "$create_tag"
 
       # The first command that can fail is the repository's own tag parser. It
       # rejects uppercase hex, five or seven characters, an empty suffix, a
       # non-hex character, and generation zero. No release asset is built before
-      # this passes.
+      # this passes. A supplied generation is the preflight value, and it must
+      # equal what the parser reads from the tag.
       - name: Parse the tag with the repository rule
         id: parse
         env:
           TAG: ${{ steps.select.outputs.tag }}
-          EVENT_NAME: ${{ github.event_name }}
           INPUT_GENERATION: ${{ inputs.generation }}
         run: |
           set -eu
           make bittern-release
-          generation="$(agent/bin/bittern-release tag "$TAG")"
-          if [ "$EVENT_NAME" = "workflow_call" ] && [ "$generation" != "$INPUT_GENERATION" ]; then
+          parsed_generation="$(agent/bin/bittern-release tag "$TAG")"
+          if [ -n "$INPUT_GENERATION" ] && [ "$parsed_generation" != "$INPUT_GENERATION" ]; then
             printf 'the Go parser read generation %s, the preflight computed %s\n' \
-              "$generation" "$INPUT_GENERATION" >&2
+              "$parsed_generation" "$INPUT_GENERATION" >&2
             exit 1
           fi
+          generation="${INPUT_GENERATION:-$parsed_generation}"
           printf 'generation=%s\n' "$generation" >> "$GITHUB_OUTPUT"
 
   checks:
@@ -292,6 +279,7 @@ jobs:
         id: manifest
         env:
           TAG_GENERATION: ${{ needs.tag.outputs.generation }}
+          RELEASE_COMMIT: ${{ needs.tag.outputs.commit }}
         run: |
           set -eu
           for asset in manifest.json bittern-app.tar.gz bittern-beta-kit.tar.gz SHA256SUMS; do
@@ -307,9 +295,9 @@ jobs:
             exit 1
           fi
           manifest_commit="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["source_commit"])' build/assets/manifest.json)"
-          if [ "$manifest_commit" != "$GITHUB_SHA" ]; then
-            printf 'the manifest source_commit %s does not equal the tagged commit %s\n' \
-              "$manifest_commit" "$GITHUB_SHA" >&2
+          if [ "$manifest_commit" != "$RELEASE_COMMIT" ]; then
+            printf 'the manifest source_commit %s does not equal the release commit %s\n' \
+              "$manifest_commit" "$RELEASE_COMMIT" >&2
             exit 1
           fi
           payload_sha256="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["payload"]["sha256"])' build/assets/manifest.json)"
@@ -402,13 +390,14 @@ jobs:
         env:
           TAG_GENERATION: ${{ needs.tag.outputs.generation }}
           TAG: ${{ needs.tag.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.tag.outputs.commit }}
         run: |
           set -eu
           {
             printf 'Bittern beta generation %s\n\n' "$TAG_GENERATION"
             printf -- '- Channel: beta\n'
             printf -- '- Generation: %s\n' "$TAG_GENERATION"
-            printf -- '- Source commit: %s\n' "$GITHUB_SHA"
+            printf -- '- Source commit: %s\n' "$RELEASE_COMMIT"
             printf -- '- Tag: %s\n\n' "$TAG"
             printf 'Assets:\n'
             printf -- '- manifest.json\n'
@@ -431,9 +420,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.tag.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.tag.outputs.commit }}
         run: |
           set -eu
-          commit="$GITHUB_SHA"
+          commit="$RELEASE_COMMIT"
           if git ls-remote --tags origin "refs/tags/$TAG" | grep -q .; then
             printf 'tag %s already exists; a release tag is never moved or reused\n' "$TAG" >&2
             exit 1

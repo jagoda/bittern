@@ -175,8 +175,10 @@ never moved.
 ### Follow-ups
 
 - Prove the first dispatch release now that both environments admit `main`: run
-  `make release-preflight`, dispatch `release.yml` with the computed tag, approve `beta`, and record
-  the tag creation, draft upload, run URL, and release URL in the beta bench rollout.
+  `make release-preflight`, dispatch `release.yml` with `dry_run` true to run the called publish
+  workflow through the checks and the signing step with no tag, draft, or release, then dispatch
+  `release.yml` with `dry_run` false and the computed tag in `confirm`, approve `beta`, and record
+  the tag creation, draft upload, run URLs, and release URL in the beta bench rollout.
 - Keep [OQ-36](../open-questions.md) resolved by this decision and the
   [trust README](../../packaging/trust/README.md) control mapping in the same change. The temporary
   dry-run policy procedure is retired; the no-secret dry-run environment is not needed for the
