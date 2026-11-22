@@ -77,10 +77,10 @@ install order, rollback order, live-write boundary, or verification order.
    `schema_after`, and `health`. Section 12 requires the platform frozen in the journal, and a resume
    after a cut needs the base and migration evidence to write one history record. The implementation
    adds those fields. It does not add secrets.
-2. **Operation id generation.** The id names the candidate generation from a bounded, untrusted
-   peek at the source manifest before the journal is created. The candidate is still verified later,
-   and the peek does not decide anything. A missing or malformed manifest keeps `g000000`, because
-   there is no candidate generation to name.
+2. **Operation id generation.** The id uses the previous committed generation, which is trusted
+   state read before the journal is created, plus a `crypto/rand` suffix. It does not read the
+   candidate manifest before verification. A missing or malformed manifest therefore cannot shape
+   the journal.
 3. **Pending migration lifetime.** The path table says the pending file is removed at commit or
    rollback. Section 4 and section 7 say the slice-two agent reads the pending file after commit and
    persists it, and that rollback removes it. The engine keeps it after commit and removes it on

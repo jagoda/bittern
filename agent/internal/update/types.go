@@ -386,6 +386,7 @@ type Options struct {
 	MinFreeBytes     uint64
 	HealthTimeout    time.Duration
 	Secrets          []string
+	SecretsPath      string
 	BeforeStep       func(Step) error
 	AfterStep        func(Step) error
 	Logger           func(format string, args ...any)

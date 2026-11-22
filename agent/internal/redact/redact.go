@@ -133,17 +133,19 @@ func (r *Redactor) String(value string) string {
 	if value == "" {
 		return value
 	}
+	// Replace known values before the common patterns. A complete RTSP URL is
+	// registered literally; the pattern would otherwise mask only the
+	// credentials and leave the path or query part of the same secret behind.
+	if r != nil {
+		r.mu.RLock()
+		literals := append([]string(nil), r.literals...)
+		r.mu.RUnlock()
+		for _, secret := range literals {
+			value = strings.ReplaceAll(value, secret, Placeholder)
+		}
+	}
 	for _, pattern := range patterns {
 		value = pattern.expression.ReplaceAllString(value, pattern.replacement)
-	}
-	if r == nil {
-		return value
-	}
-	r.mu.RLock()
-	literals := append([]string(nil), r.literals...)
-	r.mu.RUnlock()
-	for _, secret := range literals {
-		value = strings.ReplaceAll(value, secret, Placeholder)
 	}
 	return value
 }

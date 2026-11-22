@@ -306,13 +306,14 @@ func removeAll(path string) error {
 	return nil
 }
 
-func operationID(now time.Time, generation int64) string {
+var randomRead = rand.Read
+
+func operationID(now time.Time, generation int64) (string, error) {
 	var random [4]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		sum := sha256.Sum256([]byte(now.UTC().Format(time.RFC3339Nano)))
-		copy(random[:], sum[:4])
+	if _, err := randomRead(random[:]); err != nil {
+		return "", fmt.Errorf("update: allocate operation id: %w", err)
 	}
-	return fmt.Sprintf("%s-g%06d-%s", now.UTC().Format("20060102T150405Z"), generation, hex.EncodeToString(random[:]))
+	return fmt.Sprintf("%s-g%06d-%s", now.UTC().Format("20060102T150405Z"), generation, hex.EncodeToString(random[:])), nil
 }
 
 func historyFiles(directory string) ([]string, error) {

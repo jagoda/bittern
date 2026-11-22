@@ -65,6 +65,18 @@ func frigateCameraEnv(cfg *config.Config, secretsPath string) ([]byte, []string,
 	return []byte(lines.String()), values, nil
 }
 
+// CameraSecretValues returns the same camera RTSP URL values Apply registers
+// with its redactor. The update engine calls it so an error from a probe or a
+// data adapter is redacted with the values from secrets.yaml, not only the
+// literals the caller supplied.
+func CameraSecretValues(cfg *config.Config, secretsPath string) ([]string, error) {
+	_, values, err := frigateCameraEnv(cfg, secretsPath)
+	if err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
 func validateRTSPURL(value string) error {
 	if value == "" {
 		return fmt.Errorf("the value is empty")

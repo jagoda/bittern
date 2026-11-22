@@ -230,6 +230,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err := os.WriteFile(frigateConfig, []byte("old: frigate-config\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	secretsPath := filepath.Join(filepath.Dir(configPath), "secrets.yaml")
+	secretsDocument := "cameras:\n  front_door:\n    rtsp_url: rtsp://viewer:test@10.77.0.20:554/stream1\n"
+	if err := os.WriteFile(secretsPath, []byte(secretsDocument), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	system := newFakeSystem()
 	data := &fakeData{}
 	image := &fakeImage{}
@@ -263,6 +268,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		System:           system,
 		Data:             data,
 		Image:            image,
+		SecretsPath:      secretsPath,
 		Platform:         PlatformProviderFunc(func() (Platform, error) { return env.platform, nil }),
 		Base:             BaseCollectorFunc(func() (Base, error) { return env.base, nil }),
 		Now:              func() time.Time { return time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC) },

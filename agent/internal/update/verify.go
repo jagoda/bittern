@@ -260,6 +260,11 @@ func safeBundlePath(value string) (string, error) {
 	if value == "" || strings.Contains(value, `\`) || strings.HasPrefix(value, "/") {
 		return "", errorf("archive.path", "the archive path %q is not a safe relative path", value)
 	}
+	for index := 0; index < len(value); index++ {
+		if value[index] < 0x20 || value[index] == 0x7f {
+			return "", errorf("archive.path", "the archive path %q contains a control character", value)
+		}
+	}
 	for _, part := range strings.Split(value, "/") {
 		if part == ".." {
 			return "", errorf("archive.path", "the archive path %q contains a parent directory reference", value)
@@ -273,31 +278,5 @@ func safeBundlePath(value string) (string, error) {
 }
 
 func readExtraSignatures(directory string) (map[string][]byte, error) {
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	extra := make(map[string][]byte)
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasPrefix(name, "manifest.sig.") {
-			continue
-		}
-		keyID := strings.TrimPrefix(name, "manifest.sig.")
-		if keyID == "" {
-			return nil, errorf("signature.name", "the signature file %s has no key id", name)
-		}
-		data, err := os.ReadFile(filepath.Join(directory, name))
-		if err != nil {
-			return nil, err
-		}
-		if len(data) != 64 {
-			return nil, errorf("signature.length", "the signature for key %s is %d bytes, not 64", keyID, len(data))
-		}
-		extra[keyID] = data
-	}
-	return extra, nil
+	return readAdditionalSignatures(directory, "manifest.sig.")
 }

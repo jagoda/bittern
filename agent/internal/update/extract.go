@@ -8,13 +8,35 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
-// extractArchive extracts a files-only gzip tar into directory. It accepts only
-// regular files and directories, rejects duplicate entries and every special
-// type, and writes files 0600 and directories 0700. The final modes are applied
-// only after the digest check.
+const (
+	maxArchiveEntries    = 10000
+	maxArchiveEntryBytes = 64 << 20
+	maxArchiveBytes      = 128 << 20
+)
+
+// extractArchive extracts a files-only gzip tar into directory. Directories are
+// structural: the manifest lists files only, so explicit and implicit
+// directories, including empty ones, are allowed and preserved. The extraction
+// bounds the entry count, each entry size, and the total uncompressed bytes
+// before writing, and refuses a name containing a control character. It accepts
+// only regular files and directories, rejects duplicate entries and every
+// special type, and writes files 0600 and directories 0700. The final modes are
+// applied only after the digest check.
 func extractArchive(archive, directory string) (map[string]fs.FileMode, error) {
+	return extractArchiveWithSpace(archive, directory, defaultMinFreeBytes)
+}
+
+func extractArchiveWithSpace(archive, directory string, minFree uint64) (map[string]fs.FileMode, error) {
+	free, err := extractionFreeSpace(directory)
+	if err != nil {
+		return nil, err
+	}
+	if free < minFree {
+		return nil, errorf("archive.space", "the extraction target has %d bytes free, less than required %d", free, minFree)
+	}
 	file, err := os.Open(archive)
 	if err != nil {
 		return nil, err
@@ -37,6 +59,8 @@ func extractArchive(archive, directory string) (map[string]fs.FileMode, error) {
 	}
 	modes := make(map[string]fs.FileMode)
 	seen := make(map[string]bool)
+	entries := 0
+	var total int64
 	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -44,6 +68,10 @@ func extractArchive(archive, directory string) (map[string]fs.FileMode, error) {
 		}
 		if err != nil {
 			return nil, errorf("archive.read", "read the payload archive: %v", err)
+		}
+		entries++
+		if entries > maxArchiveEntries {
+			return nil, errorf("archive.entries", "the archive has more than %d entries", maxArchiveEntries)
 		}
 		clean, err := safeBundlePath(header.Name)
 		if err != nil {
@@ -53,6 +81,19 @@ func extractArchive(archive, directory string) (map[string]fs.FileMode, error) {
 			return nil, errorf("archive.duplicate", "the archive contains %s twice", clean)
 		}
 		seen[clean] = true
+		if header.Size < 0 {
+			return nil, errorf("archive.size", "the archive entry %s has a negative size", clean)
+		}
+		if header.Size > maxArchiveEntryBytes {
+			return nil, errorf("archive.size", "the archive entry %s is %d bytes, over the %d byte limit", clean, header.Size, maxArchiveEntryBytes)
+		}
+		total += header.Size
+		if total > maxArchiveBytes {
+			return nil, errorf("archive.total-size", "the archive expands to more than %d bytes", maxArchiveBytes)
+		}
+		if uint64(total) > free-minFree {
+			return nil, errorf("archive.space", "the archive would leave less than %d bytes free under %s", minFree, directory)
+		}
 		target := filepath.Join(directory, filepath.FromSlash(clean))
 		mode := header.FileInfo().Mode()
 		switch header.Typeflag {
@@ -64,27 +105,11 @@ func extractArchive(archive, directory string) (map[string]fs.FileMode, error) {
 				return nil, err
 			}
 		case tar.TypeReg, tar.TypeRegA:
-			if header.Size < 0 {
-				return nil, errorf("archive.size", "the archive entry %s has a negative size", clean)
-			}
 			if mode&(os.ModeSetuid|os.ModeSetgid) != 0 {
 				return nil, errorf("file.mode", "the archive entry %s has a setuid or setgid bit", clean)
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-				return nil, err
-			}
-			if err := os.Chmod(filepath.Dir(target), 0o700); err != nil {
-				return nil, err
-			}
-			data, err := io.ReadAll(io.LimitReader(reader, header.Size+1))
-			if err != nil {
-				return nil, err
-			}
-			if int64(len(data)) != header.Size {
-				return nil, errorf("archive.size", "the archive entry %s is truncated", clean)
-			}
-			if err := writeFileAtomic(target, data, 0o600); err != nil {
-				return nil, err
+			if err := copyReaderAtomic(target, reader, header.Size, 0o600); err != nil {
+				return nil, errorf("archive.size", "write the archive entry %s: %v", clean, err)
 			}
 			modes[clean] = mode
 		case tar.TypeSymlink, tar.TypeLink:
@@ -98,9 +123,29 @@ func extractArchive(archive, directory string) (map[string]fs.FileMode, error) {
 	return modes, nil
 }
 
+func extractionFreeSpace(directory string) (uint64, error) {
+	path := filepath.Dir(directory)
+	for {
+		var stat syscall.Statfs_t
+		err := syscall.Statfs(path, &stat)
+		if err == nil {
+			return stat.Bavail * uint64(stat.Bsize), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return 0, errorf("archive.space", "read free space under %s: %v", path, err)
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return 0, errorf("archive.space", "read free space under %s: %v", path, err)
+		}
+		path = parent
+	}
+}
+
 // archiveModes re-reads the staged payload and returns the regular-file modes.
 // The verify-files step uses it after a resume, when the extraction step's
-// in-memory map is gone.
+// in-memory map is gone. It applies the same entry and total bounds so a resume
+// cannot rebuild an unbounded map.
 func archiveModes(archive string) (map[string]fs.FileMode, error) {
 	file, err := os.Open(archive)
 	if err != nil {
@@ -114,6 +159,8 @@ func archiveModes(archive string) (map[string]fs.FileMode, error) {
 	defer gzipReader.Close()
 	reader := tar.NewReader(gzipReader)
 	modes := make(map[string]fs.FileMode)
+	entries := 0
+	var total int64
 	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -121,6 +168,20 @@ func archiveModes(archive string) (map[string]fs.FileMode, error) {
 		}
 		if err != nil {
 			return nil, err
+		}
+		entries++
+		if entries > maxArchiveEntries {
+			return nil, errorf("archive.entries", "the archive has more than %d entries", maxArchiveEntries)
+		}
+		if header.Size < 0 {
+			return nil, errorf("archive.size", "the archive entry %q has a negative size", header.Name)
+		}
+		if header.Size > maxArchiveEntryBytes {
+			return nil, errorf("archive.size", "the archive entry %q is %d bytes, over the %d byte limit", header.Name, header.Size, maxArchiveEntryBytes)
+		}
+		total += header.Size
+		if total > maxArchiveBytes {
+			return nil, errorf("archive.total-size", "the archive expands to more than %d bytes", maxArchiveBytes)
 		}
 		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
 			continue

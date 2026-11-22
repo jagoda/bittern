@@ -8,7 +8,6 @@ import (
 	"sort"
 	"time"
 
-	"bittern.invalid/agent/internal/redact"
 	"bittern.invalid/agent/internal/release"
 )
 
@@ -115,10 +114,10 @@ func (r *runner) writeHistory(record History) error {
 	if err := writeFileAtomic(p.historyPath(record.OperationID), data, 0o644); err != nil {
 		return err
 	}
-	return pruneHistory(p.history)
+	return pruneHistory(p.history, record.OperationID)
 }
 
-func pruneHistory(directory string) error {
+func pruneHistory(directory, keepID string) error {
 	names, err := historyFiles(directory)
 	if err != nil {
 		return err
@@ -127,10 +126,21 @@ func pruneHistory(directory string) error {
 		return nil
 	}
 	sort.Strings(names)
-	for _, name := range names[:len(names)-historyRetention] {
+	remove := len(names) - historyRetention
+	keepName := keepID + ".json"
+	for _, name := range names {
+		if remove == 0 {
+			break
+		}
+		if name == keepName {
+			// A clock that moved backwards must not prune the record just
+			// written. Keep it and remove the next oldest record instead.
+			continue
+		}
 		if err := os.Remove(filepath.Join(directory, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
+		remove--
 	}
 	return fsyncDir(directory)
 }
@@ -145,8 +155,4 @@ func readHistory(directory, operationID string) (*History, error) {
 		return nil, err
 	}
 	return &record, nil
-}
-
-func redactorFor(options Options) *redact.Redactor {
-	return redact.New(options.Secrets...)
 }

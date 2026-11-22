@@ -36,6 +36,7 @@ tracker.
 | EN-2 | Tests assert structure and values, not user-facing copy, because copy is expected to change | QEMU adoption fixture note, BIT-035 |
 | EN-3 | A regression test starts from the state that failed in the field, and says so | Reboot failures, field parity |
 | EN-4 | The second occurrence of a defect class triggers an audit of the class | Network path notes, reboot failures |
+| EN-5 | A planned-case matrix proves the plan runs; adversarial state proves the invariants | Update engine audit |
 | OP-1 | A repeated manual bridge becomes an idempotent script | GK41 manual bridges, BIT-016 |
 | SEC-1 | A secret has one storage location and a redaction test | ADR 0010, camera credential tests |
 | RES-1 | External facts are dated and sourced before they are relied on | Frigate assessment, AGENTS rule |
@@ -437,6 +438,22 @@ does not apply gets a one-line reason in the review.
   start-without-enable class is checked by
   [unit_enablement.py](../tests/checks/unit_enablement.py) in `make check` and by the QEMU
   post-apply reboot assertion.
+
+### EN-5 A planned-case matrix proves the plan runs; adversarial state proves the invariants
+
+- Date: 2026-11-22
+- Rule: A matrix of planned cases proves the plan runs. Only adversarial state proves the
+  invariants, so every invariant needs a test that corrupts something deliberately.
+- Evidence: [the update engine audit](notes/2026-11-22-update-engine-audit-hardening.md) found
+  restore, cleanup, bounds, journal, redaction, and pruning defects that the planned power-cut and
+  rejection matrices did not exercise. The fixes add tests that corrupt a checksum, a record, a
+  journal, an archive, a path, and a secret value on purpose.
+- Do: Add a case that removes, truncates, rewrites, or substitutes the evidence the invariant depends
+  on, and assert the engine fails closed.
+- Don't: Treat a green planned-case matrix as proof that a tampered journal, backup, archive, or
+  clock cannot cross the invariant.
+- Check: The update package adversarial tests named in the audit note and the review question "which
+  invariant does this new test corrupt?".
 
 ## Operations
 

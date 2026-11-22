@@ -3,6 +3,8 @@ package update
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -255,9 +257,23 @@ func (r *runner) bindCandidate(data []byte, signaturePath string) (*release.Mani
 	return manifest, nil
 }
 
+func validatePayloadFilename(name string) error {
+	switch name {
+	case "manifest.json", "manifest.sig", "tree", "bundle", ".", "..":
+		return errorf("payload.reserved", "the payload filename %q collides with a staging path or reserved name", name)
+	}
+	if strings.HasPrefix(name, "manifest.sig.") {
+		return errorf("payload.reserved", "the payload filename %q collides with a detached signature file", name)
+	}
+	return nil
+}
+
 func (r *runner) fetchPayload() error {
 	manifest, err := r.candidateManifest()
 	if err != nil {
+		return err
+	}
+	if err := validatePayloadFilename(manifest.Payload.Filename); err != nil {
 		return err
 	}
 	if r.options.Source == nil {
@@ -364,7 +380,7 @@ func (r *runner) extract() error {
 		return err
 	}
 	archive := filepath.Join(r.paths.stagingDir(r.journal.OperationID), manifest.Payload.Filename)
-	modes, err := extractArchive(archive, filepath.Join(r.paths.stagingDir(r.journal.OperationID), "tree"))
+	modes, err := extractArchiveWithSpace(archive, filepath.Join(r.paths.stagingDir(r.journal.OperationID), "tree"), r.options.MinFreeBytes)
 	if err != nil {
 		return err
 	}
@@ -486,19 +502,18 @@ func (r *runner) completeExistingBundle(final string) error {
 }
 
 func (r *runner) copyExtraSignatures(staging, destination string, replace bool) error {
-	entries, err := os.ReadDir(staging)
+	extra, err := readAdditionalSignatures(staging, "manifest.sig.")
 	if err != nil {
 		return err
 	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasPrefix(name, "manifest.sig.") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(staging, name))
-		if err != nil {
-			return err
-		}
+	keyIDs := make([]string, 0, len(extra))
+	for keyID := range extra {
+		keyIDs = append(keyIDs, keyID)
+	}
+	sort.Strings(keyIDs)
+	for _, keyID := range keyIDs {
+		data := extra[keyID]
+		name := "manifest.sig." + keyID
 		target := filepath.Join(destination, name)
 		if existing, err := os.ReadFile(target); err == nil && !replace {
 			if string(existing) != string(data) {
@@ -548,6 +563,12 @@ func fsyncTree(root string) error {
 }
 
 func (r *runner) backupConfig() error {
+	if err := validateConfigFile(r.options.ConfigPath, true); err != nil {
+		return err
+	}
+	if err := validateConfigFile(r.options.FrigateConfig, false); err != nil {
+		return err
+	}
 	backup := r.paths.backupDir(r.journal.OperationID)
 	if err := removeAll(backup); err != nil {
 		return err
@@ -684,6 +705,11 @@ func (r *runner) backupData() error {
 		record.Database = "snapshot"
 		record.SnapshotSHA256 = digest
 	}
+	checksums, err := writeChecksums(backup)
+	if err != nil {
+		return err
+	}
+	record.ChecksumsSHA256 = sha256Hex(checksums)
 	return writeBackupRecord(backup, record)
 }
 
@@ -908,9 +934,90 @@ func (r *runner) rollbackPointer() error {
 	return writeCurrent(r.paths.current, r.journal.PreviousGeneration)
 }
 
+// verifyBackup requires the backup record and the checksum manifest for a
+// restore, then verifies every file the manifest lists. A missing record, a
+// missing or truncated manifest, an unlisted restored file, or a digest
+// mismatch is a failed restore, never an empty backup.
+func verifyBackup(directory string) (BackupRecord, map[string]string, error) {
+	var record BackupRecord
+	recordData, err := os.ReadFile(filepath.Join(directory, "backup.json"))
+	if err != nil {
+		return record, nil, errorf("backup.record", "read the backup record under %s: %v", directory, err)
+	}
+	if err := json.Unmarshal(recordData, &record); err != nil {
+		return record, nil, errorf("backup.record", "decode the backup record under %s: %v", directory, err)
+	}
+	if record.ChecksumsSHA256 == "" {
+		return record, nil, errorf("backup.record", "the backup record under %s has no checksum digest", directory)
+	}
+	checksumsPath := filepath.Join(directory, "checksums.sha256")
+	checksums, err := os.ReadFile(checksumsPath)
+	if err != nil {
+		return record, nil, errorf("backup.checksums", "read the backup checksum manifest under %s: %v", directory, err)
+	}
+	if len(checksums) == 0 || checksums[len(checksums)-1] != '\n' {
+		return record, nil, errorf("backup.checksums", "the backup checksum manifest under %s is empty or truncated", directory)
+	}
+	if digest := sha256Hex(checksums); digest != record.ChecksumsSHA256 {
+		return record, nil, errorf("backup.checksums", "the backup checksum manifest digest %s does not match the record %s", digest, record.ChecksumsSHA256)
+	}
+	digests := make(map[string]string)
+	for index, line := range strings.Split(strings.TrimSuffix(string(checksums), "\n"), "\n") {
+		if len(line) < 67 || line[64:66] != "  " {
+			return record, nil, errorf("backup.checksums", "the backup checksum line %d is malformed", index+1)
+		}
+		if _, err := hex.DecodeString(line[:64]); err != nil {
+			return record, nil, errorf("backup.checksums", "the backup checksum line %d has an invalid digest", index+1)
+		}
+		name, err := safeBundlePath(line[66:])
+		if err != nil {
+			return record, nil, errorf("backup.checksums", "the backup checksum line %d has an unsafe path: %v", index+1, err)
+		}
+		if _, duplicate := digests[name]; duplicate {
+			return record, nil, errorf("backup.checksums", "the backup checksum manifest lists %s twice", name)
+		}
+		target := filepath.Join(directory, filepath.FromSlash(name))
+		info, err := os.Lstat(target)
+		if err != nil {
+			return record, nil, errorf("backup.checksums", "read the backed-up file %s: %v", name, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return record, nil, errorf("backup.checksums", "the backed-up path %s is not a regular file", name)
+		}
+		digest, _, err := hashFileDigest(target)
+		if err != nil {
+			return record, nil, errorf("backup.checksums", "hash the backed-up file %s: %v", name, err)
+		}
+		if actual := hex.EncodeToString(digest[:]); actual != line[:64] {
+			return record, nil, errorf("backup.checksums", "the backed-up file %s digest %s does not match %s", name, actual, line[:64])
+		}
+		digests[name] = line[:64]
+	}
+	if len(digests) == 0 {
+		return record, nil, errorf("backup.checksums", "the backup checksum manifest under %s lists no files", directory)
+	}
+	return record, digests, nil
+}
+
+func requireBackupDigest(digests map[string]string, name string) (string, error) {
+	digest, ok := digests[name]
+	if !ok {
+		return "", errorf("backup.checksums", "the backup checksum manifest does not list %s", name)
+	}
+	return digest, nil
+}
+
 func (r *runner) rollbackRestoreConfig() error {
 	backup := r.paths.backupDir(r.journal.OperationID)
-	if data, err := os.ReadFile(filepath.Join(backup, "frigate", "config.yml")); err == nil {
+	_, digests, err := verifyBackup(backup)
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(backup, "frigate", "config.yml")
+	if data, err := os.ReadFile(configPath); err == nil {
+		if _, err := requireBackupDigest(digests, "frigate/config.yml"); err != nil {
+			return err
+		}
 		if err := writeFileAtomic(r.paths.frigateConfig, data, 0o644); err != nil {
 			return err
 		}
@@ -926,12 +1033,18 @@ func (r *runner) rollbackRestoreConfig() error {
 
 func (r *runner) rollbackRestoreData() error {
 	backup := r.paths.backupDir(r.journal.OperationID)
+	record, digests, err := verifyBackup(backup)
+	if err != nil {
+		return err
+	}
 	snapshot := filepath.Join(backup, "frigate", "frigate.db")
 	if _, err := os.Stat(snapshot); errors.Is(err, os.ErrNotExist) {
-		record, readErr := r.paths.readBackup(r.journal.OperationID)
-		if readErr == nil {
-			record.Database = "no-data"
-			_ = writeBackupRecord(backup, record)
+		if record.Database == "snapshot" {
+			return errorf("rollback.data", "the backup records a database snapshot but %s is missing", snapshot)
+		}
+		record.Database = "no-data"
+		if err := writeBackupRecord(backup, record); err != nil {
+			return err
 		}
 		return nil
 	} else if err != nil {
@@ -940,18 +1053,12 @@ func (r *runner) rollbackRestoreData() error {
 	if r.options.Data == nil {
 		return errorf("rollback.data", "a Frigate snapshot exists but no data adapter is configured")
 	}
-	record, err := r.paths.readBackup(r.journal.OperationID)
+	digest, err := requireBackupDigest(digests, "frigate/frigate.db")
 	if err != nil {
 		return err
 	}
-	if record.SnapshotSHA256 != "" {
-		digest, _, err := hashFile(snapshot)
-		if err != nil {
-			return err
-		}
-		if digest != record.SnapshotSHA256 {
-			return errorf("rollback.data", "the Frigate snapshot digest does not match the backup record")
-		}
+	if record.SnapshotSHA256 != "" && record.SnapshotSHA256 != digest {
+		return errorf("rollback.data", "the Frigate snapshot digest %s does not match the backup record %s", digest, record.SnapshotSHA256)
 	}
 	return r.options.Data.Restore(snapshot)
 }

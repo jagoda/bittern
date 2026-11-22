@@ -6,7 +6,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"bittern.invalid/agent/internal/apply"
@@ -42,12 +44,29 @@ func (r *redactRedactor) String(value string) string {
 	return r.string(value)
 }
 
+// redactedError keeps the error chain for callers that classify a failure
+// while replacing the message with its redacted form.
+type redactedError struct {
+	message string
+	cause   error
+}
+
+func (e redactedError) Error() string { return e.message }
+
+func (e redactedError) Unwrap() error { return e.cause }
+
 // Install creates or resumes the one update transaction under the state root.
 func Install(options Options) (Result, error) {
 	options = normalizeOptions(options)
 	p := options.paths()
-	if err := p.ensure(); err != nil {
-		return Result{}, fmt.Errorf("update: create state root: %w", err)
+	if err := validateStateRoot(p.stateRoot); err != nil {
+		return Result{}, err
+	}
+	if err := validateConfigFile(options.ConfigPath, true); err != nil {
+		return Result{}, err
+	}
+	if err := validateConfigFile(options.FrigateConfig, false); err != nil {
+		return Result{}, err
 	}
 	lock, err := acquireLock(p.lock)
 	if err != nil {
@@ -58,6 +77,22 @@ func Install(options Options) (Result, error) {
 	journal, err := readJournal(p.journal)
 	if err != nil {
 		return Result{}, err
+	}
+	if journal != nil {
+		cfg, _, err := loadConfig(options.ConfigPath)
+		if err != nil {
+			return Result{}, err
+		}
+		if err := validateJournal(journal, cfg); err != nil {
+			result := Result{Status: ResultFailed, Failure: err.Error()}
+			if operationIDPattern.MatchString(journal.OperationID) {
+				result.OperationID = journal.OperationID
+			}
+			return result, fmt.Errorf("update: invalid journal: %w", err)
+		}
+	}
+	if err := p.ensure(); err != nil {
+		return Result{}, fmt.Errorf("update: create state root: %w", err)
 	}
 	now := options.Now().UTC()
 	if journal == nil {
@@ -73,7 +108,11 @@ func Install(options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return r.run()
+	result, err := r.run()
+	if err != nil && !errors.Is(err, ErrPowerLoss) {
+		err = redactedError{message: r.redactor.String(err.Error()), cause: err}
+	}
+	return result, err
 }
 
 func normalizeOptions(options Options) Options {
@@ -136,19 +175,13 @@ func newJournal(options Options, p paths, now time.Time) (*Journal, error) {
 	if state.CommittedGeneration != 0 && previous == 0 {
 		previous = state.CommittedGeneration
 	}
-	// The operation id names the candidate generation. The candidate is not
-	// trusted until verify-manifest, so this is a bounded peek used only for
-	// naming. A missing or malformed manifest keeps generation zero and is
-	// rejected later with the normal rule.
-	operationGeneration := int64(0)
-	if manifestBytes, _, _, err := options.Source.LoadManifest(); err == nil {
-		if parsed, err := release.ParseManifest(manifestBytes); err == nil {
-			operationGeneration = parsed.Generation
-		}
+	id, err := operationID(now, previous)
+	if err != nil {
+		return nil, err
 	}
 	return &Journal{
 		SchemaVersion:          SchemaVersion,
-		OperationID:            operationID(now, operationGeneration),
+		OperationID:            id,
 		Phase:                  PhaseInstall,
 		State:                  StateRunning,
 		Source:                 options.Source.Name(),
@@ -160,6 +193,55 @@ func newJournal(options Options, p paths, now time.Time) (*Journal, error) {
 		CreatedAt:              now.Format(time.RFC3339),
 		UpdatedAt:              now.Format(time.RFC3339),
 	}, nil
+}
+
+var operationIDPattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}Z-g[0-9]{6,}-[0-9a-f]{8}$`)
+
+// validateJournal refuses a loaded journal whose identity, phase, or plan is
+// not one this engine wrote. It runs before a step, a pointer write, or a unit
+// action, so a tampered journal cannot steer the transaction.
+func validateJournal(journal *Journal, cfg *config.Config) error {
+	if journal == nil {
+		return nil
+	}
+	if journal.SchemaVersion != SchemaVersion {
+		return errorf("journal.schema", "the journal schema version %d is not %d", journal.SchemaVersion, SchemaVersion)
+	}
+	if !operationIDPattern.MatchString(journal.OperationID) {
+		return errorf("journal.operation-id", "the journal operation id %q is not a valid operation id", journal.OperationID)
+	}
+	var expected []Step
+	switch journal.Phase {
+	case PhaseInstall:
+		expected = installSteps(cfg)
+	case PhaseRollback:
+		expected = rollbackSteps(frigateConfigured(cfg))
+	default:
+		return errorf("journal.phase", "the journal phase %q is not install or rollback", journal.Phase)
+	}
+	switch journal.State {
+	case StateRunning, StateFailed, StateRollbackFailed, StateCommitted, StateRolledBack:
+	default:
+		return errorf("journal.state", "the journal state %q is not a known state", journal.State)
+	}
+	if len(journal.Steps) == 0 {
+		return errorf("journal.steps", "the journal has no steps")
+	}
+	if len(journal.Steps) != len(expected) {
+		return errorf("journal.plan", "the journal has %d steps, not the fixed %s plan %d", len(journal.Steps), journal.Phase, len(expected))
+	}
+	for index := range expected {
+		if journal.Steps[index] != expected[index] {
+			return errorf("journal.plan", "the journal step %d is %+v, not the fixed %s step %+v", index, journal.Steps[index], journal.Phase, expected[index])
+		}
+	}
+	if journal.NextStep != "" && !hasStep(journal.Steps, journal.NextStep) {
+		return errorf("journal.next-step", "the journal next step %q is not in the plan", journal.NextStep)
+	}
+	if journal.LastCompletedStep != "" && !hasStep(journal.Steps, journal.LastCompletedStep) {
+		return errorf("journal.last-step", "the journal last step %q is not in the plan", journal.LastCompletedStep)
+	}
+	return nil
 }
 
 func loadConfig(path string) (*config.Config, []byte, error) {
@@ -179,7 +261,13 @@ func newRunner(options Options, p paths, journal *Journal, now time.Time) (*runn
 	if err != nil {
 		return nil, err
 	}
-	redactor := redact.New(options.Secrets...)
+	secrets := append([]string(nil), options.Secrets...)
+	cameraSecrets, err := apply.CameraSecretValues(cfg, options.SecretsPath)
+	if err != nil {
+		return nil, err
+	}
+	secrets = append(secrets, cameraSecrets...)
+	redactor := redact.New(secrets...)
 	r := &runner{
 		options:     options,
 		paths:       p,
@@ -423,14 +511,25 @@ func (r *runner) fail(step Step, cause error) (Result, error) {
 		r.journal.RollbackFailure = failure
 		r.journal.NextStep = step.Key
 		r.journal.UpdatedAt = r.options.Now().UTC().Format(time.RFC3339)
-		_ = writeJournal(r.paths.journal, r.journal)
+		var cleanup []error
+		if err := writeJournal(r.paths.journal, r.journal); err != nil {
+			cleanup = append(cleanup, fmt.Errorf("write rollback-failed journal: %w", err))
+		}
 		if step.Kind == kindRollbackVerify || (step.Kind == kindRollbackPointer && causesRule(cause, "rollback.previous")) {
 			manifest, manifestBytes := r.candidateForHistory()
 			record := r.buildHistory(ResultStateUnknown, manifest, manifestBytes, r.options.Now().UTC())
-			_ = r.writeHistory(record)
+			if err := r.writeHistory(record); err != nil {
+				cleanup = append(cleanup, fmt.Errorf("write state-unknown history: %w", err))
+			}
 		}
+		cleanupErr := errors.Join(cleanup...)
 		err := fmt.Errorf("update: rollback failed at %s: %w", step.Key, cause)
-		return r.result(StateRollbackFailed, err), err
+		result := r.result(StateRollbackFailed, err)
+		if cleanupErr != nil {
+			err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
+			result.RollbackFailure = strings.TrimSpace(result.RollbackFailure + "; cleanup failed: " + r.redactor.String(cleanupErr.Error()))
+		}
+		return result, err
 	}
 
 	r.journal.FailedStep = step.Key
@@ -438,10 +537,15 @@ func (r *runner) fail(step Step, cause error) (Result, error) {
 	if r.journal.State == StateCommitted {
 		r.journal.NextStep = step.Key
 		r.journal.UpdatedAt = r.options.Now().UTC().Format(time.RFC3339)
-		_ = writeJournal(r.paths.journal, r.journal)
+		journalErr := writeJournal(r.paths.journal, r.journal)
 		result := r.result(ResultCommitted, cause)
 		result.Status = ResultCommitted
-		return result, fmt.Errorf("update: committed, cleanup failed at %s: %w", step.Key, cause)
+		err := fmt.Errorf("update: committed, cleanup failed at %s: %w", step.Key, cause)
+		if journalErr != nil {
+			err = fmt.Errorf("%w; write committed cleanup journal: %v", err, journalErr)
+			result.Failure = r.redactor.String(err.Error())
+		}
+		return result, err
 	}
 	if !r.journal.LiveTouched {
 		resultKind := ResultRejected
@@ -451,17 +555,41 @@ func (r *runner) fail(step Step, cause error) (Result, error) {
 		r.journal.State = StateFailed
 		r.journal.NextStep = step.Key
 		r.journal.UpdatedAt = r.options.Now().UTC().Format(time.RFC3339)
-		_ = writeJournal(r.paths.journal, r.journal)
+		var cleanup []error
+		if err := writeJournal(r.paths.journal, r.journal); err != nil {
+			cleanup = append(cleanup, fmt.Errorf("write rejection journal: %w", err))
+		}
 		manifest, manifestBytes := r.candidateForHistory()
 		record := r.buildHistory(resultKind, manifest, manifestBytes, r.options.Now().UTC())
-		_ = r.writeHistory(record)
-		if !causesRule(cause, "journal.candidate-mismatch") {
-			_ = removeAll(r.paths.stagingDir(r.journal.OperationID))
+		if err := r.writeHistory(record); err != nil {
+			cleanup = append(cleanup, fmt.Errorf("write rejection history: %w", err))
 		}
-		_ = removeJournal(r.paths.journal)
+		if !causesRule(cause, "journal.candidate-mismatch") {
+			if err := removeAll(r.paths.stagingDir(r.journal.OperationID)); err != nil {
+				cleanup = append(cleanup, fmt.Errorf("remove staging: %w", err))
+			}
+		}
+		removeErr := removeJournal(r.paths.journal)
+		if removeErr != nil {
+			cleanup = append(cleanup, fmt.Errorf("remove journal: %w", removeErr))
+		}
+		cleanupErr := errors.Join(cleanup...)
 		result := r.result(resultKind, cause)
 		result.Status = resultKind
-		return result, fmt.Errorf("update: %s failed: %w", step.Key, cause)
+		err := fmt.Errorf("update: %s failed: %w", step.Key, cause)
+		if cleanupErr != nil {
+			detail := fmt.Sprintf("%s; rejection cleanup failed: %v", cause.Error(), cleanupErr)
+			if removeErr != nil {
+				detail += "; journal persists at " + r.paths.journal
+				result.Status = ResultFailed
+			}
+			result.Failure = r.redactor.String(detail)
+			err = fmt.Errorf("%w; rejection cleanup failed: %v", err, cleanupErr)
+			if removeErr != nil {
+				err = fmt.Errorf("%w; journal persists at %s", err, r.paths.journal)
+			}
+		}
+		return result, err
 	}
 
 	frigate := planStartsFrigate(r.journal.Steps)

@@ -33,28 +33,63 @@ func (s LocalSource) LoadManifest() ([]byte, []byte, map[string][]byte, error) {
 		}
 		return nil, nil, nil, err
 	}
-	extra := make(map[string][]byte)
-	entries, err := os.ReadDir(s.Dir)
+	extra, err := readAdditionalSignatures(s.Dir, "manifest.json.sig.")
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	prefix := "manifest.json.sig."
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasPrefix(name, prefix) || len(name) == len(prefix) {
-			continue
-		}
-		keyID := strings.TrimPrefix(name, prefix)
-		if keyID == "" || strings.ContainsAny(keyID, `/\`) {
-			return nil, nil, nil, errorf("signature.name", "the signature file %s is not named manifest.json.sig.<key_id>", name)
-		}
-		data, err := readBoundedRegular(filepath.Join(s.Dir, name), signatureLimit)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		extra[keyID] = data
-	}
 	return manifest, signature, extra, nil
+}
+
+const (
+	maxAdditionalSignatures     = 32
+	maxAdditionalSignatureBytes = 1024
+)
+
+// readAdditionalSignatures reads manifest.json.sig.<key_id> files in bounded
+// batches. The entry count and total bytes are enforced while reading, before
+// staging or a journal entry can grow with attacker-controlled signatures.
+func readAdditionalSignatures(directory, prefix string) (map[string][]byte, error) {
+	handle, err := os.Open(directory)
+	if err != nil {
+		return nil, err
+	}
+	defer handle.Close()
+	extra := make(map[string][]byte)
+	count := 0
+	total := 0
+	for {
+		entries, readErr := handle.ReadDir(64)
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasPrefix(name, prefix) || len(name) == len(prefix) {
+				continue
+			}
+			count++
+			if count > maxAdditionalSignatures {
+				return nil, errorf("signature.count", "the source has more than %d additional signature files", maxAdditionalSignatures)
+			}
+			keyID := strings.TrimPrefix(name, prefix)
+			if keyID == "" || strings.ContainsAny(keyID, `/\`) {
+				return nil, errorf("signature.name", "the signature file %s is not named manifest.json.sig.<key_id>", name)
+			}
+			data, err := readBoundedRegular(filepath.Join(directory, name), signatureLimit)
+			if err != nil {
+				return nil, err
+			}
+			total += len(data)
+			if total > maxAdditionalSignatureBytes {
+				return nil, errorf("signature.total", "the additional signature files exceed the %d byte limit", maxAdditionalSignatureBytes)
+			}
+			extra[keyID] = data
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return nil, readErr
+		}
+	}
+	return extra, nil
 }
 
 // OpenPayload opens the named archive after rejecting a symlink or a
@@ -63,6 +98,9 @@ func (s LocalSource) OpenPayload(filename string) (io.ReadCloser, error) {
 	if filename == "" || filename == "." || filename == ".." ||
 		strings.ContainsAny(filename, `/\`) || filepath.Base(filename) != filename {
 		return nil, errorf("payload.filename", "the payload filename %q is not an archive file name", filename)
+	}
+	if err := validatePayloadFilename(filename); err != nil {
+		return nil, err
 	}
 	path := filepath.Join(s.Dir, filename)
 	info, err := os.Lstat(path)

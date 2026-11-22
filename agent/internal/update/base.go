@@ -2,8 +2,10 @@ package update
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -39,7 +41,9 @@ func (c HostBaseCollector) Collect() (Base, error) {
 	if uname, err := unameRelease(); err == nil {
 		base.Kernel = uname
 	}
-	base.DockerVersion = dockerVersion(c.Docker)
+	if version, err := dockerVersion(c.Docker); err == nil {
+		base.DockerVersion = version
+	}
 	devices := c.Devices
 	if devices == nil {
 		devices = []string{"/dev/dri/renderD128"}
@@ -76,15 +80,20 @@ func unameRelease() (string, error) {
 	return builder.String(), nil
 }
 
-func dockerVersion(binary string) string {
+const defaultDockerBinary = "/usr/bin/docker"
+
+func dockerVersion(binary string) (string, error) {
 	if binary == "" {
-		binary = "docker"
+		binary = defaultDockerBinary
+	}
+	if !filepath.IsAbs(binary) {
+		return "", fmt.Errorf("docker path %q is not absolute; refusing to resolve it through PATH", binary)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	output, err := exec.CommandContext(ctx, binary, "version", "--format", "{{.Server.Version}}").Output()
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return strings.TrimSpace(string(output))
+	return strings.TrimSpace(string(output)), nil
 }
