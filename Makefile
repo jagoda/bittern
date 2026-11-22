@@ -6,18 +6,35 @@ AGENT_DIR = agent
 # shell line also contains a recursive make invocation.
 SUBMAKE = $(MAKE)
 
-# POC payload metadata. The archive name carries the release tag, or 0.0.0-poc
-# when there is no tag, plus the commit hash so a copied tarball is traceable.
-PAYLOAD_VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || printf '0.0.0-poc')
+# Beta bundle metadata. The generation is the anti-rollback counter from ADR
+# 0031 and must equal the suffix of the publish tag and the signed manifest.
+GENERATION ?= 1
+BUNDLE_VERSION ?= 0.0.0-beta.$(GENERATION)
 PAYLOAD_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || printf 'unknown')
 PAYLOAD_COMMIT_SHORT = $(shell printf '%s' '$(PAYLOAD_COMMIT)' | cut -c1-12)
-PAYLOAD_NAME ?= bittern-poc-$(PAYLOAD_VERSION)-$(PAYLOAD_COMMIT_SHORT)
 PAYLOAD_DIR = build/payload
-PAYLOAD_STAGE = $(PAYLOAD_DIR)/stage/$(PAYLOAD_NAME)
-PAYLOAD_ARCHIVE = $(PAYLOAD_DIR)/$(PAYLOAD_NAME).tar.gz
+BUNDLE_STAGE = $(PAYLOAD_DIR)/bundle
+APP_PAYLOAD = $(PAYLOAD_DIR)/bittern-app.tar.gz
+MANIFEST = $(PAYLOAD_DIR)/manifest.json
+BETA_KIT_NAME = bittern-beta-kit
+BETA_KIT_STAGE = $(PAYLOAD_DIR)/kit/$(BETA_KIT_NAME)
+BETA_KIT_ARCHIVE = $(PAYLOAD_DIR)/$(BETA_KIT_NAME).tar.gz
+BETA_KIT_SUMS = $(PAYLOAD_DIR)/SHA256SUMS
 PAYLOAD_EPOCH ?= 0
+PAYLOAD_CREATED ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+# The CI test anchor is public. Its SHA-256 is the signing key id the manifest
+# must name; the private seed is only in the protected beta environment.
+KEY_ID ?= $(shell sha256sum packaging/trust/beta-ci.pub | cut -d' ' -f1)
+# The beta compatibility rule. The provisional platform provider defines OS
+# generation 1 as the Debian 13 amd64 base, so a beta test bundle claims that one
+# generation and no wider range. See defaults/release.yaml and the phase two note.
+OS_GENERATION_MIN ?= 1
+OS_GENERATION_MAX ?= 1
+SCHEMA_MIN ?= 1
+SCHEMA_MAX ?= 2
+UPDATER_MIN ?= 1
 
-.PHONY: help check schema link-check style-check design-check bundle-check cleanup-test storage-test unit-enablement-check qemu-test qemu-firstboot qemu-firstboot-stock qemu-firstboot-clean qemu-firstboot-late-camera qemu-adoption qemu-stop assets test render detect render-poc status ui-test ui-browser-check bitternd bittern-release apply-test first-boot-poc poc-payload
+.PHONY: help check schema link-check style-check design-check bundle-check cleanup-test storage-test unit-enablement-check qemu-test qemu-firstboot qemu-firstboot-stock qemu-firstboot-clean qemu-firstboot-late-camera qemu-adoption qemu-stop assets test render detect render-poc status ui-test ui-browser-check bitternd bittern-release apply-test first-boot-poc beta-payload
 
 help:
 	@printf '%s\n' \
@@ -48,7 +65,7 @@ help:
 		'  make render-poc  Render CONFIG=... into OUT=...' \
 		'  make apply-test  Run the apply and first-boot tests' \
 		'  make first-boot-poc FIRST_BOOT_ROOT=...  Run first boot offline in a temp root' \
-		'  make poc-payload Build the POC bridge tarball under build/payload' \
+		'  make beta-payload Build the app bundle payload, manifest, beta kit and checksums' \
 		'  make bitternd    Build the daemon into agent/bin' \
 		'  make bittern-release  Build the offline release signing tool into agent/bin' \
 		'  make assets      Regenerate the embedded templates, defaults, schema, and UI assets' \
@@ -125,50 +142,80 @@ qemu-stop:
 assets:
 	@agent/scripts/sync-assets.sh
 
-# POC bridge payload. This target is deliberately not part of make check: it
-# needs the Go toolchain and produces a gitignored artifact. The two binaries
-# are static linux/amd64 builds with stripped symbols. File order and mtimes are
-# fixed so the same tree produces the same tarball.
-poc-payload: assets
+# Beta release assets. This target is deliberately not part of make check: it
+# needs the Go toolchain and produces gitignored artifacts. It builds the two
+# static linux/amd64 binaries, packs the files-only application payload and its
+# canonical manifest, then builds the unsigned beta preparation kit and its
+# published SHA256SUMS. The manifest is not signed here; sign is a separate
+# step and this target never reads a private key.
+beta-payload: assets bittern-release
 	@set -eu; \
-	stage="$(PAYLOAD_STAGE)"; \
-	stage_root="$(PAYLOAD_DIR)/stage"; \
-	archive="$(PAYLOAD_ARCHIVE)"; \
-	trap 'rm -rf "$$stage_root"' EXIT; \
-	rm -rf "$$stage_root"; \
-	mkdir -p "$$stage" "$(PAYLOAD_DIR)"; \
-	rm -f "$(PAYLOAD_DIR)"/bittern-poc-*.tar.gz; \
+	bundle="$(BUNDLE_STAGE)"; \
+	kit_root="$(abspath $(PAYLOAD_DIR))/kit"; \
+	kit="$(abspath $(BETA_KIT_STAGE))"; \
+	archive="$(BETA_KIT_ARCHIVE)"; \
+	payload_out="$(abspath $(PAYLOAD_DIR))"; \
+	trap 'rm -rf "$$bundle" "$$kit_root"' EXIT; \
+	rm -rf "$$bundle" "$$kit_root"; \
+	mkdir -p "$$bundle/usr/bin" "$$kit/templates" "$$kit/trust/release-keys" "$(PAYLOAD_DIR)"; \
 	(cd $(AGENT_DIR) && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOPROXY=off GOFLAGS=-mod=vendor \
 		$(GO) build -trimpath -buildvcs=false -ldflags='-s -w' \
-		-o "$(abspath $(PAYLOAD_STAGE))/bittern" ./cmd/bittern); \
+		-o "$$payload_out/bundle/usr/bin/bittern" ./cmd/bittern); \
 	(cd $(AGENT_DIR) && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOPROXY=off GOFLAGS=-mod=vendor \
 		$(GO) build -trimpath -buildvcs=false \
-		-ldflags='-s -w -X main.version=$(PAYLOAD_VERSION)-$(PAYLOAD_COMMIT_SHORT)' \
-		-o "$(abspath $(PAYLOAD_STAGE))/bitternd" ./cmd/bitternd); \
-	install -m 0644 agent/packaging/bittern-first-boot.service "$$stage/bittern-first-boot.service"; \
-	install -m 0644 agent/packaging/bittern-image-prewarm.service "$$stage/bittern-image-prewarm.service"; \
-	install -m 0644 agent/packaging/bittern-update.service "$$stage/bittern-update.service"; \
-	install -m 0644 agent/packaging/bitternd.service "$$stage/bitternd.service"; \
-	install -m 0755 packaging/install.sh "$$stage/install.sh"; \
-	install -m 0755 packaging/cleanup.sh "$$stage/cleanup.sh"; \
-	install -m 0755 packaging/storage-setup.sh "$$stage/storage-setup.sh"; \
-	sed -e 's/@PAYLOAD_VERSION@/$(PAYLOAD_VERSION)/g' \
+		-ldflags='-s -w -X main.version=$(BUNDLE_VERSION)-$(PAYLOAD_COMMIT_SHORT)' \
+		-o "$$payload_out/bundle/usr/bin/bitternd" ./cmd/bitternd); \
+	agent/bin/bittern-release pack --tree "$$bundle" --out "$$payload_out" \
+		--version "$(BUNDLE_VERSION)" --generation "$(GENERATION)" --channel beta \
+		--source-commit "$(PAYLOAD_COMMIT)" --key-id "$(KEY_ID)" \
+		--os-generation-min "$(OS_GENERATION_MIN)" --os-generation-max "$(OS_GENERATION_MAX)" \
+		--schema-min "$(SCHEMA_MIN)" --schema-max "$(SCHEMA_MAX)" --updater-min "$(UPDATER_MIN)" \
+		--created "$(PAYLOAD_CREATED)" --epoch "$(PAYLOAD_EPOCH)"; \
+	install -m 0755 "$$bundle/usr/bin/bittern" "$$kit/bittern"; \
+	install -m 0755 "$$bundle/usr/bin/bitternd" "$$kit/bitternd"; \
+	install -m 0644 agent/packaging/bittern-first-boot.service "$$kit/bittern-first-boot.service"; \
+	install -m 0644 agent/packaging/bittern-image-prewarm.service "$$kit/bittern-image-prewarm.service"; \
+	install -m 0644 agent/packaging/bittern-update.service "$$kit/bittern-update.service"; \
+	install -m 0644 agent/packaging/bitternd.service "$$kit/bitternd.service"; \
+	install -m 0755 packaging/install.sh "$$kit/install.sh"; \
+	install -m 0755 packaging/cleanup.sh "$$kit/cleanup.sh"; \
+	install -m 0755 packaging/storage-setup.sh "$$kit/storage-setup.sh"; \
+	install -m 0644 packaging/trust/beta-ci.pub "$$kit/trust/release-keys/$(KEY_ID).pub"; \
+	(cd templates && find . -type f ! -name README.md -print | while IFS= read -r file; do \
+		install -d -m 0755 "$$kit/templates/$$(dirname "$$file")"; \
+		install -m 0644 "$$file" "$$kit/templates/$$file"; \
+	done); \
+	sed -e 's/@BUNDLE_VERSION@/$(BUNDLE_VERSION)/g' \
+		-e 's/@GENERATION@/$(GENERATION)/g' \
 		-e 's/@PAYLOAD_COMMIT@/$(PAYLOAD_COMMIT)/g' \
 		-e 's/@PAYLOAD_COMMIT_SHORT@/$(PAYLOAD_COMMIT_SHORT)/g' \
-		packaging/README-payload.md > "$$stage/README.md"; \
-	(cd "$$stage" && \
-		sha256sum bittern bitternd bittern-first-boot.service bittern-image-prewarm.service bittern-update.service bitternd.service install.sh cleanup.sh storage-setup.sh README.md > SHA256SUMS); \
-	tar_file="$$archive.tar"; \
-	rm -f "$$tar_file" "$$archive"; \
+		-e 's/@KEY_ID@/$(KEY_ID)/g' \
+		packaging/README-beta-kit.md > "$$kit/README.md"; \
+	{ \
+		printf 'product: bittern\n'; \
+		printf 'channel: beta\n'; \
+		printf 'generation: %s\n' "$(GENERATION)"; \
+		printf 'version: %s\n' "$(BUNDLE_VERSION)"; \
+		printf 'source_commit: %s\n' "$(PAYLOAD_COMMIT)"; \
+		printf 'payload_sha256: '; sha256sum "$(APP_PAYLOAD)" | cut -d' ' -f1; \
+	} > "$$kit/VERSION"; \
+	(cd "$$kit" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sed 's|  \./|  |' > SHA256SUMS); \
+	rm -f "$$archive" "$$archive.tar"; \
 	tar --sort=name --mtime="@$(PAYLOAD_EPOCH)" --owner=0 --group=0 --numeric-owner \
-		-C "$(PAYLOAD_DIR)/stage" -cf "$$tar_file" "$(PAYLOAD_NAME)"; \
-	gzip -9n -c "$$tar_file" > "$$archive"; \
-	rm -f "$$tar_file"; \
-	printf 'payload: %s\n' "$$archive"; \
-	printf 'contents:\n'; \
-	tar -tzf "$$archive"; \
-	printf 'sha256: '; sha256sum "$$archive" | cut -d' ' -f1; \
-	printf 'size: '; du -h "$$archive" | cut -f1
+		-C "$$kit_root" -cf "$$archive.tar" "$(BETA_KIT_NAME)"; \
+	gzip -9n -c "$$archive.tar" > "$$archive"; \
+	rm -f "$$archive.tar"; \
+	(cd "$(PAYLOAD_DIR)" && sha256sum "$(BETA_KIT_NAME).tar.gz" > SHA256SUMS); \
+	printf 'payload: %s\n' "$(APP_PAYLOAD)"; \
+	sha256sum "$(APP_PAYLOAD)"; \
+	printf 'manifest: %s\n' "$(MANIFEST)"; \
+	sha256sum "$(MANIFEST)"; \
+	printf 'kit: %s\n' "$$archive"; \
+	sha256sum "$$archive"; \
+	printf 'checksums: %s\n' "$(BETA_KIT_SUMS)"; \
+	cat "$(BETA_KIT_SUMS)"; \
+	printf 'kit contents:\n'; \
+	tar -tzf "$$archive"
 
 test: assets
 	@cd $(AGENT_DIR) && CGO_ENABLED=0 GOPROXY=off GOFLAGS=-mod=vendor $(GO) test -count=1 ./...

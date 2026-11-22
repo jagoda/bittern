@@ -1,6 +1,6 @@
 # Provisional package set for bittern-os.
 # BIT-032 turns this into the mkosi package manifest. Keep it in step with
-# PACKAGES in packaging/install.sh until the POC payload ships this file.
+# PACKAGES in packaging/install.sh until the beta preparation kit ships this file.
 docker.io
 docker-cli
 docker-compose

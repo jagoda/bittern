@@ -19,7 +19,10 @@ is also the SHA-256 of this file.
 
 The private half is held only as the `BITTERN_CI_SIGNING_KEY` environment secret in `beta`, never
 at repository or organization scope. The environment stores it base64-encoded, and a workflow must
-decode it to the 32 raw seed bytes before `bittern-release sign`.
+decode it to the 32 raw seed bytes before `bittern-release sign`. The publish workflow derives the
+key id from the decoded seed and refuses to sign when it does not equal the manifest
+`signing.key_id`. The beta preparation kit installs this anchor as
+`/etc/bittern/trust/release-keys/<key_id>.pub`; nothing else installs it.
 
 Public key (hex): `1ff8f35f7c930c5d30101f1f15171818d03eec69d69d974998f6a31f0e3d6222`
 

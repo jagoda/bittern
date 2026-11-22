@@ -1,4 +1,4 @@
-# First-boot provisioning for a fresh Bittern install. The POC payload installs it.
+# First-boot provisioning for a fresh Bittern install. The beta preparation kit installs it.
 # The unit runs once before bitternd and skips itself after the marker exists.
 [Unit]
 Description=Bittern first boot provisioning

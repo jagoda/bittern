@@ -25,13 +25,16 @@ Pre-implementation. This repository contains the design documentation, schema ve
 reference validator, and the first product code: the Go configuration loader and deterministic
 renderer for networkd, nftables, dnsmasq, chrony, Frigate config, compose, and the Frigate unit,
 read-only hardware detection, the resumable apply and first-boot path, the status daemon, and the
-first-run wizard and status page skeleton with vendored HTMX. There is no image build or release
-artifact yet. CI phase one is running under
+first-run wizard and status page skeleton with vendored HTMX. There is no image build yet, and no
+release has been published. CI phase one is running under
 [ADR 0032](docs/adr/0032-continuous-integration-and-build-pipeline.md):
 [`.github/workflows/check.yml`](.github/workflows/check.yml) runs `make check` on every push to
-`main` and on every pull request, then builds an unsigned POC payload test artifact. The release
-channel is decided in [ADR 0031](docs/adr/0031-update-channel-on-github-releases.md) and is not live.
-The sequence of work to reach a first appliance release is in
+`main` and on every pull request, then builds the unsigned application payload, manifest, beta
+preparation kit, and checksums as a test artifact. The tag-driven
+[`publish.yml`](.github/workflows/publish.yml) builds the same assets, signs the manifest with the
+CI test key, and publishes a beta draft after the protected `beta` environment approval. The release
+channel is decided in [ADR 0031](docs/adr/0031-update-channel-on-github-releases.md) and no release
+is live. The sequence of work to reach a first appliance release is in
 [the implementation plan](docs/plan/implementation-plan.md). Facts about Frigate are dated
 2026-11-14 and sourced in [the Frigate assessment](docs/research/frigate-assessment.md).
 

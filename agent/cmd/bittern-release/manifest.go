@@ -118,32 +118,21 @@ func runManifest(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, "manifest", "%v", err)
 	}
-	manifest := &release.Manifest{
-		ManifestVersion: release.ManifestVersion,
-		Kind:            *kind,
-		Product:         release.Product,
+	manifest, canonical, err := buildManifest(archive, manifestSpec{
 		Version:         *version,
 		Generation:      *generation,
 		Channel:         *channel,
-		Created:         createdAt,
 		SourceCommit:    *sourceCommit,
-		Signing:         release.Signing{KeyID: *keyID},
-		Compatibility: release.Compatibility{
-			Arch:            *arch,
-			OSGenerationMin: *osGenerationMin,
-			OSGenerationMax: *osGenerationMax,
-			SchemaMin:       *schemaMin,
-			SchemaMax:       *schemaMax,
-			UpdaterMin:      *updaterMin,
-		},
-		Payload: release.Payload{
-			Filename: archive.filename,
-			Size:     archive.size,
-			SHA256:   archive.digest,
-		},
-		Files: archive.files,
-	}
-	canonical, err := manifest.Canonical()
+		KeyID:           *keyID,
+		Kind:            *kind,
+		Arch:            *arch,
+		Created:         createdAt,
+		OSGenerationMin: *osGenerationMin,
+		OSGenerationMax: *osGenerationMax,
+		SchemaMin:       *schemaMin,
+		SchemaMax:       *schemaMax,
+		UpdaterMin:      *updaterMin,
+	})
 	if err != nil {
 		return reportRejection(stderr, "manifest", err)
 	}
@@ -190,6 +179,59 @@ func runManifest(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(summary, "manifest: wrote %s\n", absoluteOut)
 	return exitOK
+}
+
+// manifestSpec is the manifest metadata the caller supplies. The payload facts
+// and file list are read from the archive so the manifest and the payload
+// cannot disagree.
+type manifestSpec struct {
+	Version         string
+	Generation      int64
+	Channel         string
+	SourceCommit    string
+	KeyID           string
+	Kind            string
+	Arch            string
+	Created         string
+	OSGenerationMin int64
+	OSGenerationMax int64
+	SchemaMin       int64
+	SchemaMax       int64
+	UpdaterMin      int64
+}
+
+// buildManifest returns the validated manifest and its canonical bytes.
+func buildManifest(archive *payloadArchive, spec manifestSpec) (*release.Manifest, []byte, error) {
+	manifest := &release.Manifest{
+		ManifestVersion: release.ManifestVersion,
+		Kind:            spec.Kind,
+		Product:         release.Product,
+		Version:         spec.Version,
+		Generation:      spec.Generation,
+		Channel:         spec.Channel,
+		Created:         spec.Created,
+		SourceCommit:    spec.SourceCommit,
+		Signing:         release.Signing{KeyID: spec.KeyID},
+		Compatibility: release.Compatibility{
+			Arch:            spec.Arch,
+			OSGenerationMin: spec.OSGenerationMin,
+			OSGenerationMax: spec.OSGenerationMax,
+			SchemaMin:       spec.SchemaMin,
+			SchemaMax:       spec.SchemaMax,
+			UpdaterMin:      spec.UpdaterMin,
+		},
+		Payload: release.Payload{
+			Filename: archive.filename,
+			Size:     archive.size,
+			SHA256:   archive.digest,
+		},
+		Files: archive.files,
+	}
+	canonical, err := manifest.Canonical()
+	if err != nil {
+		return nil, nil, err
+	}
+	return manifest, canonical, nil
 }
 
 // payloadArchive is the archive facts the manifest records and the file list.

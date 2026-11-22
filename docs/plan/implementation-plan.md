@@ -184,7 +184,7 @@ The maintainer fixed this order in session on 2026-11-22. It is recorded in
 | 1 | Decisions: ADR 0031, ADR 0032, the OQ-34 answer, and OQ-35. No release or workflow is produced. | This change |
 | 2 | CI phase one: `make check` on push and pull request, plus an unsigned bundle workflow artifact, with no secrets, no publishing, and SHA-pinned actions. | BIT-042 |
 | 3 | BIT-009 slice one: the update transaction core, the provider-supplied platform generation, the `/var/lib/bittern` write boundary, the base fingerprint, and the test-key path. The manifest, verifier and signing tool are already present. | BIT-009 |
-| 4 | Bundle packer with publish on tag: build the files-only payload and the beta preparation kit with `make beta-payload`, create the draft release, upload `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`, `bittern-beta-kit.tar.gz`, and `SHA256SUMS`, and publish the draft after approval. The CI test key signs CI bundles only; a production release still uses the offline signature from ADR 0029. | BIT-042 phase two |
+| 4 | Bundle packer with publish on tag: build the files-only payload and the beta preparation kit with `make beta-payload`, create the draft release, upload `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`, `bittern-beta-kit.tar.gz`, and `SHA256SUMS`, and publish the draft after approval. The CI test key signs CI bundles only; a production release still uses the offline signature from ADR 0029. Landed on 2026-11-22 with the packer, kit, and workflow; no release has been published. | BIT-042 phase two |
 | 5 | BIT-009 slice three: the QEMU update scenario with a valid update, an invalid signature, a digest mismatch, a downgrade, and a rollback against the published fixture on the local or bench QEMU path. QEMU stays outside CI until the KVM question is measured. | BIT-009 acceptance |
 
 1. **BIT-019 setup token QR.** Landed on 2026-11-17; the USB token copy is gone from every setup
@@ -1290,15 +1290,24 @@ defects the UI no longer has.
 ### BIT-042 Release channel and CI pipeline
 **Status.** New from the 2026-11-22 channel and CI decisions. CI phase one is step 2 in the
 [release work order](#release-work-order-2026-11-22) and landed on 2026-11-22; phase two is step 4
-and remains open. The workflow is [`.github/workflows/check.yml`](../../.github/workflows/check.yml):
-`make check` on push to `main` and on every pull request, `contents: read`, no secrets, no publish,
-and GitHub-owned actions pinned by full commit SHA. It builds the current POC payload as
-`bittern-poc-unsigned-test-build` with five-day retention, because the bundle packer and
-`make beta-payload` do not exist yet; the app bundle artifact arrives with the packer. Green runs
-are [the branch run](https://github.com/jagoda/bittern/actions/runs/45035805336) and
-[the main run](https://github.com/jagoda/bittern/actions/runs/45035992353). The first run exposed a
-chrony check defect that only appears on a host with an AppArmor-confined chronyd; it is fixed
-without skipping the check. Details, pins, and limits are in
+and landed on 2026-11-22 without publishing a release. The check workflow is
+[`.github/workflows/check.yml`](../../.github/workflows/check.yml):
+`make check` on push to `main`, on every pull request, and as the reusable check for publication,
+`contents: read`, no secrets, no publish, and GitHub-owned actions pinned by full commit SHA. Its
+build job now produces the unsigned beta application payload, canonical manifest, preparation kit,
+and checksums as `bittern-beta-unsigned-test-build` with five-day retention.
+[`.github/workflows/publish.yml`](../../.github/workflows/publish.yml) runs on an `app-beta-*` tag,
+validates the exact tag rule with the Go parser before any check or build, signs the manifest with
+the `beta` environment CI test key, creates a draft with exactly the five release assets, and
+publishes it after the protected-environment approval. `make beta-payload` supersedes
+`make poc-payload`. The packer, kit, tag parser, and workflow are not release evidence: no tag was
+created, no release was published, and the QEMU update scenario remains step 5. Details, the
+compatibility rule, and the unproven paths are in
+[the phase two note](../notes/2026-11-22-beta-payload-and-publish.md). Green phase one runs are
+[the branch run](https://github.com/jagoda/bittern/actions/runs/45035805336) and
+[the main run](https://github.com/jagoda/bittern/actions/runs/45035992353). The first phase one run
+exposed a chrony check defect that only appears on a host with an AppArmor-confined chronyd; it is
+fixed without skipping the check. Details, pins, and limits are in
 [the CI phase one note](../notes/2026-11-22-ci-phase-one.md).
 **Goal.** Put the release channel on GitHub Releases and introduce CI without moving release signing
 into CI, so checks run on every change, the app bundle can be built, signed with a test key, and

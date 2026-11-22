@@ -1,4 +1,4 @@
-# Status and TLS UI daemon unit. The POC payload installs it; the product image has not
+# Status and TLS UI daemon unit. The beta preparation kit installs it; the product image has not
 # fixed the final paths yet.
 # The apply implementation must add only the writable paths and capabilities it
 # actually needs instead of weakening this baseline.

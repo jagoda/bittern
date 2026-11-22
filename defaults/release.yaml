@@ -17,3 +17,17 @@ release:
   # Interval between update checks when checking is enabled. This does not
   # decide whether a device checks automatically; that policy remains OQ-12.
   check_interval: 24h
+  # Beta test bundle compatibility. The platform provider reads
+  # /usr/lib/bittern/platform.json and is provisional until the image ADR fixes
+  # the metadata layout. No image writes the file yet, so a beta test bundle
+  # claims one OS generation only: the Debian 13 amd64 base the kit and the
+  # bench runs use. It must not claim a 0 to maximum range, which would silently
+  # accept an unknown or untested platform. When the image writes generation 1
+  # metadata and a later OS generation is tested, widen this range in a reviewed
+  # change and re-date the evidence. See the phase two note for the reasoning.
+  beta_bundle:
+    os_generation_min: 1
+    os_generation_max: 1
+    schema_min: 1
+    schema_max: 2
+    updater_min: 1

@@ -28,12 +28,19 @@ const usage = `usage:
                           --schema-min N --schema-max N --updater-min N --out PATH
                           [--channel stable|beta] [--kind KIND] [--arch ARCH] [--created RFC3339]
                           [--dry-run]
+  bittern-release pack --tree DIR --out DIR --version V --generation N
+                          --source-commit HEX --key-id HEX
+                          --os-generation-min N --os-generation-max N
+                          --schema-min N --schema-max N --updater-min N
+                          [--channel beta|stable] [--created RFC3339] [--epoch N]
+                          [--dry-run]
+  bittern-release tag TAG
   bittern-release key-id KEYFILE [--pub-dir DIR]
 
 Bittern release signing and verification for an airgapped signing machine. The
 signed object is the canonical release manifest from ADR 0029, never the bundle
-archive. init and sign run on the signing machine, manifest runs on the build
-host, and verify runs anywhere with the pinned trust store.
+archive. init and sign run on the signing machine, pack and manifest run on the
+build host, and verify runs anywhere with the pinned trust store.
 
 Exit codes:
   0  success
@@ -80,6 +87,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runVerify(args[1:], stdout, stderr)
 	case "manifest":
 		return runManifest(args[1:], stdout, stderr)
+	case "pack":
+		return runPack(args[1:], stdout, stderr)
+	case "tag":
+		return runTag(args[1:], stdout, stderr)
 	case "key-id":
 		return runKeyID(args[1:], stdout, stderr)
 	case "help", "-h", "--help":

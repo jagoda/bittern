@@ -4,7 +4,7 @@
 - Status: checklist for the first hardware run, not a product install
 - Hardware: Minisforum GK41, Celeron J4125, 8 GB, dual Realtek Gigabit Ethernet, UHD 600,
   USB Coral, 1 TB USB SATA drive
-- Payload: `make poc-payload` on the development machine
+- Payload: `make beta-payload` on the development machine
 - Config reference: [poc-gk41.yaml](../../schema/examples/poc-gk41.yaml)
 - Related: [ADR 0005](../adr/0005-dual-nic-isolated-camera-network.md),
   [ADR 0014](../adr/0014-dedicated-recording-drive.md),
@@ -36,9 +36,11 @@ cleanup on this machine, and the Level 2 release gate on a fresh Debian install.
       the appliance:
 
 ```sh
-make poc-payload
-sha256sum build/payload/bittern-poc-*.tar.gz
+make beta-payload
+sha256sum build/payload/bittern-beta-kit.tar.gz
 ```
+
+Copy `build/payload/bittern-beta-kit.tar.gz` and `build/payload/SHA256SUMS` to the appliance.
 
 ## Install Debian 13
 
@@ -78,14 +80,17 @@ the drive.
 - [ ] Compare the SHA-256 on the appliance with the value printed on the development machine:
 
 ```sh
-sha256sum bittern-poc-*.tar.gz
+sha256sum -c SHA256SUMS
 ```
+
+Expected: `bittern-beta-kit.tar.gz: OK`. The kit is unsigned, so the published checksum and release
+immutability are the integrity check.
 
 - [ ] Unpack and inspect the contents:
 
 ```sh
-tar -xzf bittern-poc-*.tar.gz
-cd bittern-poc-*/
+tar -xzf bittern-beta-kit.tar.gz
+cd bittern-beta-kit
 ls -l
 ```
 

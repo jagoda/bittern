@@ -24,10 +24,10 @@ Out of scope:
 
 ## Package set
 
-[packages.txt](packages.txt) is the provisional package set for the image and the POC payload. It
-includes `qrencode`, which renders the first-boot setup QR from standard input, and `sqlite3`, which
-the update transaction uses for the Frigate database snapshot. The token is never a command argument
-or a file. Keep the list in step with `PACKAGES` in
+[packages.txt](packages.txt) is the provisional package set for the image and the beta preparation
+kit. It includes `qrencode`, which renders the first-boot setup QR from standard input, and
+`sqlite3`, which the update transaction uses for the Frigate database snapshot. The token is never a
+command argument or a file. Keep the list in step with `PACKAGES` in
 [packaging/install.sh](../packaging/install.sh) until BIT-032 creates the mkosi manifest.
 
 Status: not implemented yet.

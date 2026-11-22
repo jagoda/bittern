@@ -1,18 +1,28 @@
 # CI phase one
 
 - Date: 2026-11-22
-- Status: implementation note. CI phase one is running. Phase two is still open. No release was
-  published, no signing key was created, and no publish path exists.
+- Status: implementation note. CI phase one is running. Phase two landed on 2026-11-22 and is
+  recorded in [the phase two note](2026-11-22-beta-payload-and-publish.md). No release was
+  published, no signing key was created in the repository, and the QEMU update scenario is still
+  open.
 - Related: [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md),
   [ADR 0031](../adr/0031-update-channel-on-github-releases.md),
   [BIT-042](../plan/implementation-plan.md#bit-042-release-channel-and-ci-pipeline),
   [workflow](../../.github/workflows/check.yml),
   [channel, CI, and publication note](2026-11-22-channel-ci-and-publication.md)
 
+## Phase two update
+
+The build step recorded below is historical. Phase two replaces `make poc-payload` with
+`make beta-payload` and adds [the publish workflow](../../.github/workflows/publish.yml). The phase
+one check job and its environment setup remain the single definition of green; the publish workflow
+calls this workflow as a reusable check. See
+[the phase two note](2026-11-22-beta-payload-and-publish.md) for what landed and what is unproven.
+
 ## What landed
 
-[`.github/workflows/check.yml`](../../.github/workflows/check.yml) is the phase one workflow. It is
-the only workflow in the repository.
+[`.github/workflows/check.yml`](../../.github/workflows/check.yml) was the phase one workflow and,
+at phase one, the only workflow in the repository.
 
 | Property | Value |
 | --- | --- |

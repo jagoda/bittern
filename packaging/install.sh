@@ -1,10 +1,10 @@
 #!/bin/sh
-# Bittern POC payload installer for a manual Debian 13 amd64 test machine.
+# Bittern beta preparation kit installer for a manual Debian 13 amd64 test machine.
 #
-# This is a proof-of-concept bridge, not the product image installer. It
-# verifies the bundled payload, installs only the packages the POC needs,
-# installs the two static binaries and units, and leaves first boot to systemd
-# on the next boot. Every step is idempotent.
+# This is a beta bootstrap, not the product image installer. It verifies the
+# bundled kit, installs the packages the beta device needs, installs the two
+# static binaries, the units, and the CI test trust anchor, and leaves first
+# boot to systemd on the next boot. Every step is idempotent.
 set -eu
 
 # Debian 13 splits the Docker CLI out of docker.io into docker-cli. docker.io
@@ -12,7 +12,7 @@ set -eu
 # /usr/bin/docker absent. Keep docker-cli explicit.
 #
 # Debian's systemd-networkd no longer writes /etc/resolv.conf when
-# systemd-resolved is absent. The POC payload must install the resolver and let
+# systemd-resolved is absent. The beta kit must install the resolver and let
 # it take its DNS servers from the lan0 DHCP lease; do not hard-code a public
 # resolver.
 PACKAGES='docker.io docker-cli docker-compose nftables dnsmasq chrony curl ca-certificates systemd-resolved qrencode sqlite3'
@@ -44,7 +44,8 @@ usage() {
     cat <<'EOF'
 usage: sudo ./install.sh [--dry-run] [--os-release PATH]
 
-Install the Bittern POC payload on a manual Debian 13 amd64 test machine.
+Install the Bittern beta preparation kit on a manual Debian 13 amd64 test
+machine.
 
   --dry-run          verify the payload and print every planned action
   --os-release PATH  read Debian identity from PATH instead of /etc/os-release
@@ -168,12 +169,12 @@ verify_payload() {
         README.md \
         SHA256SUMS
     do
-        [ -f "$SCRIPT_DIR/$_file" ] || die "payload is incomplete: missing $_file"
+        [ -f "$SCRIPT_DIR/$_file" ] || die "kit is incomplete: missing $_file"
     done
 
     log "verifying bundled SHA256SUMS"
     (cd "$SCRIPT_DIR" && sha256sum --check --strict SHA256SUMS) ||
-        die "bundled checksums do not match; re-copy the payload"
+        die "bundled checksums do not match; re-copy the kit"
 }
 
 install_packages() {
@@ -835,13 +836,13 @@ start_docker() {
         die "the Docker CLI is missing at /usr/bin/docker. Debian 13 provides it in the docker-cli package; install docker-cli before continuing."
     fi
     if ! /usr/bin/docker --version >/dev/null 2>&1; then
-        die "docker --version failed. The POC needs the Debian docker-cli package at /usr/bin/docker; install it before continuing."
+        die "docker --version failed. The beta device needs the Debian docker-cli package at /usr/bin/docker; install it before continuing."
     fi
     if [ ! -x /usr/bin/docker-compose ]; then
-        die "the standalone Compose binary is missing at /usr/bin/docker-compose. The POC needs Docker Compose v2 from the Debian docker-compose package; install it before continuing."
+        die "the standalone Compose binary is missing at /usr/bin/docker-compose. The beta device needs Docker Compose v2 from the Debian docker-compose package; install it before continuing."
     fi
     if ! /usr/bin/docker-compose version >/dev/null 2>&1; then
-        die "docker-compose version failed. The POC needs Docker Compose v2 from the Debian docker-compose package at /usr/bin/docker-compose; install it before continuing."
+        die "docker-compose version failed. The beta device needs Docker Compose v2 from the Debian docker-compose package at /usr/bin/docker-compose; install it before continuing."
     fi
     log "docker: $(/usr/bin/docker --version | sed -n '1p')"
     log "docker-compose: $(/usr/bin/docker-compose version | sed -n '1p')"
@@ -950,16 +951,28 @@ install_files() {
     run install -d -o root -g root -m 0750 /etc/bittern /var/lib/bittern ||
         die "could not create /etc/bittern and /var/lib/bittern"
 
+    if [ -d "$SCRIPT_DIR/trust/release-keys" ]; then
+        run install -d -o root -g root -m 0755 /etc/bittern/trust/release-keys ||
+            die "could not create /etc/bittern/trust/release-keys"
+        for _trust_key in "$SCRIPT_DIR"/trust/release-keys/*.pub; do
+            [ -f "$_trust_key" ] || continue
+            run install -o root -g root -m 0644 "$_trust_key" \
+                "/etc/bittern/trust/release-keys/$(basename "$_trust_key")" ||
+                die "could not install the CI test anchor $(basename "$_trust_key")"
+        done
+    fi
+
     run systemctl daemon-reload || die "systemctl daemon-reload failed"
 }
 
 print_notes() {
     cat <<'EOF'
 
-POC WARNING
-This payload is a proof-of-concept bridge for disposable test hardware. It is
-not a product image, has no update or reset path, and does not install
-unattended upgrades. Do not run it on a machine you cannot reinstall.
+BETA PREPARATION KIT WARNING
+This kit is an unsigned beta bootstrap for disposable test hardware. It is not
+an update payload, not a product image, and does not install unattended
+upgrades. It installs only the CI test anchor, never a release anchor. Do not
+run it on a machine you cannot reinstall.
 
 RECORDING DRIVE
 The installer runs the payload's storage-setup.sh in non-destructive mode
@@ -1022,9 +1035,9 @@ check_host
 verify_payload
 
 if [ "$DRY_RUN" -eq 1 ]; then
-    log "Bittern POC payload installer: dry run on $(uname -m) with $OS_RELEASE"
+    log "Bittern beta preparation kit installer: dry run on $(uname -m) with $OS_RELEASE"
 else
-    log "Bittern POC payload installer: $OS_RELEASE on $(uname -m)"
+    log "Bittern beta preparation kit installer: $OS_RELEASE on $(uname -m)"
 fi
 
 install_packages

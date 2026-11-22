@@ -1,6 +1,6 @@
 # Fixed app bundle update worker. The agent writes /var/lib/bittern/update/request.json and starts
 # this unit. The unit takes no arguments, no environment file, and no user-controlled property; the
-# helper reads the request record and exits. The POC payload installs it and the image keeps it.
+# helper reads the request record and exits. The beta preparation kit installs it and the image keeps it.
 [Unit]
 Description=Bittern app bundle update
 Documentation=file:/usr/share/doc/bittern/README.md

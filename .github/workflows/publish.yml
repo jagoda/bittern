@@ -1,0 +1,236 @@
+# CI phase two, per ADR 0031 and ADR 0032. A beta application bundle tag runs
+# the phase one checks, builds the unsigned assets, signs the manifest with the
+# CI-only test key, uploads exactly the five release assets to a draft, and
+# publishes the draft after the protected beta environment approval.
+#
+# No release private key is present. The CI test key is a beta environment
+# secret and its public half is packaging/trust/beta-ci.pub. QEMU and hardware
+# tests stay outside CI.
+name: publish
+
+on:
+  push:
+    # The glob is deliberately broad. The first job applies the exact tag rule
+    # with the Go parser before any check or release build can run.
+    tags:
+      - 'app-beta-*'
+
+# One run per tag, and never cancel a run that may be waiting for approval.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# Least privilege. Only the publish job gets contents: write.
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    name: validate tag
+    runs-on: ubuntu-24.04
+    outputs:
+      generation: ${{ steps.parse.outputs.generation }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from agent/go.mod
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+
+      # The first command that can fail is the repository's own tag parser. It
+      # rejects uppercase hex, five or seven characters, an empty suffix, a
+      # non-hex character, and generation zero. No release asset is built before
+      # this passes.
+      - name: Parse the tag with the repository rule
+        id: parse
+        run: |
+          set -eu
+          make bittern-release
+          generation="$(agent/bin/bittern-release tag "$GITHUB_REF_NAME")"
+          printf 'generation=%s\n' "$generation" >> "$GITHUB_OUTPUT"
+
+  checks:
+    name: checks and unsigned test build
+    needs: tag
+    # The reusable phase one workflow is the single definition of green. It
+    # runs make check and builds the unsigned payload, manifest, kit, and
+    # checksums in the same run, so there is no second copy of the check logic.
+    uses: ./.github/workflows/check.yml
+    with:
+      generation: ${{ needs.tag.outputs.generation }}
+
+  publish:
+    name: sign and publish draft
+    needs: [tag, checks]
+    runs-on: ubuntu-24.04
+    # The beta environment carries the required reviewer, the app-beta-* tag
+    # policy, and the BITTERN_CI_SIGNING_KEY secret. The job cannot start before
+    # the approval, so the draft and the visible publish both happen after it.
+    environment:
+      name: beta
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from agent/go.mod
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+
+      - name: Download the unsigned build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bittern-beta-unsigned-test-build
+          path: build/assets
+
+      - name: Build the release tool
+        run: make bittern-release
+
+      # The generation is the anti-rollback counter from ADR 0031. It must equal
+      # both the tag suffix and the manifest field, or the release is wrong and
+      # must not be signed. The source commit check ties the manifest to the
+      # commit the tag points at.
+      - name: Check the asset set, generation, and source commit
+        id: manifest
+        env:
+          TAG_GENERATION: ${{ needs.tag.outputs.generation }}
+        run: |
+          set -eu
+          for asset in manifest.json bittern-app.tar.gz bittern-beta-kit.tar.gz SHA256SUMS; do
+            test -f "build/assets/$asset" || {
+              printf 'the unsigned build is missing %s\n' "$asset" >&2
+              exit 1
+            }
+          done
+          manifest_generation="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["generation"])' build/assets/manifest.json)"
+          if [ "$manifest_generation" != "$TAG_GENERATION" ]; then
+            printf 'the manifest generation %s does not equal the tag generation %s\n' \
+              "$manifest_generation" "$TAG_GENERATION" >&2
+            exit 1
+          fi
+          manifest_commit="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["source_commit"])' build/assets/manifest.json)"
+          if [ "$manifest_commit" != "$GITHUB_SHA" ]; then
+            printf 'the manifest source_commit %s does not equal the tagged commit %s\n' \
+              "$manifest_commit" "$GITHUB_SHA" >&2
+            exit 1
+          fi
+          payload_sha256="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["payload"]["sha256"])' build/assets/manifest.json)"
+          printf '%s  bittern-app.tar.gz\n' "$payload_sha256" | (cd build/assets && sha256sum -c -)
+          (cd build/assets && sha256sum -c SHA256SUMS)
+          printf 'generation=%s\n' "$manifest_generation" >> "$GITHUB_OUTPUT"
+
+      # The secret is base64-encoded raw seed bytes. It is decoded into the
+      # runner's temporary directory with mode 0600, used once, and removed by
+      # the trap. The always() step below covers a job-level failure as well.
+      - name: Sign the manifest with the CI test key
+        env:
+          BITTERN_CI_SIGNING_KEY: ${{ secrets.BITTERN_CI_SIGNING_KEY }}
+        run: |
+          set -eu
+          key_path="$RUNNER_TEMP/bittern-ci-signing-key"
+          cleanup() { rm -f "$key_path"; }
+          trap cleanup EXIT
+          printf '%s' "$BITTERN_CI_SIGNING_KEY" | base64 --decode > "$key_path"
+          chmod 600 "$key_path"
+          key_size="$(wc -c < "$key_path" | tr -d ' ')"
+          if [ "$key_size" -ne 32 ]; then
+            printf 'the decoded CI key is %s bytes, not the 32-byte Ed25519 seed\n' "$key_size" >&2
+            exit 1
+          fi
+          key_id="$(agent/bin/bittern-release key-id "$key_path" | sed -n 's/^key-id: key id //p')"
+          manifest_key_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["signing"]["key_id"])' build/assets/manifest.json)"
+          if [ "$key_id" != "$manifest_key_id" ]; then
+            printf 'the CI key id %s does not equal the manifest signing key id %s\n' \
+              "$key_id" "$manifest_key_id" >&2
+            exit 1
+          fi
+          agent/bin/bittern-release sign build/assets/manifest.json --key "$key_path" --yes
+          rm -f "$key_path"
+
+      - name: Remove the decoded key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/bittern-ci-signing-key"
+
+      - name: Verify the signature with the CI test anchor
+        run: |
+          set -eu
+          key_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["signing"]["key_id"])' build/assets/manifest.json)"
+          install -d -m 0755 "$RUNNER_TEMP/beta-trust"
+          install -m 0644 packaging/trust/beta-ci.pub "$RUNNER_TEMP/beta-trust/$key_id.pub"
+          agent/bin/bittern-release verify \
+            build/assets/manifest.json \
+            build/assets/manifest.json.sig \
+            --trust-dir "$RUNNER_TEMP/beta-trust"
+
+      - name: Write the release notes
+        env:
+          TAG_GENERATION: ${{ needs.tag.outputs.generation }}
+        run: |
+          set -eu
+          {
+            printf 'Bittern beta generation %s\n\n' "$TAG_GENERATION"
+            printf -- '- Channel: beta\n'
+            printf -- '- Generation: %s\n' "$TAG_GENERATION"
+            printf -- '- Source commit: %s\n' "$GITHUB_SHA"
+            printf -- '- Tag: %s\n\n' "$GITHUB_REF_NAME"
+            printf 'Assets:\n'
+            printf -- '- manifest.json\n'
+            printf -- '- manifest.json.sig\n'
+            printf -- '- bittern-app.tar.gz\n'
+            printf -- '- bittern-beta-kit.tar.gz\n'
+            printf -- '- SHA256SUMS\n\n'
+            printf 'The beta preparation kit is not an update payload. It is unsigned, must be verified with its published SHA-256 before running, and installs only the CI test anchor.\n\n'
+            printf 'Verify the kit checksum after download:\n\n'
+            printf '```sh\nsha256sum -c SHA256SUMS\n```\n'
+          } > "$RUNNER_TEMP/release-notes.md"
+
+      - name: Create the draft release with exactly five assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            build/assets/manifest.json \
+            build/assets/manifest.json.sig \
+            build/assets/bittern-app.tar.gz \
+            build/assets/bittern-beta-kit.tar.gz \
+            build/assets/SHA256SUMS
+
+      - name: Confirm the draft carries exactly the five assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          actual="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | LC_ALL=C sort)"
+          expected="$(printf '%s\n' \
+            manifest.json \
+            manifest.json.sig \
+            bittern-app.tar.gz \
+            bittern-beta-kit.tar.gz \
+            SHA256SUMS | LC_ALL=C sort)"
+          if [ "$actual" != "$expected" ]; then
+            printf 'the draft asset set is wrong\nexpected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
+            exit 1
+          fi
+
+      # The environment approval already happened, and the asset set is
+      # complete. This is the single visible flip from draft to published.
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false

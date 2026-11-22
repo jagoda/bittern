@@ -1,19 +1,30 @@
 # CI phase one, per ADR 0032 and BIT-042. The workflow runs the same offline
-# `make check` target a developer runs, then builds the current POC payload as
-# an unsigned test artifact. It uses no secrets, holds no write permission, and
-# publishes nothing. QEMU and hardware tests stay on the local or bench path.
+# `make check` target a developer runs, then builds the beta application payload,
+# canonical manifest, beta preparation kit, and checksums as an unsigned test
+# artifact. It uses no secrets, holds no write permission, and publishes nothing.
+# It is also the reusable check for the tag-driven publish workflow, so phase two
+# runs the same checks instead of a second copy of them.
 name: check
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+    inputs:
+      generation:
+        description: Application bundle generation for a tag-driven build
+        required: false
+        type: string
+        default: "1"
 
-# One run per ref. A new push cancels the older run on the same branch or pull
-# request instead of leaving it to finish against a superseded commit.
+# One run per ref and event. A new push cancels the older run on the same branch
+# or pull request instead of leaving it to finish against a superseded commit.
+# A reusable run is not cancelled, so the calling publish workflow keeps its
+# approval slot.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 # Least privilege: read the repository and nothing else. Phase two adds
 # contents: write to its publish job only.
@@ -93,29 +104,36 @@ jobs:
           # The module is under agent/, so the cache key uses its go.sum.
           cache-dependency-path: agent/go.sum
 
-      # The bundle packer and make beta-payload do not exist yet, so this builds
-      # the target that does exist: the POC payload tarball holding the bittern
-      # and bitternd binaries, the units, and the packaging scripts. It is a
-      # test build, not a release payload. The app bundle artifact arrives with
-      # the bundle packer in BIT-042 phase two.
-      - name: Build the POC payload
-        run: make poc-payload
+      # The bundle packer and make beta-payload build the files-only application
+      # payload, its canonical manifest, the beta preparation kit, and the kit
+      # checksums. The manifest is unsigned. This is a test build, not a release;
+      # the publish workflow signs the manifest with the CI test key after this
+      # job passes and uploads it to a draft release.
+      - name: Build the beta assets
+        env:
+          GENERATION: ${{ inputs.generation || '1' }}
+        run: make beta-payload GENERATION="$GENERATION"
 
       - name: Record what the artifact is
         run: |
           printf '%s\n' \
             '### Unsigned test build' \
             '' \
-            'This artifact is an unsigned test build of the current POC payload. It is not' \
-            'a release payload: it is unsigned, unpublished, and no device should trust it.' \
-            'The app bundle artifact arrives with the bundle packer in BIT-042 phase two.' \
+            'This artifact is an unsigned test build of the beta application payload, its' \
+            'canonical manifest, the beta preparation kit, and the kit checksums. It is not' \
+            'a signed release: the manifest is unsigned, it is unpublished, and no device' \
+            'should trust it.' \
             >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the unsigned test build
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: bittern-poc-unsigned-test-build
-          path: build/payload/bittern-poc-*.tar.gz
+          name: bittern-beta-unsigned-test-build
+          path: |
+            build/payload/bittern-app.tar.gz
+            build/payload/bittern-beta-kit.tar.gz
+            build/payload/manifest.json
+            build/payload/SHA256SUMS
           if-no-files-found: error
           # A test build is worth a review or a bench download, not long
           # storage.

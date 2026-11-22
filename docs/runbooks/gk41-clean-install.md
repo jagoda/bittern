@@ -7,7 +7,7 @@
   the checklist for the Level 2 release gate, not a product install
 - Hardware: Minisforum GK41, Celeron J4125, 8 GB, dual Realtek Gigabit Ethernet, UHD 600,
   USB Coral, 1 TB recording drive, Amcrest IP4M-1026EB camera on DHCP on `10.77.0.0/24`
-- Payload: `make poc-payload` from the commit under test
+- Payload: `make beta-payload` from the commit under test
 - Related: [GK41 POC runbook](gk41-poc.md),
   [GK41 hardware run](../notes/2026-11-15-gk41-hardware-run.md),
   [first-boot NIC roles](../notes/2026-11-15-firstboot-nic-roles.md),
@@ -268,13 +268,14 @@ media directory that is sitting on the OS drive.
 
 ### Run the cleanup
 
-Extract the payload if it is not already unpacked, then inspect the plan. The plan lists the units,
+Extract the kit if it is not already unpacked, then inspect the plan. The plan lists the units,
 binaries, configuration trees, generated files, conffile restores, containers, and images it will
 touch.
 
 ```sh
-tar -xzf bittern-poc-*.tar.gz
-cd bittern-poc-*/
+sha256sum -c SHA256SUMS
+tar -xzf bittern-beta-kit.tar.gz
+cd bittern-beta-kit
 sudo ./cleanup.sh | tee /tmp/bittern-cleanup-plan.txt
 ```
 
@@ -380,17 +381,19 @@ above. Network and DNS are configured by `install-network-bootstrap`, not by an 
 On the development machine:
 
 ```sh
-make poc-payload
-sha256sum build/payload/bittern-poc-*.tar.gz
+make beta-payload
+sha256sum build/payload/bittern-beta-kit.tar.gz
 ```
 
-On the appliance, compare the SHA-256 with the development machine:
+Copy `build/payload/bittern-beta-kit.tar.gz` and `build/payload/SHA256SUMS` to the appliance. Verify
+the copy there. The kit is unsigned, so the published checksum is its integrity check.
 
 ```sh
-sha256sum bittern-poc-*.tar.gz
+sha256sum -c SHA256SUMS
 ```
 
-Expected: the two hashes match.
+Expected: `bittern-beta-kit.tar.gz: OK`, and the digest equals the one printed on the development
+machine.
 
 ### Network bootstrap before apt
 
@@ -419,8 +422,8 @@ does not require the network to be up yet.
 ### Run the installer
 
 ```sh
-tar -xzf bittern-poc-*.tar.gz
-cd bittern-poc-*/
+tar -xzf bittern-beta-kit.tar.gz
+cd bittern-beta-kit
 sudo ./install.sh --dry-run
 sudo ./install.sh
 ```

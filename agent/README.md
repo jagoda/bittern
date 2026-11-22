@@ -167,15 +167,18 @@ implementation of the scheme.
 | Command | Runs on | What it does |
 | --- | --- | --- |
 | `init --key PATH [--pub-dir DIR]` | signing machine | Generate a 32-byte Ed25519 seed with `crypto/rand`, write it mode 0600, and write `<key_id>.pub` (32 raw bytes, mode 0644) into `DIR` |
-| `manifest --payload ARCHIVE ...` | build host | Build the canonical manifest from the payload archive: digest, size and the regular-file list with modes, sorted by path |
+| `pack --tree DIR --out DIR ...` | build host | Pack a built file tree into the deterministic files-only `bittern-app.tar.gz` and its canonical `manifest.json`; no private key is needed |
+| `manifest --payload ARCHIVE ...` | build host | Build the canonical manifest from an existing payload archive: digest, size and the regular-file list with modes, sorted by path |
 | `sign MANIFEST.json --key PATH` | signing machine | Print the fields, require `sign` or the version, sign the domain-prefixed canonical bytes, write `MANIFEST.json.sig` (64 bytes), then verify its own output |
 | `verify MANIFEST.json MANIFEST.json.sig --trust-dir DIR` | build host or any machine | Verify with the production trust-store reader, the same one the appliance uses |
+| `tag TAG` | build host or workflow | Validate an ADR 0031 beta tag with the Go rule and print its generation; reject anything that is not `app-beta-` plus six lowercase hex characters |
 | `key-id KEYFILE [--pub-dir DIR]` | signing machine | Re-derive the key id, public key and anchor path after a move |
 
 Every command refuses an existing output without `--force` where replacement is meaningful, and
-`init`, `manifest` and `sign` have `--dry-run`; `manifest --out -` writes the canonical bytes to
-stdout and `--dry-run` checks without writing. `manifest` rewrites only when the bytes changed, so a
-second run reports `unchanged`.
+`init`, `manifest`, `pack` and `sign` have `--dry-run`; `manifest --out -` writes the canonical
+bytes to stdout and `--dry-run` checks without writing. `manifest` rewrites only when the bytes
+changed, so a second run reports `unchanged`. `pack` writes `bittern-app.tar.gz` and
+`manifest.json` in the output directory and leaves signing to `sign`.
 
 `init` and `sign` refuse a key file that is not exactly 32 bytes, not a regular file, a symlink, owned
 by another user, or readable by group or others. `sign` also refuses a manifest whose

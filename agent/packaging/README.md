@@ -3,10 +3,11 @@
 `bitternd.service` is the status and UI daemon. `bittern-first-boot.service` is
 the oneshot that provisions a fresh install. `bittern-image-prewarm.service`
 downloads the pinned recording-software image in the background after first boot
-has written the network configuration. The QEMU first-boot harness and the POC
-payload installer (`packaging/install.sh`) install all three units and enable
-them. The product image and app bundle packaging work in the implementation plan
-will decide the final installed paths, users, and service ordering.
+has written the network configuration. `bittern-update.service` is the fixed
+app bundle update worker. The QEMU first-boot harness and the beta preparation
+kit installer (`packaging/install.sh`) install all four units and enable them.
+The product image and app bundle packaging work in the implementation plan will
+decide the final installed paths, users, and service ordering.
 
 ## First boot
 

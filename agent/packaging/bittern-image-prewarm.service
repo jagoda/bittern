@@ -1,4 +1,4 @@
-# Recording-software image prewarm. The POC payload installs it and the product
+# Recording-software image prewarm. The beta preparation kit installs it and the product
 # image bakes it in. It runs once in the background after the network and Docker
 # are up, overlapping with setup, and it is not a dependency of first boot. A
 # failed download is recorded for the status page and the apply refusal; it does

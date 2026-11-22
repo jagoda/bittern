@@ -1811,11 +1811,12 @@ def build_installer_payload(bittern: Path, bitternd: Path) -> Path:
         / "agent"
         / "packaging"
         / "bittern-image-prewarm.service",
+        "bittern-update.service": ROOT / "agent" / "packaging" / "bittern-update.service",
         "bitternd.service": ROOT / "agent" / "packaging" / "bitternd.service",
         "install.sh": ROOT / "packaging" / "install.sh",
         "cleanup.sh": ROOT / "packaging" / "cleanup.sh",
         "storage-setup.sh": ROOT / "packaging" / "storage-setup.sh",
-        "README.md": ROOT / "packaging" / "README-payload.md",
+        "README.md": ROOT / "packaging" / "README-beta-kit.md",
     }
     checksums = []
     for name, source in sources.items():
