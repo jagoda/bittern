@@ -230,15 +230,6 @@ class FailureMessageTests(unittest.TestCase):
             "false",
         )
 
-    def test_secret_presence_flag_missing(self) -> None:
-        self.assertFailure(
-            "secret-presence-flag-missing",
-            "must declare the beta-draft environment",
-            release_preflight.check_secret_presence,
-            True,
-            None,
-        )
-
     def test_secret_list_failed(self) -> None:
         self.assertFailure(
             "secret-list-failed",

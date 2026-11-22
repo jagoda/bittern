@@ -3,9 +3,9 @@
 - Date: 2026-11-22
 - Status: maintainer checklist for the first two published beta generations. The release workflow
   dispatch is the normal path and the tag push is the fallback. The publish workflow dry run is
-  green, but neither publish path has been run against a published release. The dispatch preflight
-  needs the `main` branch policy on `beta-draft` and `beta`; it refuses until that policy is applied.
-  The `beta` approval remains unproven until the first release is approved
+  green, and both `beta-draft` and `beta` now admit the `main` branch and the `app-beta-*` tag, so the
+  dispatch preflight passes. Neither publish path has been run against a published release. The
+  `beta` approval remains unproven until the first release is approved
 - Bench: Debian 13 (trixie) amd64, minimal, one management NIC on the house LAN, camera NIC
   unplugged, local console attached
 - Payload: the published `bittern-beta-kit.tar.gz` and the `app-beta-000001` and `app-beta-000002`
@@ -51,10 +51,9 @@ and the next action. The preflight verifies the `check.yml` run on the exact `ma
 `beta` reviewer and admin bypass, the next generation, and the tag absence. It validates the tag with
 the same Go parser the publish workflow uses. It creates no tag, draft, or release.
 
-The dispatch runs at `main`, so both environments must admit `main` in addition to `app-beta-*`. A
-missing branch policy is reported as `environment-dispatch-ref`; apply the policy before the first
-dispatch rather than working around it. If any check fails, fix the named precondition and run the
-preflight again.
+The dispatch runs at `main`, so both environments must admit `main` in addition to `app-beta-*`. The
+preflight reports a missing branch policy as `environment-dispatch-ref`; fix the policy rather than
+working around it. If any check fails, fix the named precondition and run the preflight again.
 
 - [ ] For the tag-push fallback only, the tag-path preflight passes.
 

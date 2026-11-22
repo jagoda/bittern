@@ -96,7 +96,12 @@ There is no release, no draft, and no tag.
 
 ### The environment policy exception for the dry run
 
-`beta-draft` is tag-scoped to `app-beta-*`, and a `workflow_dispatch` run at `main` is a branch ref,
+**Update 2026-11-22.** [ADR 0033](../adr/0033-dispatch-driven-release-trigger.md) adds a permanent
+`main` branch policy to both `beta-draft` and `beta`, so this temporary procedure is retired. A
+dispatch at `main` is now admitted by the steady-state policy.
+
+At the time of this run, `beta-draft` was tag-scoped to `app-beta-*`, and a `workflow_dispatch` run
+at `main` was a branch ref,
 so the environment refuses the draft job before it can read the key. The dry run proves the secret
 decode and the signature path only if it runs in that environment, so the run used a temporary
 branch policy:
@@ -125,16 +130,16 @@ done
 ```
 
 The temporary policy was created and deleted in this run; the verification above was taken after the
-deletion. The window is bounded by the maintainer's session. It adds no new actor to the key: the
-trust root is repository write access, and the same writer can already push a matching tag and get
-the key. It does widen the ref set for the duration, so the policy must not be left in place. The
-steady state is tag-only.
+deletion. The window was bounded by the maintainer's session. It added no new actor to the key: the
+trust root is repository write access, and the same writer could already push a matching tag and get
+the key. It widened the ref set for the duration, so the policy was not left in place. At the time
+of this run, the steady state was tag-only.
 
-This is a named exception, not the normal procedure. The durable fix is a dry-run path that does not
-need the key at a branch ref, or a decision to give a dry-run environment its own reviewed test key.
-It is recorded as [OQ-36](../open-questions.md), with the temporary procedure as the provisional
-default and the no-secret dry-run environment as the durable removal. The tag path needs no
-exception, because the tag ref is what the environment admits.
+This was a named exception, not the normal procedure. It was recorded as
+[OQ-36](../open-questions.md), which [ADR 0033](../adr/0033-dispatch-driven-release-trigger.md)
+resolved by adding the permanent `main` branch policy to both environments. The no-secret dry-run
+environment is not needed for the release path. The tag path needs no exception, because the tag ref
+is what the environment admits.
 
 ### A check-workflow flake
 

@@ -28,72 +28,62 @@ key id from the decoded seed and refuses to sign when it does not equal the mani
 
 Public key (hex): `c4b17fe275cc4632b58c24a4cd09ee1da8d9fb904a5e1907e75601b882855285`
 
-## Environment tag policy
+## Environment ref policy
 
-The `beta` and `beta-draft` environments both allow the tag glob `app-beta-*`, which is the
-documented `*` wildcard form. Neither environment allows a branch. The
+The `beta` and `beta-draft` environments both allow the tag glob `app-beta-*` and the `main`
+branch. Neither allows another tag or another branch. The `*` is the documented wildcard form. The
 [deployments and environments reference](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
 (accessed 2026-11-22) documents the `*` wildcard and refers further syntax to Ruby `File.fnmatch`;
 it does not document character classes or ranges as supported. The exact tag format is therefore
 validated by the publish workflow before it creates the draft, not by an undocumented glob feature.
-The workflow must accept only `app-beta-` followed by exactly six lowercase hexadecimal characters,
-with generation starting at `000001`, and reject everything else.
+The workflow accepts only `app-beta-` followed by exactly six lowercase hexadecimal characters, with
+generation starting at `000001`, and rejects everything else.
+
+[ADR 0033](../../docs/adr/0033-dispatch-driven-release-trigger.md) explains why both refs are
+needed. A workflow run carries a single ref. A dispatch at `main` carries `refs/heads/main` for the
+preflight, the signing job, and the approval job; the tag is created by the signing job after the
+build and signature succeed. The environment policy is evaluated against the run's ref, not against
+the tag created during the run or a workflow input. The tag policy remains for the tag-push
+fallback. The tag no longer constrains a branch-triggered publish; the `beta` reviewer remains the
+publication gate.
 
 The environment policy and the ADR 0031 tag scheme must change together. A change to either one
 without the other either blocks a valid tag at deploy time or permits a tag the ADR does not
-define.
-
-[ADR 0033](../../docs/adr/0033-dispatch-driven-release-trigger.md) makes a manual dispatch of
-`release.yml` at `main` the normal release path. That path needs a `main` branch policy on both
-environments in addition to the `app-beta-*` tag, because the preflight and draft jobs run at
-`refs/heads/main`. The policy is not applied yet: `make release-preflight` refuses with
-`environment-dispatch-ref` until it is, and the tag-push fallback stays tag-only. Do not add the
-branch policy without the maintainer's decision, which stays open in
-[OQ-36](../../docs/open-questions.md).
-
-A `workflow_dispatch` dry run runs at a branch ref, so the tag-only policy refuses the draft job
-before it can read the key. The dry run on 2026-11-22 added a temporary `main` branch policy to
-`beta-draft`, ran, deleted the policy, and verified that both environments list only
-`tag app-beta-*` again. That is a named exception for a maintainer-run dry run, not the steady
-state, and it must not be left in place. The procedure, the risk window, and the durable follow-up
-are in
-[the dry run note](../../docs/notes/2026-11-22-beta-dry-run-and-bench-rollout.md#the-environment-policy-exception-for-the-dry-run).
+define. The same rule applies to `main`: it is the only branch the release path uses.
 
 ## Threat model for the key
 
-The environment gate is a ref gate, not an actor gate. `beta-draft` has one protection rule, the
-`app-beta-*` tag policy, and no required reviewer. A job that declares `environment: beta-draft` is
-matched against the run's `GITHUB_REF`; a non-matching ref is refused before the job starts, so the
-secret is never provided. A matching tag is admitted with no approval, by design, because the draft
-must exist before the `beta` approver can review it.
+The environment gate is a ref gate, not an actor gate. `beta-draft` has two policies, the
+`app-beta-*` tag and the `main` branch, and no required reviewer. A job that declares
+`environment: beta-draft` is matched against the run's `GITHUB_REF`; a non-matching ref is refused
+before the job starts, so the secret is never provided. A matching tag or `main` is admitted
+without approval, by design, because the draft must exist before the `beta` approver can review it.
 
-That gate does not stop a repository writer. GitHub states that any user with write access has read
-access to all secrets in the repository, and a writer can push a workflow with a matching tag, or
-push a matching tag for a workflow already on main. The tag policy admits the tag, not the person.
-The trust root is therefore write access to this repository, which today is the single admin
-account, plus that account's own security. No tag protection rule exists, so tag creation is part
-of that write access. The policy does keep branches, pull requests, forks, and main-ref runs away
-from the key, and those are the cases below.
+The permanent `main` policy does not widen the trust root. A tag push and a main-ref workflow both
+require repository write access. The actors are unchanged; what changed is that the ref gate now
+admits the normal release dispatch instead of keeping `main` away from the key. The controls that
+still do work are the `beta` reviewer gate, which is the publication gate, SHA pinning of every
+action, and the protected `main` ruleset, which forbids deletion, force push, and non-linear
+history and has no bypass actors. The key remains a CI test key pinned only on bench devices, never
+a release anchor.
 
 | Threat | Control that stops it | Outcome |
 | --- | --- | --- |
-| Fork pull request (`pull_request` from a fork) | GitHub withholds repository and environment secrets from fork-triggered runs, and the run ref `refs/pull/N/merge` does not match the tag policy | No key |
-| Same-repository pull request (`pull_request` from a branch) | Same-repository pull requests are not fork-restricted, and the run may change the workflow it runs because that workflow comes from the merge commit. The control is the ref: `refs/pull/N/merge` is not a tag, so the environment refuses the job | No key |
-| Branch push (`refs/heads/*`) | The environment refuses the job before any step runs. Verified on 2026-11-22 | No key |
-| `pull_request_target` | The run uses the default branch workflow and the default branch ref, so the environment refuses the job, and a pull request cannot change that workflow. The event still gets a write-capable token and repository secrets; a workflow that checks out and runs pull request code is a repository takeover, not a way to widen the key's scope. No such workflow exists | No key from the environment; the trust root stays repository write access |
-| Unmatched tag | The environment accepts only tags matching `app-beta-*`. The policy matches the tag name only, so `app-beta-probe` passes it; the exact tag grammar is enforced by the publish workflow's parser, before any build or secret use | No key unless the tag matches `app-beta-*` |
-| Matching tag without approval | No reviewer on `beta-draft`, so the job runs and the key is available. Verified on 2026-11-22 with a dispatch at a matching tag. The draft it signs stays invisible until it is published, which the workflow does only after the `beta` environment approves the publish job; a repository writer can also publish a draft by hand. The key is a CI test key pinned only on bench devices, never a release anchor | Key available; no release-trust compromise because the key is a test anchor |
-| Direct change to the workflow on main | A push or dispatch run at `refs/heads/main` is refused by the tag policy, so the changed workflow cannot read the key from a main-ref run. The same writer can also push a matching tag, and the tag run reads the key without approval. Main has no required review and no required status check; the `main-protection` ruleset forbids deletion, force push, and non-linear history, and it has no bypass actors | Key readable by a repository writer who also creates a matching tag |
+| Fork pull request (`pull_request` from a fork) | GitHub withholds repository and environment secrets from fork-triggered runs, and the run ref `refs/pull/N/merge` matches neither the tag nor `main` | No key |
+| Same-repository pull request (`pull_request` from a branch) | Same-repository pull requests are not fork-restricted, and the run may change the workflow it runs because that workflow comes from the merge commit. The control is the ref: `refs/pull/N/merge` is neither a tag nor `main`, so the environment refuses the job | No key |
+| Branch push other than `main` | The environment refuses the job before any step runs | No key |
+| Main-ref run | `main` is admitted by `beta-draft`. Only a repository writer can dispatch the release workflow or add a main-triggered workflow; protected `main` and repository write access are the controls. The draft is invisible until `beta` approves | Key available to a writer-controlled job; no release-trust compromise because the key is a test anchor, and publication still needs the `beta` approval |
+| `pull_request_target` | The run uses the base branch ref, `refs/heads/main`, which is now admitted. A fork pull request cannot change the base workflow, but a repository writer can add one. The event gets a write-capable token and repository secrets; a workflow that checks out and runs pull request code is a repository takeover | Key could be read by a writer-controlled workflow; the trust root stays repository write access |
+| Unmatched tag | Only `app-beta-*` tags and `main` are admitted. The tag policy matches the tag name only, so `app-beta-probe` passes it; the exact tag grammar is enforced by the publish workflow's parser, before any build or secret use | No key unless the tag matches `app-beta-*` |
+| Matching tag without approval | No reviewer on `beta-draft`, so the job runs and the key is available. The draft it signs stays invisible until it is published, which the workflow does only after the `beta` environment approves the publish job; a repository writer can also publish a draft by hand. The key is a CI test key pinned only on bench devices, never a release anchor | Key available; no release-trust compromise because the key is a test anchor |
+| Direct change to the workflow on `main` | A main-ref run is now admitted, so a repository writer can push a workflow change and read the key from it. The same writer can also push a matching tag. Main has no required review and no required status check; the `main-protection` ruleset forbids deletion, force push, and non-linear history, and it has no bypass actors. The `beta` reviewer still gates publication, and SHA pinning keeps an action from changing under a reviewed commit | Key readable by a repository writer; no publication without the `beta` approval, and no release-trust compromise because the key is a test anchor |
 
-A direct change to a workflow on main can read the key. The environment stops the main-ref run, but
-the change can add a tag-triggered path, and whoever can push the change can also push the tag.
-Nothing in the environment configuration prevents that. What protects main is the ruleset and
-repository write access, not review, and the key's blast radius is limited by the key being a test
-anchor. Adding a reviewer to `beta-draft` would put an approval in front of every draft and defeat
-the reason the environment exists ([ADR 0032](../../docs/adr/0032-continuous-integration-and-build-pipeline.md));
-it would not change the tag path, because the tag is what the environment admits.
+The key is a CI test anchor. A writer who can read it can sign a bundle that only bench devices with
+that anchor would trust; that is the same blast radius as a tag push. A release that a field device
+trusts still needs the offline release key under [ADR 0029](../../docs/adr/0029-release-signing-and-key-custody.md).
+The resolved [OQ-36](../../docs/open-questions.md#resolved-questions) row records the policy choice.
 
-Do not add `refs/pull/*/merge` or a branch pattern to either environment's policy. The current
-policy depends on pull request and branch refs never matching. The probe runs and the cleanup are
-recorded in the
+Do not add `refs/pull/*/merge`, any branch other than `main`, or any tag other than `app-beta-*` to
+either environment's policy. The policy depends on those refs never matching. The probe runs and
+the cleanup are recorded in the
 [verification note](../../docs/notes/2026-11-22-beta-draft-secret-verification.md).

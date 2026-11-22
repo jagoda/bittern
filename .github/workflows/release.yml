@@ -14,9 +14,11 @@
 # this workflow, and a tag created here is never pushed through the tag path.
 #
 # Least privilege: the preflight reads contents, check runs, and the public
-# environment policies. Only the release job, which calls the tag, draft, and
-# publish jobs, gets contents write. The CI test key stays in beta-draft and is
-# never passed to the publish job. Every action is SHA-pinned.
+# environment policies. It declares no environment and receives no secret; the
+# draft job's beta-draft gate is where the CI key is checked and used. Only the
+# release job, which calls the tag, draft, and publish jobs, gets contents
+# write. The CI test key stays in beta-draft and is never passed to the publish
+# job. Every action is SHA-pinned.
 name: release
 
 on:
@@ -45,12 +47,10 @@ jobs:
   preflight:
     name: release preflight
     runs-on: ubuntu-24.04
-    # beta-draft scopes the CI test key. The job only compares the secret to
-    # the empty string to prove the name exists; the value is never printed or
-    # passed to a command. The dispatch runs at main, so the environment must
-    # admit main in addition to app-beta-*.
-    environment:
-      name: beta-draft
+    # No environment declaration: the preflight reads public metadata with the
+    # workflow token and needs no environment secret. It therefore has no ref
+    # gate of its own, and the check runs before any key-bearing job. It
+    # inherits contents: read and actions: read from the workflow level.
     outputs:
       tag: ${{ steps.preflight.outputs.tag }}
       generation: ${{ steps.preflight.outputs.generation }}
@@ -73,9 +73,6 @@ jobs:
         id: preflight
         env:
           GH_TOKEN: ${{ github.token }}
-          # Presence only. The expression compares the secret to the empty
-          # string; the value is not placed in the environment or printed.
-          BITTERN_PREFLIGHT_SECRET_PRESENT: ${{ secrets.BITTERN_CI_SIGNING_KEY != '' }}
           INPUT_CONFIRM: ${{ inputs.confirm }}
         run: make release-preflight
 

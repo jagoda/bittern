@@ -77,11 +77,11 @@ decision superseded in part by ADR-0033`, following the partial-supersession for
 
 - verifies the current `main` head has a completed, successful `check.yml` run on that exact
   commit, and refuses if the head moved after the run or during a release run;
-- verifies `BITTERN_CI_SIGNING_KEY` exists in `beta-draft` by name only, never reading or printing
-  a value;
-- verifies both environments admit the `app-beta-*` tag, the `main` branch for the dispatch path,
-  and no other ref; verifies `beta` requires the maintainer as reviewer and has
-  `can_admins_bypass` off;
+- verifies `BITTERN_CI_SIGNING_KEY` exists in `beta-draft` by name only in the maintainer's local
+  preflight; the workflow's preflight job declares no environment and reads no key, and the draft
+  job's `beta-draft` gate is where the key is present and used;
+- verifies both environments admit the `app-beta-*` tag and the `main` branch, and no other ref;
+  verifies `beta` requires the maintainer as reviewer and has `can_admins_bypass` off;
 - computes the next generation as the highest published `app-beta-*` release generation plus one,
   ignoring drafts, other channels, and tags without a published release, and refuses if the
   computed tag already exists;
@@ -93,27 +93,44 @@ decision superseded in part by ADR-0033`, following the partial-supersession for
 `--plan` performs every check and prints the result without changing anything. The script never
 creates a tag, draft, or release in any mode.
 
-**5. The dispatch ref needs the default branch admitted by both environments.** A
+**5. Both environments admit the `main` branch as well as the `app-beta-*` tag.** A
 `workflow_dispatch` at `main` carries `refs/heads/main`, not a tag. The build and signature job uses
-`beta-draft`, and the publish job uses `beta`. Both environments admit only the `app-beta-*` tag
-today, so a dispatch at `main` is refused before the key is read. The dispatch path therefore
-requires a `main` branch policy on both environments, in addition to the tag policy. The tag-push
-fallback continues to use the tag policy.
+`beta-draft`, and the publish job uses `beta`. Both environments now admit the `main` branch in
+addition to the `app-beta-*` tag; no other branch or tag is allowed. The tag-push fallback continues
+to use the tag policy.
 
-This is a repository setting, not a code change. The preflight verifies it and refuses with
-`environment-dispatch-ref` until it is applied. The alternative, a separate branch-scoped signing
-environment with its own key, is rejected for now: it duplicates the environment and key scope for
-the same CI test key, and the task keeps the key in `beta-draft` and the approval in `beta`.
-[OQ-36](../open-questions.md) records the dry-run history and the policy decision. The trust
-boundary does not move: the key is a CI test key pinned only on bench devices, the trust root
-remains repository write access, and `beta` still requires the maintainer's approval.
+[OQ-36](../open-questions.md) is resolved by this decision. The alternative, a separate
+branch-scoped signing environment with its own key, is rejected: it duplicates the environment and
+key scope for the same CI test key, and this decision keeps the key in `beta-draft` and the approval
+in `beta`. The trust boundary does not move: the key is a CI test key pinned only on bench devices,
+the trust root remains repository write access, and `beta` still requires the maintainer's
+approval.
+
+### Why both environments accept main
+
+A workflow run carries a single ref for all of its jobs. A dispatch at `main` fixes that ref to
+`refs/heads/main`, and the called reusable workflow's jobs inherit it. The tag does not exist when
+the run starts; the signing job creates it only after the build and signature succeed. By the time
+the publish job runs, the tag exists, but the run's ref is still `refs/heads/main`. GitHub evaluates
+an environment's deployment branch and tag policies against the run's ref, not against a release tag
+created during the run and not against a workflow input. The signing job therefore needs `main` on
+`beta-draft`, and the approval job needs `main` on `beta`, even though both jobs belong to a release
+that will carry a tag.
+
+The tag policy still admits the fallback tag push. It no longer constrains a branch-triggered
+publish: a dispatch at `main` is admitted by the branch policy, and the tag is a release identity
+created later, not the ref that opens the environment. The `beta` reviewer remains the publication
+gate. Admitting `main` lets the approval job start and wait; it does not publish anything without
+the maintainer's approval, and `can_admins_bypass` stays false.
 
 **6. Concurrency, permissions, and key handling.** `release.yml` uses the `bittern-release-beta`
 concurrency group with `cancel-in-progress: false`, so two runs cannot compute the same generation
 while the first is waiting for approval. The workflow has `contents: read` and `actions: read` at
-the workflow level. Only the draft and publish jobs have `contents: write`. The CI test key is held
-by the `beta-draft` environment on the draft job, is removed by the existing `always()` cleanup
-step, and is never passed to the publish job. Every action stays SHA-pinned.
+the workflow level. The preflight and the called tag and checks jobs are read-only. The release job
+raises `contents: write` for the called draft and publish jobs, which are the only jobs that create
+the tag and draft and publish. The preflight job declares no environment and receives no key. The CI
+test key is held by the `beta-draft` environment on the draft job, is removed by the existing
+`always()` cleanup step, and is never passed to the publish job. Every action stays SHA-pinned.
 
 **7. A failure before the tag creates no tag.** The preflight, the checks, the build, the asset
 check, the signature, and the signature verification all run before the tag creation step. A
@@ -139,8 +156,9 @@ never moved.
 
 ### Negative / costs
 
-- The dispatch path widens the environment ref gate from tags to tags plus `main`. The key is a CI
-  test key, but the tag-only gate no longer covers the release workflow's main-ref run.
+- The dispatch path widens the environment ref gate from tags to tags plus `main`. The tag scoping
+  no longer constrains a branch-triggered publish. The key is a CI test key, the trust root remains
+  repository write access, and the `beta` reviewer remains the publication gate.
 - The release workflow is another workflow to maintain, review, and keep SHA-pinned.
 - The tag and the draft are not one atomic transaction. A draft upload failure after the tag leaves
   a tag without a visible release, and the next attempt must use a new generation.
@@ -154,14 +172,13 @@ never moved.
 
 ### Follow-ups
 
-- Apply the `main` branch policy to `beta-draft` and `beta` before the first dispatch release.
-  Then run `make release-preflight`, dispatch `release.yml` with the computed tag, approve `beta`,
-  and record the first dispatch publish in the beta bench rollout.
-- Update [OQ-36](../open-questions.md) and [the trust README](../../packaging/trust/README.md) when
-  the policy is applied. The dry-run temporary policy procedure is no longer needed once `main` is
-  admitted permanently; the no-secret dry-run environment remains a separate option.
-- Prove the tag creation, the draft upload, the `beta` approval, and the visible publish on the
-  first dispatch. Record the run and release URLs in the runbook's record table.
+- Prove the first dispatch release now that both environments admit `main`: run
+  `make release-preflight`, dispatch `release.yml` with the computed tag, approve `beta`, and record
+  the tag creation, draft upload, run URL, and release URL in the beta bench rollout.
+- Keep [OQ-36](../open-questions.md) resolved by this decision and the
+  [trust README](../../packaging/trust/README.md) control mapping in the same change. The temporary
+  dry-run policy procedure is retired; the no-secret dry-run environment is not needed for the
+  release path.
 - Decide whether the tag-push fallback stays after the dispatch path is proven. It is kept now
   because it is the only path that can publish when the release workflow is unavailable.
 - Add the first published generation to the update-history and support-bundle surfaces if the
@@ -183,10 +200,9 @@ never moved.
 - **Build and sign locally, then push the tag from the maintainer's machine.** The tag is created
   before the CI build and signature, the build is not the CI build, and the local key path is the
   airgapped release key rather than the CI test key. Rejected.
-- **A separate branch-scoped signing environment with its own key.** It keeps both environments
-  tag-only, but duplicates the environment and key scope for the same CI test key. It remains the
-  fallback option if the maintainer rejects the `main` policy; the dispatch path would then need a
-  new environment and a key copy. Rejected for now in favour of the smaller policy change.
+- **A separate branch-scoped signing environment with its own key.** It would keep both
+  environments tag-only, but duplicates the environment and key scope for the same CI test key.
+  Rejected because the `main` branch policy is smaller and the `beta` reviewer remains the gate.
 
 ## References
 

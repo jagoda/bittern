@@ -6,9 +6,13 @@ This script is the executable precondition. It verifies, in order:
 
 - the current main head has a completed, successful check.yml run on that exact
   commit;
-- BITTERN_CI_SIGNING_KEY exists in the beta-draft environment, by name only;
-- both environments admit the app-beta-* tag, and the dispatch path also needs
-  the main branch; beta needs the maintainer as reviewer with admin bypass off;
+- the maintainer's local run verifies BITTERN_CI_SIGNING_KEY exists in the
+  beta-draft environment, by name only; a workflow run without an environment
+  does not read the key, and the draft job's beta-draft gate is where it is
+  present and used;
+- both environments admit the app-beta-* tag and the main branch; beta needs
+  the maintainer as reviewer with admin bypass off; --tag-path does not require
+  main;
 - the next generation is the highest published app-beta-* generation plus one,
   ignoring drafts, other channels, and tags without a published release;
 - the computed tag does not exist;
@@ -19,7 +23,7 @@ It prints the tag, the commit, the generation, and the exact next action. It
 never creates a tag, draft, or release in any mode. --plan is the explicit plan
 mode; --tag-path checks the tag-push fallback, which does not need main.
 
-The daily check is read-only. The only writes are the GitHub Actions output and
+The check is read-only. The only writes are the GitHub Actions output and
 summary files when the runner provides them.
 """
 
@@ -186,22 +190,16 @@ def check_main_head(
     return latest
 
 
-def check_secret_presence(ci: bool, ci_presence: str | None) -> None:
-    if ci and ci_presence is None:
-        raise PreflightError(
-            "secret-presence-flag-missing",
-            "the preflight job must declare the beta-draft environment and set "
-            "BITTERN_PREFLIGHT_SECRET_PRESENT from the secret comparison",
-        )
-
-
 def check_secret(
     names: list[str] | None = None, ci_presence: str | None = None
 ) -> None:
     """Verify the secret name without reading a value.
 
-    In Actions the caller sets ci_presence from the secret comparison in the
-    beta-draft environment. Locally the name comes from gh secret list.
+    The maintainer's local preflight reads the name from gh secret list. A job
+    that declares the beta-draft environment may pass ci_presence from the
+    secret comparison instead. The release workflow's preflight job does not
+    declare the environment and does not check the key; the draft job's
+    beta-draft gate is where the key is present and used.
     """
     if ci_presence is not None:
         if ci_presence.lower() != "true":
@@ -463,12 +461,20 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     ci_presence = os.environ.get("BITTERN_PREFLIGHT_SECRET_PRESENT") if ci else None
-    if ci and ci_presence is None:
-        attempt(lambda: check_secret_presence(ci, ci_presence))
-    else:
-        names = None if ci else attempt(lambda: read_secret_names(args.repo))
+    if ci_presence is not None:
         try:
-            check_secret(names, ci_presence)
+            check_secret(None, ci_presence)
+            facts["secret"] = f"{SECRET_NAME} present in {SECRET_ENVIRONMENT} (name only)"
+        except PreflightError as error:
+            failures.append(error)
+    elif ci:
+        facts["secret"] = (
+            "not checked by this job; the beta-draft draft job holds the key"
+        )
+    else:
+        names = attempt(lambda: read_secret_names(args.repo))
+        try:
+            check_secret(names)
             facts["secret"] = f"{SECRET_NAME} present in {SECRET_ENVIRONMENT} (name only)"
         except PreflightError as error:
             failures.append(error)
