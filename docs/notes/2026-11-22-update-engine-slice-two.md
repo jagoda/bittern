@@ -94,9 +94,10 @@ departs from it in these small ways:
 3. **The shared lock checks symlinked ancestors.** `oplock` refuses a lock path whose existing
    parents include a symlink, in addition to the slice one lock-file checks. Apply previously had no
    state-root validation, so this keeps the common path honest.
-4. **The POC payload target carries the unit.** `make poc-payload` now includes
-   `bittern-update.service` and its checksum. This is the existing POC bridge, not the BIT-042 phase
-   two packer, which remains out of scope.
+4. **The POC payload target carried the unit.** At slice two, `make poc-payload` included
+   `bittern-update.service` and its checksum. BIT-042 phase two superseded that target with
+   `make beta-payload`; the beta preparation kit carries the unit and the same checksum rule. The
+   packer is no longer out of scope.
 5. **The status field is `current_generation`.** The slice zero placeholder was `generation`. The
    new name distinguishes it from `render.generation`; no released reader exists.
 6. **The unit orders after `bitternd.service`.** The first design delta draft used
