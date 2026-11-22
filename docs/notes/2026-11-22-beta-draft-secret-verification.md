@@ -164,6 +164,11 @@ skipped, and no draft or release was created. The publish run was deleted during
 | Releases | None exist |
 | Working tree | The revert commit restores the tree to `e425c71`; no probe file remains |
 
+Deleting the only run of the publish workflow also marked that workflow's record `deleted`, even
+though `publish.yml` stayed on main and GitHub still ran it by path. A comment-only change to
+`publish.yml` (commit `3b09e6f`) re-registered it as active. Do not delete a workflow's last run if
+the workflow must stay listed; check `state` through the workflows API after run cleanup.
+
 ## Limit
 
 The probe proves secret availability and ref gating only. It does not prove the signing, draft, and
