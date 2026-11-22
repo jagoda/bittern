@@ -77,10 +77,13 @@ The fix keeps the checks running:
 
 - The workflow appends `/tmp/Test*/** r,` to `/etc/apparmor.d/local/usr.sbin.chronyd` and reloads the
   profile. The profile stays in enforce mode and gains only the read path the validator needs.
-- `chronyCheckFile` in [system.go](../../agent/internal/apply/system.go) validates the staged file
-  when it cannot create the `/etc/chrony` copy. The root appliance still uses the `/etc/chrony` copy,
-  so the AppArmor workaround is unchanged there.
-- Two unit tests cover the `/etc/chrony` copy and the non-root fallback.
+- `chronyCheckFile` in [system.go](../../agent/internal/apply/system.go) takes the directory it
+  should use as an input. The appliance passes `/etc/chrony`; the unit tests pass a temporary
+  directory they control.
+- There is no fallback. If the directory cannot accept the copy, the check fails with the directory
+  and the permission error instead of validating the staged file. A read-only root or wrong
+  permissions must make the check fail, not turn an unavailable check into a passing one.
+- Three unit tests cover the `/etc/chrony` copy, an unwritable directory, and a missing directory.
 
 No check was skipped, removed, or loosened. chronyd validates the same rendered bytes; only the
 readable path changed.

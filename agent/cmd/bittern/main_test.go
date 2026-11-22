@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"bittern.invalid/agent/internal/apply"
 	"bittern.invalid/agent/internal/auth"
 	"bittern.invalid/agent/internal/frigateimage"
 	secretstore "bittern.invalid/agent/internal/secrets"
@@ -32,6 +33,13 @@ func repoRoot(t *testing.T) string {
 		}
 		dir = parent
 	}
+}
+
+func firstBootTestSystem(t *testing.T) *apply.ExecSystem {
+	t.Helper()
+	system := apply.NewExecSystem()
+	system.ChronyConfigDir = t.TempDir()
+	return system
 }
 
 func TestRenderPOCExample(t *testing.T) {
@@ -86,12 +94,12 @@ func TestFirstBootOffline(t *testing.T) {
 	stateRoot := filepath.Join(root, "state")
 	configRoot := filepath.Join(root, "etc")
 	liveRoot := filepath.Join(root, "live")
-	if err := runFirstBoot([]string{
+	if err := runFirstBootWithSystem([]string{
 		"--offline",
 		"--state-root", stateRoot,
 		"--config-root", configRoot,
 		"--live-root", liveRoot,
-	}); err != nil {
+	}, firstBootTestSystem(t)); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{
@@ -214,14 +222,15 @@ func TestFirstBootOutputDoesNotContainTheSetupToken(t *testing.T) {
 	}
 	original := os.Stdout
 	os.Stdout = writer
+	system := firstBootTestSystem(t)
 	runErr := make(chan error, 1)
 	go func() {
-		err := runFirstBoot([]string{
+		err := runFirstBootWithSystem([]string{
 			"--offline",
 			"--state-root", stateRoot,
 			"--config-root", configRoot,
 			"--live-root", liveRoot,
-		})
+		}, system)
 		os.Stdout = original
 		_ = writer.Close()
 		runErr <- err
@@ -361,14 +370,15 @@ func TestFirstBootConsoleBlockGoesOnlyToTheConsole(t *testing.T) {
 	}
 	originalStdout := os.Stdout
 	os.Stdout = writer
+	system := firstBootTestSystem(t)
 	runErr := make(chan error, 1)
 	go func() {
-		err := runFirstBoot([]string{
+		err := runFirstBootWithSystem([]string{
 			"--offline",
 			"--state-root", stateRoot,
 			"--config-root", configRoot,
 			"--live-root", liveRoot,
-		})
+		}, system)
 		os.Stdout = originalStdout
 		_ = writer.Close()
 		runErr <- err

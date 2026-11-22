@@ -212,6 +212,13 @@ func runRender(args []string) error {
 }
 
 func runFirstBoot(args []string) error {
+	return runFirstBootWithSystem(args, apply.NewExecSystem())
+}
+
+// runFirstBootWithSystem runs first boot on an explicit system. The CLI passes
+// the production system; a test passes one whose chrony check directory is a
+// temporary directory it controls.
+func runFirstBootWithSystem(args []string, system *apply.ExecSystem) error {
 	flags := flag.NewFlagSet("first-boot", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	stateRoot := flags.String("state-root", "/var/lib/bittern", "state root for generations, journal and markers")
@@ -233,7 +240,9 @@ func runFirstBoot(args []string) error {
 		}
 	}
 
-	system := apply.NewExecSystem()
+	if system == nil {
+		system = apply.NewExecSystem()
+	}
 	system.Offline = *offline
 	options := firstboot.Options{
 		StateRoot:  *stateRoot,
