@@ -74,3 +74,8 @@ New CI test key:
 The workflow has not run with the new key. A tag-triggered draft job has the secret available, but
 the signing, draft, and approval path is not proven until a real tag run happens. No tag was created
 and no release was published.
+
+Update, 2026-11-22: a temporary probe later proved the environment gate. A branch ref is refused
+before the job starts, and a dispatch at a matching `app-beta-*` tag receives the secret with no
+approval. Signing and publication are still unproven. See the
+[verification note](2026-11-22-beta-draft-secret-verification.md).
