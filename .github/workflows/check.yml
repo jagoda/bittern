@@ -90,6 +90,8 @@ jobs:
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: agent/go.mod
+          # The module is under agent/, so the cache key uses its go.sum.
+          cache-dependency-path: agent/go.sum
 
       # The bundle packer and make beta-payload do not exist yet, so this builds
       # the target that does exist: the POC payload tarball holding the bittern
