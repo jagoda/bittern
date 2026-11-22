@@ -1,0 +1,59 @@
+# First-boot provisioning for a fresh Bittern install. The POC payload installs it.
+# The unit runs once before bitternd and skips itself after the marker exists.
+[Unit]
+Description=Bittern first boot provisioning
+Documentation=file:/usr/share/doc/bittern/README.md
+After=local-fs.target
+Before=bitternd.service
+ConditionPathExists=!/var/lib/bittern/first-boot.json
+RequiresMountsFor=/etc/bittern /var/lib/bittern
+
+[Service]
+Type=oneshot
+# The setup QR block goes directly to the local virtual console. The service's
+# stdout and stderr still go to the journal and never contain the token.
+Environment=BITTERN_CONSOLE=/dev/tty1
+RemainAfterExit=yes
+ExecStart=/usr/bin/bittern first-boot
+TimeoutStartSec=10min
+User=root
+Group=root
+UMask=0077
+StateDirectory=bittern
+ConfigurationDirectory=bittern
+ConfigurationDirectoryMode=0750
+
+# Apply writes the config and TLS certificate under /etc/bittern, its journal
+# and generations under /var/lib/bittern, and live service files under /etc.
+# The whole /etc directory is writable because atomic replacement of
+# /etc/nftables.conf creates its temporary file beside the target.
+ReadWritePaths=/etc /var/lib/bittern
+
+# Minimal hardening baseline. Unlike bitternd, this unit needs to see physical
+# devices, so PrivateDevices is not enabled. It keeps CAP_NET_ADMIN because the
+# apply transaction runs nft -c and the firewall health probe.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

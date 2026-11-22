@@ -1,0 +1,75 @@
+{{define "review"}}{{template "head" .}}
+{{template "wizard-progress" .}}
+<h1 data-step-name="review">Review configuration</h1>
+<p class="lede">These are the values that would be written to the appliance. Nothing has been written yet.</p>
+{{template "preview-notice" .}}
+{{if .ApplyError}}
+<div class="alert" role="alert" tabindex="-1">
+  <h2>The configuration was not applied</h2>
+  <p>{{.ApplyError}}</p>
+</div>
+{{end}}
+<div class="card">
+  <h2>Appliance settings</h2>
+  <dl class="facts">
+    <dt>Configuration</dt>
+    <dd>{{if .Preview}}Preview, not saved{{else}}Not saved yet{{end}}</dd>
+    <dt>Hostname</dt>
+    <dd>{{.Plan.Hostname}}</dd>
+    <dt>House network</dt>
+    <dd>{{if eq .Plan.LANMode "DHCP"}}Automatic address{{else}}Address{{end}}, currently {{.Plan.LANAddress}}</dd>
+    <dt>Camera network</dt>
+    <dd>{{.Plan.CAM0Address}}</dd>
+    <dt>Recording drive</dt>
+    <dd>Separate drive</dd>
+  </dl>
+</div>
+<h2>Cameras</h2>
+{{range .Cameras}}
+<div class="card" data-camera-ref="{{.Ref}}" data-camera-name="{{.Name}}">
+  <h3>{{.Name}}</h3>
+  {{$error := index $.CameraErrors .Ref}}{{if $error}}
+  <div class="alert" role="alert">
+    <p>The settings for this camera were not applied, and nothing on the appliance has changed. {{$error}}</p>
+  </div>
+  {{end}}
+  <dl class="facts">
+    <dt>Address</dt>
+    <dd data-camera-address="{{.Address}}">{{.Address}}</dd>
+    <dt>Stream port</dt>
+    <dd data-camera-port="{{.Port}}">{{.Port}}</dd>
+    <dt>Stream path</dt>
+    <dd data-camera-path="{{.Path}}">{{.Path}}</dd>
+    {{if .MAC}}<dt>Address reservation</dt>
+    <dd data-camera-reservation="{{.Address}}">Bittern keeps {{.Address}} for this camera on the camera network.</dd>{{end}}
+    <dt>Sign-in</dt>
+    <dd data-camera-credentials="{{if .HasCredentials}}stored{{else}}none{{end}}">{{if .HasCredentials}}Saved for this camera when you apply, and never shown again{{else}}None; this camera has no username or password{{end}}</dd>
+  </dl>
+  <p class="page-links"><a href="/ui/wizard/camera/{{.Ref}}/settings?from=review">Change settings</a></p>
+</div>
+{{end}}
+<details class="disclosure">
+  <summary>Technical details</summary>
+  <dl class="facts">
+    {{if not .Preview}}<dt>Configuration path</dt>
+    <dd><code>{{.Plan.ConfigPath}}</code></dd>{{end}}
+    <dt>Recording drive path</dt>
+    <dd><code>{{.Plan.StoragePath}}</code></dd>
+    {{range .Cameras}}{{if .MAC}}<dt>{{.Name}} hardware address</dt>
+    <dd data-camera-mac="{{.MAC}}">{{.MAC}}</dd>{{end}}{{end}}
+  </dl>
+</details>
+<div class="card">
+  <h2>Apply the configuration</h2>
+  <p>Bittern checks the configuration, saves it, and starts the recording service. If a check fails, nothing changes.</p>
+  <p class="hint">The apply can take a minute or two while the recording service starts. The next page names the step that is running and how long it has taken. You can leave it; the apply continues on the appliance.</p>
+  <form method="post" action="/ui/wizard/apply" data-busy="true" data-busy-label="Starting the apply...">
+    {{template "csrf" .}}
+    <div class="form-actions">
+      <button type="submit">Apply configuration</button>
+      <a href="/ui/wizard/camera">Change cameras</a>
+      <a href="/ui/wizard">Back to welcome</a>
+    </div>
+  </form>
+</div>
+{{template "foot" .}}{{end}}

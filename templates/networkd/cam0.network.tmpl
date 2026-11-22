@@ -1,0 +1,13 @@
+# Camera interface: static, gatewayless and IPv6-disabled (ADR 0005).
+[Match]
+Name=cam0
+
+[Network]
+# Cameras may be offline at first boot; the address must exist so dnsmasq and chrony can bind.
+ConfigureWithoutCarrier=yes
+Address={{ .Address }}
+DHCP=no
+IPv6AcceptRA=no
+LinkLocalAddressing=no
+
+# Configured camera subnet: {{ .Subnet }}

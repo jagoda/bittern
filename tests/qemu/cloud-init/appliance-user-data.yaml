@@ -1,0 +1,71 @@
+#cloud-config
+hostname: __HOSTNAME__
+manage_etc_hosts: true
+disable_root: true
+ssh_pwauth: false
+
+users:
+  - default
+  - name: __SSH_USER__
+    gecos: Bittern QEMU harness
+    groups: [adm, sudo, docker]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - __SSH_PUBKEY__
+
+package_update: true
+package_upgrade: false
+packages:
+  - curl
+  - docker.io
+  # Debian 13 splits the Docker CLI out of docker.io into 'docker-cli', and
+  # ships Compose v2 as the standalone binary in 'docker-compose'; there is no
+  # 'docker-compose-v2' package in trixie.
+  - docker-cli
+  - docker-compose
+  - chrony
+  - dnsmasq
+  - iproute2
+  - nftables
+
+write_files:
+  - path: /usr/local/bin/bittern-rtsp-probe
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env python3
+      import socket
+      import sys
+
+      host, port, path = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+      request = (
+          f"OPTIONS rtsp://{host}:{port}{path} RTSP/1.0\r\n"
+          "CSeq: 1\r\n"
+          "User-Agent: bittern-qemu-harness\r\n\r\n"
+      )
+      with socket.create_connection((host, port), timeout=5) as sock:
+          sock.sendall(request.encode())
+          response = sock.recv(4096)
+      first = response.split(b"\r\n", 1)[0].decode("utf-8", "replace")
+      if not first.startswith("RTSP/1.0 200"):
+          raise SystemExit(f"unexpected RTSP response: {first}")
+      print(first)
+
+  - path: /etc/sysctl.d/99-bittern-harness.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      net.ipv6.conf.cam0.disable_ipv6 = 1
+      net.ipv6.conf.cam0.accept_ra = 0
+
+runcmd:
+  - install -d -o root -g root -m 0755 /var/lib/bittern/media
+  # Debian 13 comments out conf-dir in /etc/dnsmasq.conf. The renderer writes
+  # /etc/dnsmasq.d/bittern.conf, so the harness appliance includes that
+  # directory before first boot.
+  - printf 'conf-dir=/etc/dnsmasq.d/,*.conf\n' > /etc/dnsmasq.conf
+  - systemctl enable --now docker
+  - sysctl -w net.ipv6.conf.cam0.disable_ipv6=1
+  - sysctl -w net.ipv6.conf.cam0.accept_ra=0
+  - touch /run/bittern-harness-ready

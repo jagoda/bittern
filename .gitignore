@@ -1,0 +1,50 @@
+# Build and render artifacts.
+/build/
+/out/
+/.render/
+/.render-tmp/
+/render/
+/render-tmp/
+/rendered/
+/tmp/
+
+# Python bytecode.
+__pycache__/
+*.pyc
+
+# Go build output.
+/agent/bin/
+
+# Generated go:embed inputs. Keep the embed declarations and drift test tracked
+# while the copied templates, defaults, schema and UI assets stay out of git.
+# Regenerate with agent/scripts/sync-assets.sh or make assets.
+/agent/internal/assets/*
+!/agent/internal/assets/assets.go
+!/agent/internal/assets/assets_test.go
+
+# Opt-in browser check dependencies. The lockfile is committed; node_modules is
+# installed with npm ci and is never part of the repository or the appliance.
+/tests/browser/node_modules/
+
+# Local task worktrees. Keep them under .worktrees/ so a checkout never carries
+# another task's tree, and remember that removing a worktree also removes the
+# QEMU pidfiles under its build/qemu/, so stop the guests first.
+/.worktrees/
+
+# Device secrets and per-machine overrides. A real secrets file never enters
+# git. The first-boot goldens carry redacted placeholders, so they stay tracked.
+.env
+secrets.yaml
+!/tests/firstboot/*/expected/etc/bittern/secrets.yaml
+*.local.yaml
+
+# Signing key material. bittern-release init writes the Ed25519 seed to --key
+# and the <key_id>.pub trust anchor to --pub-dir, which defaults to the current
+# directory. Never commit either.
+*.key
+*.pub
+
+# Local agent state. The tracked skills under .pi/skills are project
+# documentation; everything else in .pi is local tool and session state.
+/.pi/*
+!/.pi/skills/

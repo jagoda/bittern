@@ -1,0 +1,272 @@
+{{define "camera-mac-input"}}<input id="camera-mac" name="camera_mac" type="text" value="{{.Form.MAC}}" autocomplete="off" aria-describedby="camera-mac-hint{{if hasError .Errors "mac"}} camera-mac-error{{end}}"{{if hasError .Errors "mac"}} aria-invalid="true"{{end}}{{if .MacOOB}} hx-swap-oob="outerHTML"{{end}} />{{end}}
+
+{{define "camera-name-field"}}
+<div class="field">
+  <label for="camera-name">Camera name <span class="field-required">Required</span></label>
+  <p class="hint" id="camera-name-hint">A short name, for example Front door.</p>
+  {{if hasError .Errors "name"}}<p class="field-error" id="camera-name-error">{{index .Errors "name"}}</p>{{end}}
+  <input id="camera-name" name="name" type="text" value="{{.Form.Name}}" maxlength="64" required="required" autocomplete="off"{{if .AddAutofocus}} autofocus="autofocus"{{end}} aria-describedby="camera-name-hint{{if hasError .Errors "name"}} camera-name-error{{end}}"{{if hasError .Errors "name"}} aria-invalid="true"{{end}} />
+</div>
+{{end}}
+
+{{define "camera-address-field"}}
+<div class="field">
+  <label for="camera-address">Camera address <span class="field-required">Required</span></label>
+  <p class="hint" id="camera-address-hint">{{if .Editing}}The address on the camera network, for example 10.77.0.20.{{else if .CameraSettings}}The address on the camera network, for example 10.77.0.20.{{else}}Choose a camera above, or type its address on the camera network.{{end}}</p>
+  {{if hasError .Errors "address"}}<p class="field-error" id="camera-address-error">{{index .Errors "address"}}</p>{{end}}
+  <input id="camera-address" name="address" type="text" value="{{.Form.Address}}" inputmode="decimal" autocomplete="off" required="required" aria-describedby="camera-address-hint{{if hasError .Errors "address"}} camera-address-error{{end}}"{{if hasError .Errors "address"}} aria-invalid="true"{{end}} />
+</div>
+{{end}}
+
+{{define "camera-identity-content"}}
+{{if .SelectionNotice}}<p class="notice" role="status">{{.SelectionNotice}}</p>{{end}}
+<input id="camera-name-auto" name="name_auto" type="hidden" value="{{if .NameAutoFilled}}{{.Form.Name}}{{end}}" />
+{{template "camera-name-field" .}}
+{{template "camera-address-field" .}}
+{{if .MacOOB}}{{template "camera-mac-input" .}}{{end}}
+{{end}}
+
+{{define "camera-identity"}}
+<div id="camera-identity">{{template "camera-identity-content" .}}</div>
+{{end}}
+
+{{define "camera-stream-fields"}}
+<fieldset>
+  <legend>Stream</legend>
+  <div class="field">
+    <label for="camera-port">Stream port <span class="field-required">Required</span></label>
+    <p class="hint" id="camera-port-hint">Usually 554. Change it only when the camera manual gives another port.</p>
+    {{if hasError .Errors "port"}}<p class="field-error" id="camera-port-error">{{index .Errors "port"}}</p>{{end}}
+    <input id="camera-port" name="rtsp_port" type="number" value="{{.Form.Port}}" min="1" max="65535" inputmode="numeric" required="required" aria-describedby="camera-port-hint{{if hasError .Errors "port"}} camera-port-error{{end}}"{{if hasError .Errors "port"}} aria-invalid="true"{{end}} />
+  </div>
+  <div class="field">
+    <label for="camera-path">Stream path <span class="field-required">Required</span></label>
+    <p class="hint" id="camera-path-hint">Usually /. The camera manual gives the path when it is not /.</p>
+    {{if hasError .Errors "path"}}<p class="field-error" id="camera-path-error">{{index .Errors "path"}}</p>{{end}}
+    <input id="camera-path" name="rtsp_path" type="text" value="{{.Form.Path}}" required="required" autocomplete="off" aria-describedby="camera-path-hint{{if hasError .Errors "path"}} camera-path-error{{end}}"{{if hasError .Errors "path"}} aria-invalid="true"{{end}} />
+  </div>
+</fieldset>
+{{end}}
+
+{{define "camera-advanced-fields"}}
+<details class="disclosure advanced-settings"{{if or (hasError .Errors "mac") (hasError .Errors "username") (hasError .Errors "password")}} open="open"{{end}}>
+  <summary>Hardware address and sign-in</summary>
+  <p class="hint">Optional. Add the hardware address only when Bittern did not find the camera, and the camera sign-in only when the camera needs one.</p>
+  <fieldset>
+    <legend>Camera identity</legend>
+    <div class="field">
+      <label for="camera-mac">Hardware address (MAC)</label>
+      <p class="hint" id="camera-mac-hint">Only needed when Bittern did not find the camera and its address is in the range Bittern hands out.</p>
+      {{if hasError .Errors "mac"}}<p class="field-error" id="camera-mac-error">{{index .Errors "mac"}}</p>{{end}}
+      {{template "camera-mac-input" .}}
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Camera sign-in</legend>
+    <div class="field">
+      <label for="camera-username">Camera username</label>
+      <p class="hint" id="camera-username-hint">The camera account, not the Bittern administrator.</p>
+      {{if hasError .Errors "username"}}<p class="field-error" id="camera-username-error">{{index .Errors "username"}}</p>{{end}}
+      <input id="camera-username" name="username" type="text" value="{{.Form.Username}}" maxlength="128" autocomplete="off" aria-describedby="camera-username-hint{{if hasError .Errors "username"}} camera-username-error{{end}}"{{if hasError .Errors "username"}} aria-invalid="true"{{end}} />
+    </div>
+    <div class="field">
+      <label for="camera-password">Camera password</label>
+      <p class="hint" id="camera-password-hint">{{if .Editing}}Leave blank to keep the saved sign-in. Stored on the appliance and never shown again.{{else if .CameraSettings}}Leave blank to keep the sign-in you entered. It is written only when you apply, and never shown again.{{else}}Leave both sign-in fields blank for a camera without one. It is written only when you apply, and never shown again.{{end}}</p>
+      {{if hasError .Errors "password"}}<p class="field-error" id="camera-password-error">{{index .Errors "password"}}</p>{{end}}
+      <input id="camera-password" name="password" type="password" maxlength="256" autocomplete="new-password" value="" aria-describedby="camera-password-hint{{if hasError .Errors "password"}} camera-password-error{{end}}"{{if hasError .Errors "password"}} aria-invalid="true"{{end}} />
+    </div>
+  </fieldset>
+</details>
+{{end}}
+
+{{define "camera-error-summary"}}
+{{if .ErrorList}}
+<div class="alert" role="alert" tabindex="-1">
+  <h2>{{if and (not .Editing) .ErrorCamera}}Check the details for {{.ErrorCamera}}{{else}}Check the camera details{{end}}</h2>
+  <ul>
+    {{range .ErrorList}}<li>{{.Label}}: {{.Message}}</li>{{end}}
+  </ul>
+  {{if not .Editing}}<p class="hint">Enter the sign-in again if you had typed one. Bittern never shows a saved password.</p>{{end}}
+</div>
+{{end}}
+{{end}}
+
+{{define "camera"}}{{template "head" .}}
+{{if .Editing}}
+<h1 data-step-name="camera-edit">Edit camera</h1>
+<p class="lede">Change this camera's name, address, or sign-in. Bittern checks the change before it is applied.</p>
+{{template "preview-notice" .}}
+{{if .ApplyError}}
+<div class="alert" role="alert" tabindex="-1">
+  <h2>The camera change was not applied</h2>
+  <p>{{.ApplyError}}</p>
+</div>
+{{end}}
+{{template "camera-error-summary" .}}
+<form method="post" action="{{.CameraAction}}" id="camera-form">
+  {{template "csrf" .}}
+  {{template "camera-identity" .}}
+  {{template "camera-stream-fields" .}}
+  {{template "camera-advanced-fields" .}}
+  <div class="form-actions">
+    <button type="submit">Apply camera change</button>
+    <a href="{{.BackURL}}">{{.BackLabel}}</a>
+  </div>
+</form>
+{{else if .CameraSettings}}
+{{template "wizard-progress" .}}
+<h1 data-step-name="camera-settings">Camera settings</h1>
+<p class="lede">Change this camera's name, address, stream, or sign-in. Nothing is applied until you review every camera.</p>
+{{template "preview-notice" .}}
+{{template "camera-error-summary" .}}
+<form method="post" action="{{.CameraAction}}" id="camera-form">
+  {{template "csrf" .}}
+  <input type="hidden" name="from" value="{{.SettingsFrom}}" />
+  <fieldset>
+    <legend>Camera</legend>
+    {{template "camera-name-field" .}}
+    {{template "camera-address-field" .}}
+  </fieldset>
+  {{template "camera-stream-fields" .}}
+  {{template "camera-advanced-fields" .}}
+  <div class="form-actions">
+    <button type="submit">Save camera settings</button>
+    <a href="{{.BackURL}}">{{.BackLabel}}</a>
+  </div>
+</form>
+{{else}}
+{{template "wizard-progress" .}}
+<h1 data-step-name="camera">Cameras</h1>
+<p class="lede">These cameras are in this setup. Add another below, then review the configuration. Nothing is applied until you review.</p>
+{{template "preview-notice" .}}
+{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+{{if .EmptyList}}
+<div class="alert" role="alert" tabindex="-1">
+  <h2>Add a camera before you review</h2>
+  <p>This setup has no camera yet. Nothing is applied until you add one and review the configuration.</p>
+</div>
+{{end}}
+<section aria-labelledby="setup-cameras-heading">
+  <h2 id="setup-cameras-heading">Cameras in this setup</h2>
+  {{if .Cameras}}
+  <p class="hint" id="remove-from-list-hint">Remove from list changes only this setup. Nothing on the appliance changes, and the sign-in typed for that camera is dropped.</p>
+  <ul class="camera-list">
+    {{range .Cameras}}
+    <li class="camera-card" data-camera-name="{{.Name}}" data-camera-address="{{.Address}}">
+      <div class="camera-head">
+        <h3>{{.Name}}</h3>
+        <span class="state-badge state-unknown">Not applied yet</span>
+      </div>
+      <dl class="facts">
+        <dt>Address</dt>
+        <dd data-camera-address="{{.Address}}">{{.Address}}</dd>
+        <dt>Stream port</dt>
+        <dd data-camera-port="{{.Port}}">{{.Port}}</dd>
+        <dt>Stream path</dt>
+        <dd data-camera-path="{{.Path}}">{{.Path}}</dd>
+        {{if .MAC}}<dt>Hardware address</dt>
+        <dd data-camera-mac="{{.MAC}}">{{.MAC}}</dd>{{end}}
+        <dt>Sign-in</dt>
+        <dd data-camera-credentials="{{if .HasCredentials}}stored{{else}}none{{end}}">{{if .HasCredentials}}Provided for this camera. Bittern writes it only when you apply.{{else}}None; this camera has no username or password.{{end}}</dd>
+      </dl>
+      <div class="camera-actions">
+        <a class="button secondary" href="/ui/wizard/camera/{{.Ref}}/settings">Edit settings</a>
+        <form method="post" action="/ui/wizard/camera/{{.Ref}}/remove" class="inline-form">
+          {{template "csrf" $}}
+          <button type="submit" class="button quiet" aria-describedby="remove-from-list-hint">Remove from list</button>
+        </form>
+      </div>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p>No cameras in this setup yet. Add the first one below. Nothing is applied until you review.</p>
+  {{end}}
+</section>
+<section aria-labelledby="add-camera-heading" data-discovery-state="{{if .DiscoveryError}}failed{{else}}ok{{end}}">
+  <h2 id="add-camera-heading">Add a camera</h2>
+  <p class="lede">Choose a camera Bittern found on the camera network, or type its address yourself.</p>
+  <details class="disclosure explainer">
+    <summary>How Bittern finds cameras</summary>
+    <p>Bittern searches the camera network. If no check finds the camera, add it by address.</p>
+  </details>
+  <p class="hint">Bittern never sends the camera password.</p>
+  {{if .DiscoveryError}}
+  <div class="alert" role="alert">
+    <h2>Bittern could not search the camera network</h2>
+    <p>{{.DiscoveryError}}</p>
+  </div>
+  {{end}}
+  <form method="post" action="{{.DiscoveryAction}}" class="discovery-actions" data-busy="true" data-busy-label="Searching...">
+    {{template "csrf" .}}
+    <button type="submit" class="button secondary">Search again</button>
+  </form>
+  {{if .Candidates}}
+  <form method="get" action="{{.CameraAction}}" class="candidate-form">
+    <div class="card">
+      <h3>Cameras found</h3>
+      {{if .DiscoveryRateLimited}}<p class="hint">Bittern searched a moment ago, so this is the previous result.</p>{{end}}
+      <p class="hint" id="candidate-hint">Choose a camera to fill in its name, address, and hardware address. You can change the name before you review.</p>
+      <ul class="candidate-list">
+        {{range .Candidates}}
+        <li>
+          <label class="candidate-row" for="candidate-{{.Address}}">
+            <input id="candidate-{{.Address}}" type="radio" name="selected" value="{{.Address}}" required="required"{{if eq .Address $.Form.Address}} checked="checked"{{end}} hx-get="{{$.CameraAction}}" hx-trigger="change" hx-target="#camera-identity" hx-swap="innerHTML" hx-include="#camera-name,#camera-name-auto" aria-describedby="candidate-hint" />
+            <span class="candidate-address" data-camera-address="{{.Address}}">{{.Address}}</span>
+            <span class="badge" data-camera-state="{{.Status}}">{{if eq .Status "online"}}Online{{else}}Seen{{end}}</span>
+          </label>
+          <p class="candidate-meta">
+            {{if or .Vendor .Model}}<span{{if .Vendor}} data-camera-vendor="{{.Vendor}}"{{end}}{{if .Model}} data-camera-model="{{.Model}}"{{end}}>{{.Vendor}}{{if and .Vendor .Model}} {{end}}{{.Model}}</span>{{end}}
+          </p>
+          {{if or .MAC .Sources .Layers .Detail}}
+          <details class="candidate-evidence">
+            <summary>Technical details<span class="visually-hidden"> for {{.Address}}</span></summary>
+            {{if or .MAC .Sources}}
+            <dl class="facts">
+              {{if .MAC}}<dt>Hardware address</dt>
+              <dd data-camera-mac="{{.MAC}}">{{.MAC}}</dd>{{end}}
+              {{if .Sources}}<dt>Found by</dt>
+              <dd data-camera-sources="{{join .Sources ", "}}">{{join .Sources ", "}}</dd>{{end}}
+            </dl>
+            {{end}}
+            {{if .Detail}}<p class="hint">{{.Detail}}</p>{{end}}
+            {{if .Layers}}
+            <ul class="layer-list">
+              {{range .Layers}}<li data-discovery-layer="{{.Name}}" data-discovery-layer-state="{{.State}}" data-discovery-detail="{{.Detail}}"><span class="badge">{{.State}}</span> {{.Name}}: {{.Detail}}</li>{{end}}
+            </ul>
+            {{end}}
+          </details>
+          {{end}}
+        </li>
+        {{end}}
+      </ul>
+      <noscript>
+      <div class="candidate-actions">
+        <button type="submit" class="button secondary">Use this camera</button>
+      </div>
+      </noscript>
+    </div>
+  </form>
+  {{else}}
+  {{if not .DiscoveryError}}<p class="hint">No camera answered on the camera network. Connect it to the camera port and search again, or type its address below.</p>{{end}}
+  {{end}}
+  {{template "camera-error-summary" .}}
+  <form method="post" action="{{.CameraAction}}" id="camera-form">
+    {{template "csrf" .}}
+    {{template "camera-identity" .}}
+    {{template "camera-stream-fields" .}}
+    {{template "camera-advanced-fields" .}}
+    <div class="form-actions">
+      <button type="submit" class="button secondary">Add camera</button>
+      <a href="{{.BackURL}}">{{.BackLabel}}</a>
+    </div>
+  </form>
+</section>
+{{if .Cameras}}
+<form method="post" action="{{.ContinueAction}}" class="form-actions">
+  {{template "csrf" .}}
+  <button type="submit">Review configuration</button>
+</form>
+{{end}}
+{{end}}
+{{template "foot" .}}{{end}}

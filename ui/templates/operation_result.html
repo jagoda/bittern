@@ -1,0 +1,172 @@
+{{define "operation-cameras"}}
+{{if .Operation.Cameras}}
+<div class="card">
+  <h2>Cameras</h2>
+  {{if eq .Operation.State "succeeded"}}
+  <p>Bittern tested each camera's picture after the apply. The result for each camera is below.</p>
+  {{else if .Operation.CamerasUnchanged}}
+  <p>The configuration was not applied, so nothing was changed for any camera below.</p>
+  {{else}}
+  <p>The apply did not finish, so Bittern does not report these cameras as changed.</p>
+  {{end}}
+  <dl class="facts">
+    {{range .Operation.Cameras}}
+    <dt>{{.Name}}</dt>
+    <dd data-camera-name="{{.Name}}" data-camera-address="{{.Address}}" data-camera-picture="{{if .PictureReceived}}received{{else if .PictureMissing}}missing{{else}}untested{{end}}">
+      {{if .Address}}{{.Address}}. {{end}}
+      {{if eq $.Operation.State "succeeded"}}
+        {{if .PictureReceived}}<span class="state-badge state-ok">Picture received</span> The appliance received a picture from this camera.
+        {{else if .PictureMissing}}<span class="state-badge state-degraded">No picture yet</span> Check that the camera is switched on, connected to the camera network, and that its sign-in is correct. Then test the picture again.
+        {{else}}<span class="state-badge state-unknown">Not tested</span> Bittern did not test this camera's picture.
+        {{end}}
+      {{else if $.Operation.CamerasUnchanged}}<span class="state-badge state-unknown">Not applied</span>
+      {{else}}<span class="state-badge state-unknown">Unknown</span> Open status to see what the appliance is running.
+      {{end}}
+    </dd>
+    {{end}}
+  </dl>
+</div>
+{{end}}
+{{end}}
+
+{{define "operation-result"}}{{template "head" .}}
+{{template "wizard-progress" .}}
+{{if not .Operation.Present}}
+<h1 data-step-name="result" data-result-state="absent">Apply result</h1>
+<p class="lede">There is no apply result to show. Start an apply from the review page, or open status for the current appliance state.</p>
+<div class="card">
+  <h2>What you can do next</h2>
+  <p class="action-links"><a href="/ui/wizard/review">Return to review</a> <a href="/ui/status">Open status</a></p>
+</div>
+{{else if eq .Operation.State "succeeded"}}
+<h1 data-step-name="result" data-result-state="succeeded">{{if .Operation.CamerasWithoutPicture}}Configuration applied with a problem{{else}}Configuration applied{{end}}</h1>
+{{if .Operation.CamerasWithoutPicture}}
+<p class="lede">Bittern saved the configuration and started the recording service. {{if eq .Operation.CamerasWithoutPicture 1}}One camera has{{else}}{{.Operation.CamerasWithoutPicture}} cameras have{{end}} not sent a picture yet, so {{if eq .Operation.CamerasWithoutPicture 1}}it is{{else}}they are{{end}} not recording yet. The configuration stays applied, and the cameras below say which.</p>
+{{else}}
+<p class="lede">Bittern saved the configuration and started the recording service. The checks passed.</p>
+{{end}}
+{{template "preview-notice" .}}
+<div class="card">
+  <h2>What Bittern did</h2>
+  <dl class="facts">
+    <dt>Result</dt>
+    <dd><span class="state-badge state-{{.Operation.StateClass}}">{{.Operation.StateLabel}}</span></dd>
+    <dt>Started</dt>
+    <dd>{{.Operation.StartedAt}} UTC</dd>
+    <dt>Finished</dt>
+    <dd>{{.Operation.FinishedAt}} UTC</dd>
+    <dt>Time taken</dt>
+    <dd>{{.Operation.Elapsed}}</dd>
+    {{if .Operation.StepsTotal}}<dt>Steps done</dt>
+    <dd>{{.Operation.StepsCompleted}} of {{.Operation.StepsTotal}} steps done</dd>{{end}}
+  </dl>
+</div>
+{{template "operation-cameras" .}}
+{{if .Operation.HasTechnicalDetails}}
+<details class="disclosure">
+  <summary>Technical details</summary>
+  <dl class="facts">
+    {{if .Operation.Previous}}<dt>Previous saved configuration</dt>
+    <dd>{{.Operation.Previous}}</dd>{{end}}
+    {{if .Operation.Generation}}<dt>Saved configuration</dt>
+    <dd>{{.Operation.Generation}}</dd>{{end}}
+    {{range .Operation.Snapshots}}{{if .Err}}<dt>Camera check ({{.CameraName}})</dt>
+    <dd>{{.Err}}</dd>{{end}}{{end}}
+  </dl>
+</details>
+{{end}}
+<div class="card">
+  <h2>What happens next</h2>
+  <ul>
+    <li>Open status to see whether the appliance and its recordings are working.</li>
+    <li>Open the camera list to edit a camera or test its picture.</li>
+  </ul>
+  <p class="action-links"><a href="/ui/status">Open status</a> <a href="/ui/cameras">Open cameras</a></p>
+</div>
+{{else}}
+<h1 data-step-name="result" data-result-state="{{.Operation.State}}">{{if eq .Operation.State "rolled-back"}}Previous configuration restored{{else}}Configuration not applied{{end}}</h1>
+<p class="lede">{{if eq .Operation.State "rolled-back"}}The new configuration was not applied. Bittern restored the previous configuration, so the appliance is still running the settings it had before.{{else if .Operation.CamerasUnchanged}}Bittern did not apply the configuration because it refused one camera's settings. Nothing on the appliance has changed.{{else}}The new configuration was not applied. No completed restore is recorded, so open status to see what the appliance is running.{{end}}</p>
+{{template "preview-notice" .}}
+<div class="alert" role="alert">
+  {{if .Operation.RollbackFailed}}
+  <h2>The previous configuration was not fully restored</h2>
+  <p>The appliance may be partly configured. Open status and use the support path before trying another apply.</p>
+  {{else if eq .Operation.FailureKind "recording-image"}}
+  <h2>The new configuration was not applied</h2>
+  <p>{{.Operation.Failure}}</p>
+  {{else if eq .Operation.FailureKind "camera-settings"}}
+  <h2>The new configuration was not applied</h2>
+  <p>{{.Operation.Failure}}</p>
+  <p>Correct this camera on the review page, then apply again. Nothing on the appliance has changed.</p>
+  {{else}}
+  <h2>The new configuration was not applied</h2>
+  {{if .Operation.FailingStepLabel}}<p>The apply stopped at {{.Operation.FailingStepLabel}}. Open status to see what needs attention, then return to review and apply again.</p>{{else}}<p>Open status to see what needs attention, then return to review and apply again.</p>{{end}}
+  {{end}}
+</div>
+<div class="card">
+  <h2>Apply result</h2>
+  <dl class="facts">
+    <dt>Status</dt>
+    <dd><span class="state-badge state-{{.Operation.StateClass}}">{{.Operation.StateLabel}}</span></dd>
+    {{if .Operation.FailingStepLabel}}<dt>Stopped at</dt>
+    <dd>{{.Operation.FailingStepLabel}}</dd>{{end}}
+    {{if .Operation.RollbackFailed}}<dt>Restore stopped at</dt>
+    <dd>{{.Operation.RollbackFailed}}</dd>{{end}}
+    {{if eq .Operation.State "rolled-back"}}<dt>Previous configuration</dt>
+    <dd>Restored</dd>{{end}}
+    <dt>Started</dt>
+    <dd>{{.Operation.StartedAt}} UTC</dd>
+    <dt>Finished</dt>
+    <dd>{{.Operation.FinishedAt}} UTC</dd>
+    <dt>Time taken</dt>
+    <dd>{{.Operation.Elapsed}}</dd>
+    {{if .Operation.StepsTotal}}<dt>Steps completed</dt>
+    <dd>{{.Operation.StepsCompleted}} of {{.Operation.StepsTotal}} steps</dd>{{end}}
+  </dl>
+</div>
+{{template "operation-cameras" .}}
+{{if .Operation.HasTechnicalDetails}}
+<details class="disclosure">
+  <summary>Technical details</summary>
+  <dl class="facts">
+    {{if .Operation.FailureDetail}}<dt>Reported error</dt>
+    <dd>{{.Operation.FailureDetail}}</dd>{{else if .Operation.Failure}}<dt>Reported error</dt>
+    <dd>{{.Operation.Failure}}</dd>{{end}}
+    {{if .Operation.FailureCause}}<dt>Download error</dt>
+    <dd>{{.Operation.FailureCause}}</dd>{{end}}
+    {{if .Operation.FailingStep}}<dt>Step</dt>
+    <dd>{{.Operation.FailingStep}}</dd>{{end}}
+    {{if .Operation.RollbackFailedStep}}<dt>Restore step</dt>
+    <dd>{{.Operation.RollbackFailedStep}}</dd>{{end}}
+    {{if .Operation.Previous}}<dt>Previous saved configuration</dt>
+    <dd>{{.Operation.Previous}}</dd>{{end}}
+    {{if .Operation.Generation}}<dt>Saved configuration</dt>
+    <dd>{{.Operation.Generation}}</dd>{{end}}
+    {{range .Operation.Snapshots}}{{if .Err}}<dt>Camera check ({{.CameraName}})</dt>
+    <dd>{{.Err}}</dd>{{end}}{{end}}
+  </dl>
+</details>
+{{end}}
+<div class="card">
+  <h2>What is running now</h2>
+  {{if .Operation.RollbackFailed}}
+  <p>Bittern could not fully restore the previous configuration. Some of the new settings may still be on the appliance.</p>
+  {{else if eq .Operation.State "rolled-back"}}
+  <p>Bittern restored the previous configuration. The settings the appliance had before this apply are running again.</p>
+  {{else if .Operation.CamerasUnchanged}}
+  <p>Bittern did not write this configuration, so the appliance is still running the settings it had before.</p>
+  {{else}}
+  <p>No completed restore is recorded for this apply. Open status to see what the appliance is running.</p>
+  {{end}}
+</div>
+<div class="card">
+  <h2>What you can do next</h2>
+  <ul>
+    <li>Open status to see what needs attention and which step did not finish.</li>
+    <li>Correct the cause, then return to review and apply again.</li>
+    <li>If status says the previous configuration was not fully restored, use the support path before trying another apply.</li>
+  </ul>
+  <p class="action-links"><a href="/ui/status">Open status</a> <a href="/ui/wizard/review">Return to review</a></p>
+</div>
+{{end}}
+{{template "foot" .}}{{end}}

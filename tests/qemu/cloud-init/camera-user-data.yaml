@@ -1,0 +1,90 @@
+#cloud-config
+hostname: __HOSTNAME__
+manage_etc_hosts: true
+disable_root: true
+ssh_pwauth: false
+
+users:
+  - default
+  - name: __SSH_USER__
+    gecos: Bittern QEMU camera fixture
+    groups: [adm, sudo]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - __SSH_PUBKEY__
+
+package_update: true
+package_upgrade: false
+packages:
+  - curl
+  - ffmpeg
+  - iproute2
+
+write_files:
+  - path: /usr/local/bin/bittern-camera
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      set -eu
+      until ip -4 addr show dev cam0 2>/dev/null | grep -q "inet __CAM_ADDR__/"; do
+          sleep 1
+      done
+      install -d /opt/bittern-camera
+      cd /opt/bittern-camera
+      if [ ! -x mediamtx ]; then
+          curl -fL --retry 3 -o mediamtx.tar.gz "__MEDIAMTX_URL__"
+          echo "__MEDIAMTX_SHA256__  mediamtx.tar.gz" | sha256sum -c -
+          tar -xzf mediamtx.tar.gz mediamtx
+      fi
+      cat > mediamtx.yml <<'EOF'
+      logLevel: warn
+      api: false
+      metrics: false
+      pprof: false
+      playback: false
+      rtsp: true
+      rtspAddress: 0.0.0.0:8554
+      rtspTransports: [tcp]
+      rtmp: false
+      hls: false
+      webrtc: false
+      srt: false
+      paths:
+        all_others:
+      EOF
+      ./mediamtx mediamtx.yml >/var/log/bittern-camera-mediamtx.log 2>&1 &
+      for _ in $(seq 1 30); do
+          if python3 -c 'import socket; s = socket.create_connection(("127.0.0.1", 8554), 1); s.close()' 2>/dev/null; then
+              break
+          fi
+          sleep 1
+      done
+      exec ffmpeg -hide_banner -loglevel warning -nostdin -re \
+          -f lavfi -i "testsrc=size=__CAM_RES__:rate=__CAM_FPS__" \
+          -an -c:v libx264 -preset ultrafast -tune zerolatency \
+          -pix_fmt yuv420p -g 20 -f rtsp -rtsp_transport tcp \
+          "rtsp://127.0.0.1:8554__CAM_PATH__"
+
+  - path: /etc/systemd/system/bittern-camera.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Bittern virtual RTSP camera
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      ExecStart=/usr/local/bin/bittern-camera
+      Restart=always
+      RestartSec=2
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - systemctl daemon-reload
+  - systemctl enable --now bittern-camera.service
+  - touch /run/bittern-harness-ready

@@ -1,0 +1,180 @@
+{
+  "description": "Expected outcomes for the reference appliance.yaml validator. Paths are relative to this file. Version 1 documents are migrated to version 2 before validation.",
+  "cases": [
+    {
+      "name": "four-camera example",
+      "file": "../../schema/examples/four-cameras.yaml",
+      "expected": []
+    },
+    {
+      "name": "GK41 POC example",
+      "file": "../../schema/examples/poc-gk41.yaml",
+      "expected": []
+    },
+    {
+      "name": "minimal valid document",
+      "file": "fixtures/valid-minimal.yaml",
+      "expected": []
+    },
+    {
+      "name": "valid version 2 document",
+      "file": "fixtures/valid-v2.yaml",
+      "expected": []
+    },
+    {
+      "name": "match sets both mac and pci",
+      "file": "fixtures/invalid-match.yaml",
+      "expected": [
+        {
+          "path": "$.network.lan0.match",
+          "rule": "schema.oneOf"
+        }
+      ]
+    },
+    {
+      "name": "malformed match MAC",
+      "file": "fixtures/invalid-mac.yaml",
+      "expected": [
+        {
+          "path": "$.network.lan0.match.mac",
+          "rule": "schema.pattern"
+        }
+      ]
+    },
+    {
+      "name": "drive selector sets both by_id and serial",
+      "file": "fixtures/invalid-drive-selector.yaml",
+      "expected": [
+        {
+          "path": "$.storage.recording.drives[0]",
+          "rule": "schema.oneOf"
+        }
+      ]
+    },
+    {
+      "name": "unknown key",
+      "file": "fixtures/unknown-key.yaml",
+      "expected": [
+        {
+          "path": "$.identity.unknown_setting",
+          "rule": "schema.unknown-key"
+        }
+      ]
+    },
+    {
+      "name": "camera password field",
+      "file": "fixtures/camera-password.yaml",
+      "expected": [
+        {
+          "path": "$.cameras[0].password",
+          "rule": "schema.unknown-key"
+        }
+      ]
+    },
+    {
+      "name": "missing schema_version",
+      "file": "fixtures/missing-schema-version.yaml",
+      "expected": [
+        {
+          "path": "$.schema_version",
+          "rule": "schema.required"
+        }
+      ]
+    },
+    {
+      "name": "unsupported schema_version",
+      "file": "fixtures/unsupported-schema-version.yaml",
+      "expected": [
+        {
+          "path": "$.schema_version",
+          "rule": "schema.const"
+        }
+      ]
+    },
+    {
+      "name": "overlapping lan0 and cam0 subnets",
+      "file": "fixtures/overlapping-subnets.yaml",
+      "expected": [
+        {
+          "path": "$.network.lan0.subnet",
+          "rule": "network.subnet-overlap"
+        }
+      ]
+    },
+    {
+      "name": "gateway outside its subnet",
+      "file": "fixtures/gateway-outside-subnet.yaml",
+      "expected": [
+        {
+          "path": "$.network.lan0.gateway",
+          "rule": "network.gateway-outside-subnet"
+        }
+      ]
+    },
+    {
+      "name": "camera address on lan0",
+      "file": "fixtures/camera-on-lan.yaml",
+      "expected": [
+        {
+          "path": "$.cameras[0].address",
+          "rule": "cameras.address-on-lan"
+        }
+      ]
+    },
+    {
+      "name": "storage path on the OS drive",
+      "file": "fixtures/storage-on-os-drive.yaml",
+      "expected": [
+        {
+          "path": "$.storage.recording.mount_point",
+          "rule": "storage.os-drive-path"
+        }
+      ]
+    },
+    {
+      "name": "camera address inside the DHCP pool",
+      "file": "fixtures/camera-in-dhcp-pool.yaml",
+      "expected": [
+        {
+          "path": "$.cameras[0].address",
+          "rule": "cameras.address-in-dhcp-pool"
+        }
+      ]
+    },
+    {
+      "name": "reserved camera inside the DHCP pool",
+      "file": "fixtures/camera-reserved-in-pool.yaml",
+      "expected": []
+    },
+    {
+      "name": "malformed camera MAC",
+      "file": "fixtures/camera-invalid-mac.yaml",
+      "expected": [
+        {
+          "path": "$.cameras[0].mac",
+          "rule": "schema.pattern"
+        }
+      ]
+    },
+    {
+      "name": "duplicate camera MAC",
+      "file": "fixtures/duplicate-camera-mac.yaml",
+      "expected": [
+        {
+          "path": "$.cameras[1].mac",
+          "rule": "cameras.duplicate-mac"
+        }
+      ]
+    },
+    {
+      "name": "duplicate camera address",
+      "file": "fixtures/duplicate-camera-address.yaml",
+      "expected": [
+        {
+          "path": "$.cameras[1].address",
+          "rule": "cameras.duplicate-address"
+        }
+      ]
+    }
+  ]
+}

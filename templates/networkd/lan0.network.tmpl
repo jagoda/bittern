@@ -1,0 +1,11 @@
+# House LAN interface: DHCP client with a static reservation (ADR 0005).
+[Match]
+Name=lan0
+
+[Network]
+DHCP=ipv4
+
+# Configured LAN subnet: {{ .Subnet }}
+{{- if .Gateway }}
+# Expected DHCP gateway: {{ .Gateway }}
+{{- end }}

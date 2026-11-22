@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "image": {
+    "name": "debian-13-genericcloud-amd64.qcow2",
+    "release": "Debian 13 (trixie) genericcloud amd64",
+    "build": "20261111-2659",
+    "url": "https://cloud.debian.org/images/cloud/trixie/20261111-2659/debian-13-genericcloud-amd64-20261111-2659.qcow2",
+    "sha256": "e2d95cfb631bf38e30017c32653c2536b8d95447d4083040faffd147942ab9e9",
+    "sha512": "3247873136ba09b060fab45e9c115239f81c1d401fce00b8fa9b872013f7135d6a40b12462ab5ac03b9fa4ed5955dd0e8d1c900109a939ad7a0a4dafe7dea47b"
+  },
+  "vm": {
+    "cpus": 4,
+    "memory_mb": 4096,
+    "disk_size": "64G",
+    "ssh_user": "bittern"
+  },
+  "network": {
+    "lan": {
+      "mode": "qemu-user",
+      "hostfwd": {
+        "ssh": 2222,
+        "frigate_internal": 15000,
+        "go2rtc": 11984,
+        "rtsp": 18554,
+        "webrtc": 18556,
+        "ui": 14443
+      }
+    },
+    "cam": {
+      "mode": "qemu-dgram-unix",
+      "subnet": "10.77.0.0/24",
+      "appliance_address": "10.77.0.1",
+      "camera_address": "10.77.0.20"
+    }
+  },
+  "camera": {
+    "host_ssh_port": 2223,
+    "host_rtsp_port": 18555,
+    "rtsp_path": "/cam0",
+    "resolution": "640x360",
+    "fps": 10,
+    "mediamtx": {
+      "version": "1.21.3",
+      "url": "https://github.com/bluenviron/mediamtx/releases/download/v1.21.3/mediamtx_v1.21.3_linux_amd64.tar.gz",
+      "sha256": "0a2ea7eba96023631efa1bea7804823a9145b043b6646a8a05798d4ac24ed635",
+      "license": "MIT"
+    }
+  },
+  "timeouts_seconds": {
+    "kvm_boot": 180,
+    "kvm_snapshot_restore": 30,
+    "kvm_test_suite": 600,
+    "tcg_boot": 1800,
+    "tcg_snapshot_restore": 180,
+    "tcg_test_suite": 3600,
+    "ssh_connect": 30,
+    "camera_ready": 60
+  }
+}

@@ -1,0 +1,72 @@
+# Bittern appliance configuration, schema version 2.
+#
+# This example has four cameras and one local recording drive. It contains no
+# credentials: camera entries reference keys in /etc/bittern/secrets.yaml, which
+# is mode 0600 and never committed. See AGENTS.md, "Hard rules".
+schema_version: 2
+
+identity:
+  hostname: bittern
+  timezone: UTC
+
+network:
+  lan0:
+    mode: dhcp
+    subnet: 192.168.1.0/24
+    gateway: 192.168.1.1
+  cam0:
+    mode: static
+    address: 10.77.0.1/24
+    dhcp:
+      pool_start: 10.77.0.50
+      pool_end: 10.77.0.199
+      reservation_start: 10.77.0.10
+      reservation_end: 10.77.0.49
+      gateway: 10.77.0.1
+      ntp_server: 10.77.0.1
+
+cameras:
+  - id: front_door
+    name: Front door
+    address: 10.77.0.20
+    rtsp_port: 554
+    rtsp_path: /stream1
+    credentials_ref: cameras.front_door
+  - id: driveway
+    name: Driveway
+    address: 10.77.0.21
+    rtsp_port: 554
+    rtsp_path: /stream1
+    credentials_ref: cameras.driveway
+  - id: back_garden
+    name: Back garden
+    address: 10.77.0.22
+    rtsp_port: 554
+    rtsp_path: /stream1
+    credentials_ref: cameras.back_garden
+  - id: side_gate
+    name: Side gate
+    address: 10.77.0.23
+    rtsp_port: 554
+    rtsp_path: /stream1
+    credentials_ref: cameras.side_gate
+
+# One dedicated local recording drive, no SMB, NFS, or cloud target. The
+# drives list names pool members; an empty list is valid when only the media
+# mount point is known.
+storage:
+  recording:
+    mount_point: /var/lib/bittern/media
+    drives: []
+    retention_days: 14
+    free_space_reserve_gb: 50
+
+updates:
+  channel: stable
+
+# Telemetry, update-check, disk-encryption, and RTSP exposure settings are not
+# fields because those questions are still open (OQ-06, OQ-12, OQ-15).
+privacy:
+  tailscale:
+    enabled: false
+    camera_subnet_route: false

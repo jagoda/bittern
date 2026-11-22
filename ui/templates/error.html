@@ -1,0 +1,12 @@
+{{define "error"}}{{template "head" .}}
+<h1>{{.Title}}</h1>
+<p class="lede">{{.Message}}</p>
+<div class="card">
+  <h2>What you can do next</h2>
+  <p>{{.NextStep}}</p>
+  <div class="form-actions">
+    <a class="button" href="{{if .BackURL}}{{.BackURL}}{{else}}/ui/wizard{{end}}">{{if .BackLabel}}{{.BackLabel}}{{else}}Open setup{{end}}</a>
+    <a href="/ui/status">Open status</a>
+  </div>
+</div>
+{{template "foot" .}}{{end}}

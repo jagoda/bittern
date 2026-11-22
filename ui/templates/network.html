@@ -1,0 +1,57 @@
+{{define "network"}}{{template "head" .}}
+{{template "wizard-progress" .}}
+<h1 data-step-name="network">Network check</h1>
+<p class="lede">Bittern uses two separate network connections so cameras cannot reach the house network or the internet.</p>
+{{template "preview-notice" .}}
+<div class="card">
+  <h2>Connections found</h2>
+  <p class="table-caption" id="network-connections">Network connections</p>
+  <div class="table-wrap stack-at-phone" role="region" tabindex="0" aria-labelledby="network-connections">
+    <table aria-labelledby="network-connections">
+      <thead>
+        <tr>
+          <th scope="col">Connection</th>
+          <th scope="col">Address</th>
+          <th scope="col">Cable</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr data-network-lan-address="{{.Network.LANAddress}}" data-network-lan-carrier="{{.Network.LANCarrier}}">
+          <th scope="row">House network</th>
+          <td>{{.Network.LANAddress}}</td>
+          <td>{{yesno .Network.LANCarrier}}</td>
+        </tr>
+        <tr data-network-cam-address="{{.Network.CAMAddress}}" data-network-cam-carrier="{{.Network.CAMCarrier}}">
+          <th scope="row">Camera network</th>
+          <td>{{.Network.CAMAddress}}</td>
+          <td>{{yesno .Network.CAMCarrier}}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <dl class="table-stack" aria-labelledby="network-connections">
+    <div class="table-stack-row">
+      <dt class="table-stack-term">House network</dt>
+      <dd class="table-stack-state"><span class="table-stack-label">Cable</span> {{yesno .Network.LANCarrier}}</dd>
+      <dd class="table-stack-detail"><span class="table-stack-label">Address</span> <span class="break-token">{{.Network.LANAddress}}</span></dd>
+    </div>
+    <div class="table-stack-row">
+      <dt class="table-stack-term">Camera network</dt>
+      <dd class="table-stack-state"><span class="table-stack-label">Cable</span> {{yesno .Network.CAMCarrier}}</dd>
+      <dd class="table-stack-detail"><span class="table-stack-label">Address</span> <span class="break-token">{{.Network.CAMAddress}}</span></dd>
+    </div>
+  </dl>
+  <p>{{.Network.Detail}}</p>
+  <details class="disclosure">
+    <summary>Technical details</summary>
+    <p>The appliance labels the house network port lan0 and the camera port cam0.</p>
+  </details>
+  <form method="post" action="/ui/wizard/storage">
+    {{template "csrf" .}}
+    <div class="form-actions">
+      <button type="submit">Continue to recording drive</button>
+      <a href="/ui/wizard">Back to welcome</a>
+    </div>
+  </form>
+</div>
+{{template "foot" .}}{{end}}

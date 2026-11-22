@@ -1,0 +1,118 @@
+{
+  "schema": 1,
+  "generated_at": "2026-11-14T12:00:00Z",
+  "state": "degraded",
+  "reason": "recording service is not responding, so recording is stopped; recording media has 1073741824 free bytes, below the 53687091200 byte reserve",
+  "sections": {
+    "config": {
+      "state": "ok",
+      "path": "/etc/bittern/appliance.yaml",
+      "present": true,
+      "schema_version": 2,
+      "valid": true,
+      "errors": []
+    },
+    "render": {
+      "state": "ok",
+      "generation": "2",
+      "apply_state": "applied",
+      "file_count": 8,
+      "last_render": "2026-11-14T12:00:00Z",
+      "validation": [
+        {
+          "name": "order",
+          "state": "ok",
+          "message": "paths are sorted"
+        },
+        {
+          "name": "paths",
+          "state": "ok",
+          "message": "relative, unique output paths"
+        },
+        {
+          "name": "headers",
+          "state": "ok",
+          "message": "every file carries the generated header"
+        },
+        {
+          "name": "native-checkers",
+          "state": "unknown",
+          "message": "nft, dnsmasq, chrony, and Frigate checks are not run by the status builder"
+        }
+      ]
+    },
+    "frigate": {
+      "state": "degraded",
+      "configured": true,
+      "reachable": false,
+      "version": null,
+      "camera_count": 1,
+      "image": {
+        "state": "ready",
+        "digest": "sha256:fd60f99ffd4eb6c42360ed4e14953e270586f239309ab3983e55b2e97ffac09a",
+        "last_error": ""
+      },
+      "last_error": "dial tcp 127.0.0.1:5000: connect: connection refused"
+    },
+    "cameras": {
+      "state": "unknown",
+      "items": [
+        {
+          "id": "front_door",
+          "name": "Front door",
+          "address": "10.77.0.20",
+          "enabled": true,
+          "stream": "unknown",
+          "snapshot": "unknown",
+          "recording": "degraded",
+          "last_seen": null,
+          "detail": "No camera check has run since the last adoption or test."
+        }
+      ]
+    },
+    "storage": {
+      "state": "degraded",
+      "path": "/var/lib/bittern/media",
+      "present": true,
+      "detail_state": "ready",
+      "free_bytes": 1073741824,
+      "reserve_bytes": 53687091200,
+      "member_count": 1,
+      "missing_members": []
+    },
+    "network": {
+      "state": "ok",
+      "lan0": {
+        "address": "192.168.1.50/24",
+        "carrier": true,
+        "last_error": ""
+      },
+      "cam0": {
+        "address": "10.77.0.1/24",
+        "carrier": true,
+        "last_error": ""
+      }
+    },
+    "updates": {
+      "state": "ok",
+      "current_slot": "a",
+      "generation": 7
+    },
+    "reset": {
+      "state": "ok",
+      "level": "configuration",
+      "completed_at": "2026-11-14T11:00:00Z"
+    },
+    "hardware": {
+      "state": "ok",
+      "cpu": {
+        "model": "Intel N100",
+        "cores": 4
+      },
+      "memory_bytes": 17179869184,
+      "accelerators": [
+        "openvino"
+      ]
+    }
+  }
+}

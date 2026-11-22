@@ -1,0 +1,49 @@
+{{define "done"}}{{template "head" .}}
+{{template "wizard-progress" .}}
+{{$failed := false}}{{range .Snapshots}}{{if not .Succeeded}}{{$failed = true}}{{end}}{{end}}
+<h1 data-step-name="done" data-result-state="succeeded">{{if $failed}}Setup finished with a problem{{else}}Setup complete{{end}}</h1>
+<p class="lede">Bittern saved the configuration and started the recording service.{{if .Snapshots}} The checks below show what it found.{{end}}</p>
+{{template "preview-notice" .}}
+{{if .Snapshots}}
+<div class="card">
+  <h2>Cameras</h2>
+  <dl class="facts">
+    {{range .Snapshots}}
+    <dt>{{.CameraName}}</dt>
+    <dd data-camera-name="{{.CameraName}}" data-camera-picture="{{if .Succeeded}}received{{else}}missing{{end}}">
+      {{if .Succeeded}}<span class="state-badge state-ok">Picture received</span> This camera is sending pictures.
+      <details class="disclosure">
+        <summary>Technical details</summary>
+        <dl class="facts">
+          <dt>Picture</dt>
+          <dd>Sent by the recording service: {{.ContentType}}, {{.Bytes}} bytes.</dd>
+        </dl>
+      </details>
+      {{else}}<span class="state-badge state-degraded">No picture yet</span> This camera has not sent a picture yet. The configuration is applied. Check the camera power, the cable, and the stream path, then run setup again.
+      {{if .Err}}<details class="disclosure">
+        <summary>Technical details</summary>
+        <dl class="facts">
+          <dt>Camera check</dt>
+          <dd>{{.Err}}</dd>
+        </dl>
+      </details>{{end}}
+      {{end}}
+    </dd>
+    {{end}}
+  </dl>
+</div>
+{{end}}
+<div class="card">
+  <h2>What happens next</h2>
+  <ul>
+    <li>Open status to see whether the appliance and its recordings are healthy.</li>
+    <li>Keep the camera and recording drive checks in view while the first recording starts.</li>
+    <li>Return to setup if you need to change the camera details.</li>
+  </ul>
+  <div class="form-actions">
+    <a class="button" href="/ui/cameras">Manage cameras</a>
+    <a href="/ui/status">Open status</a>
+    <a href="/ui/wizard">Back to setup</a>
+  </div>
+</div>
+{{template "foot" .}}{{end}}

@@ -1,0 +1,84 @@
+{{define "cameras"}}{{template "head" .}}
+<h1>Cameras</h1>
+<p class="lede">The cameras Bittern manages. Bittern tests a camera only when you ask it to.</p>
+{{template "preview-notice" .}}
+{{if .Flash}}<p class="notice" role="status">{{.Flash}}</p>{{end}}
+{{if .FlashError}}<div class="alert" role="alert"><p>{{.FlashError}}</p></div>{{end}}
+{{if not .CameraList.Items}}
+<div class="card">
+  <h2>No cameras yet</h2>
+  <p>Bittern has no camera to record. Add one and it appears here.</p>
+  <div class="form-actions"><a class="button" href="/ui/wizard/camera">Add camera</a></div>
+</div>
+{{else}}
+<ul class="camera-list">
+  {{range .CameraList.Items}}
+  {{$picture := index $.Pictures .ID}}
+  <li class="camera-card" data-camera-name="{{.Name}}" data-camera-address="{{.Address}}" data-camera-enabled="{{if .Enabled}}true{{else}}false{{end}}" data-camera-stream-state="{{.Stream}}" data-camera-picture-state="{{.Snapshot}}" data-camera-recording-state="{{.Recording}}">
+    <div class="camera-head">
+      <h2>{{.Name}}</h2>
+      <span class="badge{{if not .Enabled}} badge-disabled{{end}}">{{if .Enabled}}Enabled{{else}}Disabled{{end}}</span>
+    </div>
+    <p class="camera-ident">
+      <span>{{.Address}}</span>
+      <span class="camera-seen">{{if .LastSeen}}Last seen {{datetimePtr .LastSeen}} UTC{{else}}Not seen yet{{end}}</span>
+    </p>
+    {{if .Enabled}}
+    {{if and (eq .Stream "ok") (eq .Snapshot "ok") (eq .Recording "ok")}}
+    <p class="camera-checks"><span class="state-badge state-ok">All checks passing</span></p>
+    {{else if and (eq .Stream "unknown") (eq .Snapshot "unknown") (eq .Recording "unknown")}}
+    <p class="camera-checks"><span class="state-badge state-unknown">Not checked yet</span></p>
+    {{else}}
+    <p class="camera-checks">
+      {{if eq .Stream "failed"}}<span class="state-badge state-failed">Not streaming</span>{{end}}
+      {{if eq .Snapshot "failed"}}<span class="state-badge state-failed">Test picture failed</span>{{else if eq .Snapshot "unknown"}}<span class="state-badge state-unknown">Picture not tested</span>{{end}}
+      {{if eq .Recording "failed"}}<span class="state-badge state-failed">Not recording</span>{{else if eq .Recording "degraded"}}<span class="state-badge state-degraded">Recording degraded</span>{{else if eq .Recording "unknown"}}<span class="state-badge state-unknown">Recording not checked</span>{{end}}
+    </p>
+    {{end}}
+    {{else}}
+    <p class="camera-checks"><span class="state-badge state-unknown">Not checked while disabled</span></p>
+    {{end}}
+    {{if $picture}}
+    <figure class="camera-picture" data-picture>
+      {{if $picture.URL}}
+      <img class="camera-picture-image" src="{{$picture.URL}}" alt="{{$picture.Alt}}" data-picture-image hidden="hidden" />
+      <p class="camera-picture-error" data-picture-error role="status" hidden="hidden">{{$picture.Fallback}}</p>
+      <noscript><p class="camera-picture-error"><a href="{{$picture.URL}}">Open the test picture</a>. JavaScript is off, so the picture is not shown here.</p></noscript>
+      {{else}}
+      <p class="camera-picture-error" role="status">{{$picture.Message}}</p>
+      {{end}}
+      <figcaption>{{$picture.Caption}}</figcaption>
+    </figure>
+    {{end}}
+    <div class="camera-actions">
+      <a class="button secondary" href="/ui/cameras/{{.ID}}/edit">Edit</a>
+      <form method="post" action="/ui/cameras/{{.ID}}/snapshot" class="inline-form" data-busy="true" data-busy-label="Testing...">
+        {{template "csrf" $}}
+        <button type="submit" class="button quiet">Test picture</button>
+      </form>
+      <a class="quiet-destructive" href="/ui/cameras/{{.ID}}/remove">Remove camera</a>
+    </div>
+    <details class="camera-details">
+      <summary>Technical details<span class="visually-hidden"> for {{.Name}}</span></summary>
+      <dl class="facts">
+        <dt>Stream</dt>
+        <dd><span class="state-badge state-{{.Stream}}">{{if eq .Stream "unknown"}}Stream not checked{{else}}{{cameraStreamLabel .Stream}}{{end}}</span></dd>
+        <dt>Picture</dt>
+        <dd><span class="state-badge state-{{.Snapshot}}">{{if eq .Snapshot "unknown"}}Picture not tested{{else}}{{cameraSnapshotLabel .Snapshot}}{{end}}</span></dd>
+        <dt>Recording</dt>
+        <dd><span class="state-badge state-{{.Recording}}">{{if eq .Recording "unknown"}}Recording not checked{{else}}{{cameraRecordingLabel .Recording}}{{end}}</span></dd>
+        <dt>Last picture</dt>
+        <dd>{{if .SnapshotAt}}{{datetimePtr .SnapshotAt}} UTC{{else}}Not tested yet{{end}}</dd>
+        <dt>Hardware address</dt>
+        <dd>{{if .MAC}}{{.MAC}}{{else}}Not recorded{{end}}</dd>
+        <dt>Vendor or model</dt>
+        <dd>{{if .Vendor}}{{.Vendor}}{{if .Model}} {{.Model}}{{end}}{{else}}{{if .Model}}{{.Model}}{{else}}Not reported{{end}}{{end}}</dd>
+      </dl>
+      {{if .Detail}}<p class="hint">{{.Detail}}</p>{{end}}
+    </details>
+  </li>
+  {{end}}
+</ul>
+{{end}}
+<p class="page-links"><a href="/ui/status">Back to status</a> <a href="/ui/wizard">Back to setup</a></p>
+{{template "foot" .}}{{end}}

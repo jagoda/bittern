@@ -1,0 +1,142 @@
+[
+  {
+    "route": "login",
+    "path": "/ui/login",
+    "flow": "guest"
+  },
+  {
+    "route": "setup",
+    "path": "/ui/setup",
+    "flow": "setup"
+  },
+  {
+    "route": "wizard",
+    "path": "/ui/wizard",
+    "flow": "auth"
+  },
+  {
+    "route": "wizard-network",
+    "path": "/ui/wizard/network",
+    "flow": "auth"
+  },
+  {
+    "route": "wizard-storage",
+    "path": "/ui/wizard/storage",
+    "flow": "auth"
+  },
+  {
+    "route": "wizard-camera",
+    "path": "/ui/wizard/camera",
+    "flow": "auth",
+    "prepare": "cameras"
+  },
+  {
+    "route": "wizard-camera-settings",
+    "path": "/ui/wizard/camera/c1/settings",
+    "flow": "auth",
+    "prepare": "review"
+  },
+  {
+    "route": "wizard-review",
+    "path": "/ui/wizard/review",
+    "flow": "auth",
+    "prepare": "review"
+  },
+  {
+    "route": "wizard-operation",
+    "path": "/ui/wizard/apply",
+    "flow": "auth",
+    "prepare": "started"
+  },
+  {
+    "route": "wizard-result",
+    "path": "/ui/wizard/result",
+    "flow": "auth",
+    "prepare": "applied"
+  },
+  {
+    "route": "wizard-done",
+    "path": "/ui/wizard/done",
+    "flow": "auth",
+    "prepare": "applied"
+  },
+  {
+    "route": "cameras",
+    "path": "/ui/cameras",
+    "flow": "auth"
+  },
+  {
+    "route": "cameras",
+    "path": "/ui/cameras?flash=picture-ok&picture=front_door&at=preview",
+    "flow": "auth",
+    "variant": "picture"
+  },
+  {
+    "route": "cameras",
+    "path": "/ui/cameras",
+    "flow": "auth",
+    "variant": "picture-taken",
+    "actions": [
+      {
+        "action": "click",
+        "selector": "form[action='/ui/cameras/front_door/snapshot'] button[type='submit']"
+      },
+      {
+        "action": "wait",
+        "selector": "img[data-picture-image]",
+        "state": "visible",
+        "decoded": true
+      }
+    ]
+  },
+  {
+    "route": "camera-edit",
+    "path": "/ui/cameras/front_door/edit",
+    "flow": "auth"
+  },
+  {
+    "route": "camera-picture",
+    "path": "/ui/cameras/front_door/picture",
+    "flow": "auth"
+  },
+  {
+    "route": "camera-remove",
+    "path": "/ui/cameras/front_door/remove",
+    "flow": "auth"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status",
+    "flow": "auth",
+    "variant": "ready"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?state=booting",
+    "flow": "auth",
+    "variant": "booting"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?state=degraded",
+    "flow": "auth",
+    "variant": "degraded"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?state=updating",
+    "flow": "auth",
+    "variant": "updating"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?state=failed",
+    "flow": "auth",
+    "variant": "failed"
+  },
+  {
+    "route": "not-found",
+    "path": "/ui/missing",
+    "flow": "auth"
+  }
+]

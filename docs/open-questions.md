@@ -1,0 +1,269 @@
+# Open questions
+
+This is the register of decisions Bittern has not made, plus the record of the few decisions answered
+in place in a design document. An open question is not a decision: nothing in this file authorises
+an implementation choice. An answered row is a decision with a date, a link to the document that
+states it, and its evidence; it authorises only what that document states. Agents must not silently
+pick an answer, infer one from a ticket, or write code that hard-codes one option while the question
+is open. If work needs an answer, stop and ask, or write the ADR that settles it.
+
+How to use it:
+
+- Every question has a stable ID, OQ-01 onward, and IDs are never reused. Reference the ID in
+  commits, tickets and ADRs.
+- Answer by writing an ADR. Then delete the row from the table and record it under "Resolved
+  questions" with a link to the ADR. A token or component decision that
+  [the design-system change classes](design/evolution.md#change-classes) record in a design document
+  needs no ADR; keep its row and put the answer in the last cell.
+- Update the "Next step / owner" cell as work happens, so the next agent knows where the thread is.
+- Keep questions small enough to answer. If an entry has become two decisions, split it and assign a
+  new ID; do not recycle old IDs.
+- Review the register at every phase gate in the implementation plan. A question nobody has touched for
+  two phases is either deferred on purpose or forgotten; say which.
+
+Reading the columns:
+
+- **Question** is the decision, phrased as a question with a single answer.
+- **Why it matters** says what breaks or stalls while it stays open. **Blocking** marks work that
+  cannot start, not work that is merely inconvenienced.
+- **Options** is the shortlist already discussed, not an exhaustive survey. Adding an option is fine;
+  deleting one needs a reason in the ADR.
+- **Next step / owner** is the next concrete action and the role accountable for it, not the person
+  who happens to be reading.
+
+Blocking status, stated honestly:
+
+- OQ-02 (agent language) was resolved on 2026-11-14 by [ADR 0015](adr/0015-agent-language.md), so it
+  no longer blocks public release. OQ-01 (license) was resolved on 2026-11-14. OQ-24 (unconfigured
+  recording media) was resolved on 2026-11-14 by schema version 2, which makes an empty
+  `storage.recording.drives` list the explicit unconfigured state.
+- Hardware-in-loop testing and the BOM are blocked by OQ-09. QEMU work can proceed without it.
+- OQ-26 (touch-target floor), OQ-27 (360 or 390) and OQ-28 (screenshot retention) were answered on
+  2026-11-21 and are no longer blocking. The decisions are in their register rows below and in
+  [tokens.md](design/tokens.md#target-size), [review.md](design/review.md#widths) and
+  [review.md](design/review.md#screenshots). OQ-29 (route coverage) has a provisional working rule
+  since 2026-11-17: each UI ticket adds its routes to the manifest in the same change, and the drift
+  test fails a missing route.
+- OQ-30 (bulk camera add) does not block BIT-029: the sequential path is the interim path, and the
+  question decides whether a batch flow is needed for the four-camera MVP. The camera step's list and
+  its single review are specified as of 2026-11-21, so the open part is narrower: whether one search
+  pass may adopt several selected cameras at once.
+- OQ-31 (boot on a missing recording drive) was answered on 2026-11-21 by
+  [ADR 0028](adr/0028-missing-recording-drive-and-boot.md). The stopgap mount options, the Frigate
+  start gate and the status states are decided; BIT-012 still decides the product pool mounts.
+- OQ-32 (the header destination after first run) and OQ-33 (linkable and transient states) do not
+  block BIT-036, which fixes the current flow contradictions. OQ-32 decides what replaces `Setup`
+  once a settings surface exists; OQ-33 decides the state-by-state linkability assignment, which
+  BIT-014 declares for the operation view when it lands. Accepting ADR 0027 does not mandate either
+  change.
+- Nothing blocks the P0 and P1 documentation, schema and skeleton work in
+  [the implementation plan](plan/implementation-plan.md). OQ-19 (recording-drive redundancy),
+  OQ-20 (upstream time sources), OQ-21 (audio capture), OQ-22 (device I/O boundary) and OQ-23
+  (live video path) are not blocking. OQ-23 blocks live view, not the first-boot milestone, which
+  uses a snapshot. OQ-25 (local kiosk UI) is deferred on purpose and does not block v1. The
+  renderer uses provisional defaults where it needs an answer.
+
+## Register
+
+| ID | Question | Why it matters | Options | Next step / owner |
+| --- | --- | --- | --- | --- |
+| OQ-04 | Which OS A/B update mechanism? | Update safety and rollback are core promises; the choice shapes the image and signing chain. | systemd-sysupdate (in-tree, signed, simple); RAUC (bundle format, bootloader integration); Mender (hosted control plane). | Prototype sysupdate on a QEMU image, compare with RAUC; ADR; owner: image. The proposed [ADR 0030](adr/0030-ab-from-the-first-image.md) assumes A/B from the first image but leaves the mechanism here; this question stays open until the image ADR is accepted. |
+| OQ-05 | Is A/B present from day one, or added later? | Effort versus bricking risk; P3 exit criteria depend on it. | A/B from the first image; single slot with USB recovery first. | Decide together with OQ-04; owner: maintainer. The proposed [ADR 0030](adr/0030-ab-from-the-first-image.md) proposes A/B from the first image; this question stays open until the ADR is accepted. |
+| OQ-06 | Disk encryption, secure boot and TPM? | Footage and secrets at rest; TPM ties an image to hardware and complicates recovery and resale. | LUKS with TPM2 unlock; LUKS with passphrase; no encryption in v1; secure boot via shim. | Threat-model addendum to ADR 0010; owner: security. |
+| OQ-07 | Do we support Frigate+ models and buy a commercial license? | Better models and funding for upstream, but the terms restrict customer-site deployment and hardware bundling. | No Frigate+; owner-supplied key only; commercial license for a paid SKU. | Ask Frigate, Inc. directly; decide before any paid SKU; owner: maintainer. |
+| OQ-08 | Do we ship a Home Assistant add-on? | Reaches HA users, but needs Full Access and a different config path, and splits the test matrix. | No add-on in v1; document the community add-on; first-party add-on later. | Revisit after P4; owner: maintainer. |
+| OQ-09 | Which hardware SKU and BOM? | **Blocking** for HIL testing, driver and thermal validation, PoE budget and price. | N100 mini-PC, dual 2.5GbE, 8-port PoE switch, 4 TB HDD, UPS; N305 for more cameras. | Buy one reference unit, publish the BOM; owner: maintainer. |
+| OQ-10 | Which cameras are supported? | Field success depends on quirks (gateway requirement, NTP option 42, ONVIF auth); support load scales with the list, and a claim without evidence is guesswork. | A tested matrix with quirks and the manual fallback; community reports only; no list. | Maintain the [camera matrix](notes/camera-matrix.md) from BIT-008 probe data and field runs: record model, firmware, discovery layer, auth, profile and RTSP path, and turn each quirk into a row and a test. [ADR 0024](adr/0024-onvif-discovery-levels.md) makes manual address plus RTSP the baseline. The POC slice already supplies address, MAC, the ONVIF name scope and layer results; profile and media evidence remain open. Owner: QA. |
+| OQ-11 | Is there a multi-site or fleet control plane? | Decides whether Bittern is one appliance or a product line with hosted operations. | Per-device only; signed bundle pull from CI; hosted control plane. | Defer to P4; revisit with tailnet-based support; owner: maintainer. |
+| OQ-12 | What are the telemetry and update-check defaults? | The privacy promise versus update awareness; upstream version check is on by default. | All off with manual checks; update-check only against our server; opt-in diagnostics. | Install policy is proposed in [ADR 0021](adr/0021-security-updates.md); update-check and telemetry defaults remain open. Decide with the privacy ADR; owner: security. |
+| OQ-13 | What support and warranty model? | Determines docs, remote access, reset design and price; also who answers the phone. | Best-effort community; paid support; reseller warranty; none. | Define before the first handoff; owner: maintainer. |
+| OQ-14 | Is the name and domain clear? | Needed for repository, docs, registry, signing identity and any trademark filing. | `bittern.dev`, `bittern.io`, `bittern.org`; alternate bird names if taken. | Search trademarks and registries; owner: maintainer. |
+| OQ-15 | Are 8554 (RTSP restream) and Home Assistant access exposed by default? | Convenience versus attack surface; HA integration expects reachable streams. | Closed by default; open on LAN; open on tailnet only. | The BIT-003 renderer closes 8554 by default; decide before exposing it, owner: network. |
+| OQ-16 | How are recordings backed up off the appliance? | The recording pool has no redundancy and v1 has no backup path ([ADR 0014](adr/0014-dedicated-recording-drive.md), [ADR 0018](adr/0018-recording-capacity-pool.md)); a failed member loses its share, and losing the pool loses all footage, but cloud breaks local-first. The primary recording target is decided; this question covers backup only. | Local USB or NAS copy target; optional S3-compatible target; both. | Decide after P2; owner: maintainer. |
+| OQ-17 | Localization and accessibility scope? | Non-technical owners may not read English; accessibility is a quality bar, not a feature. | English only in v1; i18n framework from the start; a11y audit before P4. | Decide localization and the wider accessibility scope, then record it in a follow-up ADR; baseline accessibility is fixed by [ADR 0019](adr/0019-ui-stack.md); owner: frontend. |
+| OQ-18 | What is the target price? | Drives BOM, license, support model and whether Frigate+ is viable. | At cost; 300-500 USD; 800 USD and up with support. | Estimate from the BOM after OQ-09; owner: maintainer. |
+| OQ-19 | Does the recording pool need redundancy? | **Not blocking.** Capacity scaling is decided by [ADR 0018](adr/0018-recording-capacity-pool.md); redundancy is not. The pool has no redundancy, so a failed member loses its share of footage, and mirroring adds cost and complexity and does not replace backup. | Keep the non-redundant pool; mirror a second recording drive; external backup target. | Revisit after field data; owner: maintainer. |
+| OQ-20 | Which upstream time sources should chrony use on `lan0`? | NTP is an unsolicited outbound flow in the default path, and schema version 2 has no time-source field. A public pool has privacy and availability trade-offs. | Public pool (`pool.ntp.org`, the provisional renderer default); NTP servers supplied by DHCP on `lan0`; a vendor-operated set; owner-supplied addresses. | Decide with the privacy and egress review; owner: runtime. |
+| OQ-21 | Should the appliance capture camera audio, and under what privacy posture? | **Not blocking.** Audio can capture private conversations and changes retention, data flow, and the privacy page. | No audio in v1; off by default with explicit enablement and a data-flow note; on by default. | Write the privacy and data-flow note from [ADR 0010](adr/0010-security-and-privacy-posture.md) before any audio field ships; owner: security. |
+| OQ-22 | Does `bitternd` own relays, alarm inputs, and audio, and how do Frigate events reach them? | **Not blocking.** Device I/O needs one privileged boundary; wiring Frigate directly to GPIO or relays would bypass the renderer and the trust model. Hardware choice depends on OQ-09. | `bitternd` owns device I/O; a separate privileged helper; direct Frigate integrations or MQTT. | Decide with OQ-09 and write an ADR; see [extension points](notes/2026-11-14-extension-points.md); owner: runtime. |
+| OQ-23 | How does live video reach the browser? | **Not blocking for the first-boot milestone**, which uses a snapshot. Live view decides whether 8555 is exposed on `lan0`, whether go2rtc needs authentication, and how much video is proxied through `bitternd`. 8555 stays closed on `lan0` until this is answered, matching the current renderer. | Direct WebRTC on 8555 with go2rtc authentication; WebRTC or HLS proxied through `bitternd`; snapshots only in v1. | Resolve with the ADR in [BIT-023](plan/implementation-plan.md#bit-023-live-view); Tailscale plus the loopback Frigate UI is the interim verification path. See [media surfaces note](notes/2026-11-14-media-surfaces.md) and [NVR note](notes/2026-11-15-nvr-tailscale-interim-path.md); owner: frontend. |
+| OQ-25 | Should the appliance offer a local kiosk UI on an attached display? | **Deferred, not decided; not blocking.** The idea is a local full-screen view beside the network UI, but it adds a second session and auth path and depends on live view, a display choice and a recovery design. Current thinking: reuse the existing Go template and HTMX UI through a loopback TLS endpoint, with a kiosk principal, a local credential or PIN, and an explicit admin unlock, not a UI fork. | No local session in v1; a kiosk session reusing `bittern-ui`; a separate kiosk UI. | Deferred until after the v1 hardware gate; answer OQ-23, choose the display and write an ADR before implementation. See [kiosk mode note](notes/2026-11-15-kiosk-mode.md); owner: frontend. |
+| OQ-26 | What is the minimum touch-target size for the Bittern UI? | BIT-020 says only "touch-friendly", so the browser check cannot pass or fail a control and the same layout work may be done twice. WCAG 2.2 AA SC 2.5.8 sets 24 by 24 CSS pixels as the minimum; Apple and Material guidance use 44 pt and 48 dp; a 44 pixel floor changes row heights and control spacing on every page. | 24 by 24 CSS pixels, the WCAG 2.2 AA floor; 44 by 44 CSS pixels, common practice and stricter for touch; 24 as the hard floor with 44 for primary actions; no numeric floor, review only. | **Answered 2026-11-21, by role.** 44 by 44 CSS pixels for navigation, action rows and any whole-row target; 24 by 24 as the hard floor for every other interactive control, including a link inside a sentence, which WCAG 2.2 AA SC 2.5.8 exempts and this system still holds to 24. Hit area counts, visual size does not. [tokens.md](design/tokens.md#target-size) states the rule with `--touch-target` and `--touch-target-min`, and [components.md](design/components.md) states it per component. Evidence: the warning set at the provisional 24 floor on 2026-11-21, where every warning was a target below 44 and the flagged links were single-line text links at 27 to 32 high while the candidate radio was 24 by 24; the count is in the evidence note below rather than in this cell. History: [ADR 0025](adr/0025-browser-check-for-the-responsive-ui.md) provisionally failed below 24 and warned below 44, and the screens were measured on 2026-11-21. Owner: frontend. |
+| OQ-27 | Is the responsive scope 360 or 390 CSS pixels wide? | BIT-020's scope says the layout works from a 360 CSS pixel phone, its acceptance and the UX-8 principle measure at 390 by 844, and the [UI README](../ui/README.md) says 360 to 390. A check at 390 alone can pass a layout that breaks at 360, so a green run at one width does not prove the stated scope. The browser check measured both widths; the acceptance width was the open part. | Check 390 only, matching acceptance; check 360 only, matching scope; check both widths; keep 360 as the design floor and 390 as the acceptance width. | **Answered 2026-11-21.** 360 CSS pixels is the supported minimum and a floor that must pass. Both 360 and 390 are acceptance widths; the check measures 360 by 800, 390 by 844, 1280 by 800 and 1920 by 1080. [review.md](design/review.md#widths) states the four widths and their roles, and [patterns.md](design/patterns.md#cross-pattern-rules) carries the per-screen rule. Evidence: the 2026-11-17 run checked 51 screens at three widths and found 5 failures at 360, all on the status action row, fixed in `ui/static/bittern.css`; the re-run passed 51 screens at 360, 390 and 1280 with 0 failures, and the four-width run measured 68 route-width screens. 360 sits below every layout breakpoint (38rem, 44rem, 60rem), so neither phone width is a midpoint sample. History: [ADR 0025](adr/0025-browser-check-for-the-responsive-ui.md) provisionally measured 390 only, and 360 was added on 2026-11-17. Owner: frontend. |
+| OQ-28 | Are browser-check screenshots committed, gitignored build artifacts, or only linked? | BIT-020 requires a screenshot per screen and says the screenshots are checked in with the browser test or linked from the UI README. A binary per route and width on every change is repository weight and review noise; an artifact that is not kept cannot be compared later, and a link can rot. | Commit them under `tests/browser/screenshots/`; keep them as gitignored artifacts under `build/`; commit none and link a per-run artifact directory; commit a curated set per release. | **Answered 2026-11-21.** Per-run images stay gitignored working artifacts under `build/ui-screenshots/`, and a curated set is attached to each gate result or release, not committed per change. [review.md](design/review.md#screenshots) states the retention rule and where the curated set goes. Evidence: a per-run set is 68 default full-page images (17 screens from 13 routes at four widths) plus an `-expanded` copy for each screen with a closed disclosure, and `/build/` already covers the directory; [tests/browser/README.md](../tests/browser/README.md) records how the images are written. History: BIT-020 landed on 2026-11-17 and wrote the gitignored directory, which was the de facto option, and no screenshot has been committed. Owner: maintainer. |
+| OQ-29 | How do later UI tickets extend the browser check route list? | Updates, logs, support, reset and live view do not exist yet, so the check cannot cover them, and BIT-022, BIT-023, BIT-024, BIT-025, BIT-030 and BIT-031 all cite the BIT-020 checks. Without a rule each ticket either adds routes ad hoc or silently stays uncovered. | Every UI ticket adds its routes to the manifest in the same change; a separate coverage ticket per surface; the check derives routes from the UI README route table; no extension until the surface exists. | Answered provisionally on 2026-11-17: every UI ticket adds its routes to the [browser-check manifest](../tests/browser/routes.json) in the same change, and the manifest drift test fails a missing route instead of letting it stay unnoticed. This is a working rule, not a review decision, so it stays provisional; owner: frontend. |
+| OQ-30 | Is bulk camera add in scope for v1, and if so what is the batch flow? | The [Level 2 hardware run](notes/2026-11-17-level2-hardware-run.md) reported that the one-camera-at-a-time flow will not support adding many cameras at once. The MVP asks for four cameras in under 30 minutes, and a batch flow changes discovery, credential collection, reservation writing, review, apply atomicity and failure handling. | Sequential add from the listing ([BIT-029](plan/implementation-plan.md#bit-029-multi-camera-inventory-and-add-from-listing)); select several discovered cameras and adopt them in one batch; import a list of addresses and credentials; defer bulk add until measured evidence shows sequential add misses the budget. | Measure the sequential add time after BIT-029, then decide against the four-camera MVP budget; owner: frontend. The camera step's list and one Review are specified on 2026-11-21 ([flows.md](design/flows.md#the-camera-step)), so only the arity of one search pass remains open; see the evidence note below. |
+| OQ-32 | Which destination replaces `Setup` in the header after the first run completes? | `Setup` stays in the header after setup completes and is the only route to change configuration. [ADR 0027](adr/0027-flow-layer-above-patterns.md) says a completed flow is absent from the header (N5), and a rename with no settings surface would relabel the first-run wizard instead of replacing it. | Keep the entry and rename it `Settings` when a settings surface exists; hide it until a settings surface exists; leave it as it is and record the intent. | Leave the header unchanged for now and let [BIT-036](plan/implementation-plan.md#bit-036-first-run-and-flow-contradictions-from-the-flow-layer) own the rename and the settings surface; see the note below. Owner: frontend. |
+| OQ-33 | Which UI states must be stable URLs, and which are transient? | The answer decides what a bookmark or refresh returns and whether a future HTMX swap can change state without a URL. F8 defines three classes but not every state's assignment; the current table marks setup conditional and camera remove object scoped, while the apply operation view has no route yet. | Status, camera list and camera edit stable, with setup, review, apply and remove transient; status and camera list stable only, with every object-scoped screen transient; every GET-rendered state stable, including the wizard steps encoded in the URL. | Decide with the operation view before any HTMX swap replaces a state; see the note below. Owner: frontend. |
+| OQ-34 | What bytes does `payload.sha256` cover? | [ADR 0029](adr/0029-release-signing-and-key-custody.md) says the archive contains `manifest.json`, its signature files and the payload files, and that the payload digest covers the archive including the manifest and signatures. The manifest also contains `payload.sha256`, so the digest would have to cover a file that contains the digest. That fixed point does not exist, and the release path cannot assemble a signed bundle until the field has a well-defined input. | Hash a files-only payload archive and ship the manifest and signature beside it; define the digest over the canonical file list instead of an archive, which needs a new field; hash the archive with the manifest and signature entries excluded; keep the wording and add a separate bundle digest field. | Not blocking the offline signing tool, which hashes the archive it is given. The interim reading is the first option: `manifest --payload` hashes the archive as supplied, so the release path must pass a files-only payload archive. [The release signing tool note](notes/2026-11-21-release-signing-tool.md) records the contradiction. Owner: release. |
+
+**OQ-10 reference device.** The reference device for
+[BIT-027](plan/implementation-plan.md#bit-027-robust-onvif-profiles-ptz-and-field-interoperability) is
+a recent Axis PTZ, used for profile negotiation, PTZ presets and continuous move, home and stop,
+snapshot, events, and field quirks. Its model and firmware are added to the tested-device matrix under
+this question when the device is tested, with its services, profiles, authentication, and each quirk
+and the evidence for it. No credential, serial number, MAC address, or site identifier is recorded.
+Until that row exists the model is a candidate, not a supported camera.
+
+**OQ-26 evidence.** On 2026-11-21 the browser-check warning list was read for this question. The
+warning list is all text links 27 to 32 CSS pixels high; the candidate radio is 24 by 24 and passes
+the floor. The check reports 0 failures at the provisional 24 by 24 floor. That set is the evidence
+for the by-role answer: the flagged links are the inline and row links the rule distinguishes, so an
+inline link stays at 24 while a navigation or action target moves to 44. The count is not a
+constant: the 2026-11-21 design-conformance audit recorded 216 warnings and the review register
+records 228 for the 2026-11-17 width commit, so this note cites the dated set rather than a current
+figure.
+
+**OQ-27 evidence.** On 2026-11-17 the browser check added 360 by 800 to its existing 390 by 844
+and 1280 by 800 viewports. At two widths it had passed 34 route-width screens with 0 failures and
+114 warnings, 57 per width. At three widths the first run checked 51 screens and found 5 failures at
+360, all on the status routes: the three action links wrapped inside one inline link box, so the
+centre of "Back to setup" landed in the gap between its two line boxes and was reported as covered
+by the parent paragraph. `ui/static/bittern.css` now lays that row out as a wrapping flex row, and
+`ui/templates/status.html` gives the row its class. The re-run passed 51 screens with 0 failures and
+171 warnings, 57 per width; the 44 pixel warning set did not grow. That run is the evidence for the
+answer: 360 passes, so it is the supported minimum and not a design-only floor, and both phone
+widths are acceptance widths. The layout breakpoints are 38rem, 44rem and 60rem, so neither width
+is a midpoint sample; the four-width run now measures 68 route-width screens and both phone widths
+must pass. [review.md](design/review.md#widths) records the budgets.
+
+**OQ-28 evidence.** As of 2026-11-21, BIT-020 has landed and `make ui-browser-check` writes one
+full-page screenshot per route and width to gitignored `build/ui-screenshots/`, with no screenshot
+committed. A run is 68 default images from 17 screens and 13 routes at four widths, plus an
+`-expanded` copy for each screen with a closed disclosure. That set is the per-run working artifact
+the answer keeps out of git; the curated set for a gate result or release is the durable record.
+[review.md](design/review.md#screenshots) states the retention rule.
+
+**OQ-30 evidence.** On 2026-11-21 the maintainer decided the camera step's shape: the cameras added
+so far are listed at the top of the step, discovery and manual entry add one more, and one review
+applies them all. That settles where cameras accumulate and how they are committed, and it settles
+that removing one from the list is not the destructive remove. It does not settle how many cameras
+one search pass may adopt: a candidate-by-candidate add (today's shape), selecting several
+discovered cameras and collecting credentials for each in one pass, or importing a list of addresses
+and sign-ins. All three fit the specified destinations, because they differ inside the add
+destination and in what one add commits, not in the step's list or its one review. The measurement
+that decides is still the four-camera time budget in the register row. Evidence:
+[the step's specification](design/flows.md#the-camera-step) and
+[its note](notes/2026-11-21-multi-camera-step-spec.md).
+
+**OQ-32 navigation destination after first run.** `Setup` stays in the header after the first run
+completes and is the only route to change configuration
+([base.html](../ui/templates/base.html), line 18; [flows.md](design/flows.md#the-setup-defect)).
+[ADR 0027](adr/0027-flow-layer-above-patterns.md) makes the navigation model binding, and N5 says a
+completed flow is absent from the header, so leaving the entry is a known contradiction rather than
+an undecided label.
+
+Options: keep the entry and rename it `Settings` when a settings surface exists, with
+[BIT-036](plan/implementation-plan.md#bit-036-first-run-and-flow-contradictions-from-the-flow-layer)
+owning the route and the surface; hide the entry after the first run completes, with reconfiguration
+staying a reset ([ADR 0017](adr/0017-reset-levels-and-decommissioning.md)); leave it as it is and
+record the intent that the first-run wizard remains the only route to change configuration.
+
+Recommended: leave the header unchanged for now and let BIT-036 own the rename, so accepting
+ADR 0027 does not mandate an undesigned navigation change. A settings surface is not designed, and
+renaming the entry to `Settings` while it opens the first-run wizard would relabel the defect
+instead of fixing it.
+
+**OQ-33 linkable and transient states.** F8 classifies a state as persistent, object scoped or
+transient, and the table in [flows.md](design/flows.md#linkability) records the current assignment.
+The assignment decides what a bookmark or refresh returns and what a future HTMX swap may replace
+without a URL. The current table marks `/ui/setup` conditional and
+`/ui/cameras/{id}/remove` object scoped, while the apply operation view has no route yet
+([BIT-014](plan/implementation-plan.md#bit-014-long-running-operation-progress)). No HTMX swap
+changes a state today; the status fragment is the only fragment.
+
+Options: stable for status, the camera list and a camera edit page, with setup, review, apply and
+remove transient; stable for status and the camera list only, with every object-scoped screen
+transient; every GET-rendered state stable, including the wizard steps, with the session encoded in
+the URL.
+
+Recommended: the first. Status and the camera list render from appliance state, and a camera edit
+page is worth a bookmark while the camera exists. Setup, review, apply and remove depend on a
+session, a one-shot result or a destructive commit, so they redirect with an explanation when their
+state is gone and are never the only record of a result. A future HTMX swap must keep a stable URL
+for a persistent state and must not silently replace a transient one.
+
+## Dependencies between questions
+
+Some questions cannot be answered well in isolation. Answer the left side first, or answer both in one
+ADR:
+
+| Pairing | Why they travel together |
+| --- | --- |
+| OQ-04 then OQ-05 | The A/B mechanism determines whether day-one A/B is cheap or expensive. |
+| OQ-23 after ADR 0019 | The UI stack fixes whether a proxy or HLS endpoint terminates in `bitternd`, and the TLS listener is the only browser-facing port. |
+| OQ-09 then OQ-06 | TPM and disk encryption depend on the chosen board and firmware. |
+| OQ-09 then OQ-18 | Price follows the BOM, not the other way round. |
+| OQ-12 then OQ-13 | Support access and telemetry share the same remote path and privacy story. |
+| OQ-12 then OQ-20 | The telemetry and egress promise constrains whether a public NTP pool is acceptable. |
+
+Owner roles are placeholders until the project has named people: maintainer (product and release),
+security, frontend, image, runtime, network, QA, release. If a role has no owner, the maintainer owns
+it by default and should say so in the next review.
+
+## Resolved questions
+
+Resolved questions graduate to an ADR and are listed here for history: the question, the decision, a
+link to the ADR, and the date. They keep their ID and are not renumbered. The process itself is
+recorded in [ADR 0001](adr/0001-adopt-architecture-decision-records.md).
+
+| ID | Question | Resolution | Decision | Date |
+| --- | --- | --- | --- | --- |
+| OQ-01 | Which license does Bittern use? | MIT for all original Bittern code and documentation. No Apache-2.0, no CLA; contributions are inbound under MIT; a DCO is optional and not adopted; the Bittern name and logo are not licensed under MIT. | [ADR 0013](adr/0013-branding-and-licensing-constraints.md), [LICENSE](../LICENSE) | 2026-11-14 |
+| OQ-02 | Which language for `bitternd` and the `bittern` CLI? | Go for `bitternd` and the `bittern` CLI, statically linked binaries built from vendored modules. | [ADR 0015](adr/0015-agent-language.md) | 2026-11-14 |
+| OQ-03 | Which UI stack for `bittern-ui`, and how does live video reach the browser? | Server-rendered Go `html/template` with HTMX, embedded in `bitternd`, TLS by default. The live-video half was split out as OQ-23. | [ADR 0019](adr/0019-ui-stack.md) | 2026-11-14 |
+| OQ-24 | How does the schema represent an appliance with no recording drive? | Schema version 2 requires `storage.recording.drives` and defines an empty list as the explicit unconfigured media state. Version 1 documents migrate before validation. | [ADR 0018](adr/0018-recording-capacity-pool.md), [schema v1 to v2](../schema/migrations/README.md) | 2026-11-14 |
+| OQ-31 | May a missing recording drive block boot? | **Answered 2026-11-21.** No. Boot completes and the UI reports the fault, but Frigate does not start and recording never falls back to the OS disk. The media fstab line gains `nofail` and a bounded `x-systemd.device-timeout`; the Frigate unit uses `RequiresMountsFor` and an `ExecStartPre` mountpoint check; status distinguishes not attached, attached but not mounted, and mounted but failing its write test; `storage-setup.sh` rewrites existing fstab lines, so the change migrates on its next run. The history is in the note below. | [ADR 0028](adr/0028-missing-recording-drive-and-boot.md) | 2026-11-21 |
+
+Frigate+ support remains open as OQ-07; the MIT decision does not settle it.
+
+### OQ-31 history
+
+**Boot hazard, recorded and answered on 2026-11-21.** Before ADR 0028,
+`packaging/storage-setup.sh` wrote
+`UUID=<uuid> /var/lib/bittern/media ext4 defaults,noatime 0 2`, with no `nofail`, and the
+[POC runbook](runbooks/gk41-poc.md#prepare-the-recording-drive) forbade `nofail`. When the drive was
+present at install and was missing at the next boot, `local-fs.target` failed; on a headless
+appliance the expected result was emergency mode with no UI. That boot behaviour was inferred from
+the fstab line on 2026-11-21, not measured on the GK41. `install.sh` continued with a warning when no
+eligible drive was found, so an install with no drive wrote no fstab line and still booted.
+
+Consequences: the owner lost the UI and the status page at the moment storage failed, so a cable,
+enclosure or power fault became a console visit. Frigate cannot start without media, which is
+correct, and recordings must not fall back to `/`, because filling the OS drive breaks updates and
+the appliance ([ADR 0014](adr/0014-dedicated-recording-drive.md),
+[ADR 0018](adr/0018-recording-capacity-pool.md)).
+
+Options: keep the hard fstab failure and accept emergency mode; use a systemd mount unit with
+`nofail`, an explicit degraded storage state and a Frigate start gate such as `RequiresMountsFor` or
+a mount-source check, so boot continues but recording does not start on the OS disk; or fall back to
+a mount on the OS disk. The fallback was rejected because it violates ADR 0014's separation and
+silently fills the OS drive, and it hides the fault.
+
+Recommended at the time: the mount unit with `nofail`, the degraded storage state and the Frigate
+start gate, after measuring the boot and gate behaviour on the GK41. That option changes the
+runbook's blanket no-`nofail` rule and the reading of ADR 0014's "must be mounted at boot".
+[ADR 0028](adr/0028-missing-recording-drive-and-boot.md) records that decision; this note keeps the
+history of the question.
+
+Do not leave a resolved question in both places. A question resolved by an ADR moves here; a row
+answered in place under the design-system change classes stays in the register with its answer and
+is not copied here. Keeping both copies guarantees they diverge.
+
+## How to answer a question
+
+1. Timebox the investigation. If the answer needs more than a day of evidence gathering, split the
+   question or choose a reversible interim option and record it as such.
+2. Gather evidence, not preference: an upstream document, a spike result, a costed BOM, a legal term,
+   or a test on real hardware. Link it in the ADR.
+3. Write the ADR in `docs/adr/`, using the next free number. State the decision, the alternatives, the
+   consequences and what would make us revisit it.
+4. Move the row: delete it from the register above and add a line with the ADR link and the date.
+   When [the design-system change classes](design/evolution.md#change-classes) record the decision in
+   a design document instead, keep the row and put the answer, the date and the evidence in its last
+   cell.
+5. Update anything that referenced the ID: tickets in this repository, the implementation plan, and
+   README or architecture text that hedged on the answer.
+
+If the answer contradicts an accepted ADR, do not edit that ADR silently. Write a new ADR that
+supersedes it and link both directions.

@@ -1,0 +1,49 @@
+# Minimal Bittern configuration written by first boot.
+# Change it through the wizard or CLI; the appliance re-renders managed files.
+
+schema_version: 2
+identity:
+    hostname: bittern
+    timezone: UTC
+network:
+    lan0:
+        mode: dhcp
+        subnet: 192.168.1.0/24
+        match:
+            mac: aa:bb:cc:dd:ee:01
+    cam0:
+        mode: static
+        address: 10.77.0.1/24
+        dhcp:
+            pool_start: 10.77.0.50
+            pool_end: 10.77.0.199
+            reservation_start: 10.77.0.10
+            reservation_end: 10.77.0.49
+            gateway: 10.77.0.1
+            ntp_server: 10.77.0.1
+        match:
+            mac: aa:bb:cc:dd:ee:02
+cameras:
+    - id: front_door
+      name: Front door
+      address: 10.77.0.20
+      credentials_ref: cameras.front_door.rtsp_url
+storage:
+    recording:
+        mount_point: /var/lib/bittern/media
+        drives:
+            - by_id: /dev/disk/by-id/ata-test
+        retention_days: 14
+        free_space_reserve_gb: 50
+updates:
+    channel: stable
+privacy:
+    tailscale:
+        enabled: false
+        camera_subnet_route: false
+hardware:
+    detector:
+        type: coral_usb
+        device: usb
+    video_decode:
+        acceleration: vaapi

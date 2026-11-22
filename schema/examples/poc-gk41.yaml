@@ -1,0 +1,74 @@
+# Bittern POC profile for a Minisforum GK41, schema version 2.
+#
+# This file is not the reference appliance configuration and is not a BOM
+# decision. It sizes a two-camera hardware-in-the-loop proof on a Celeron J4125
+# with 8 GB of memory and a 1 TB USB recording drive. See
+# docs/notes/2026-11-14-poc-gk41.md.
+#
+# Camera credentials are referenced by key and live in
+# /etc/bittern/secrets.yaml, which is mode 0600 and never committed.
+schema_version: 2
+
+identity:
+  hostname: bittern-poc
+  timezone: UTC
+
+network:
+  lan0:
+    mode: dhcp
+    subnet: 192.168.1.0/24
+    gateway: 192.168.1.1
+    # Replace these MAC addresses with the GK41 values from bittern detect.
+    match:
+      mac: aa:bb:cc:dd:ee:01
+  cam0:
+    mode: static
+    address: 10.77.0.1/24
+    match:
+      mac: aa:bb:cc:dd:ee:02
+    dhcp:
+      pool_start: 10.77.0.50
+      pool_end: 10.77.0.199
+      reservation_start: 10.77.0.10
+      reservation_end: 10.77.0.49
+      gateway: 10.77.0.1
+      ntp_server: 10.77.0.1
+
+cameras:
+  - id: poc_cam0
+    name: POC camera 0
+    address: 10.77.0.20
+    rtsp_port: 554
+    rtsp_path: /stream1
+    credentials_ref: cameras.poc_cam0
+  - id: poc_cam1
+    name: POC camera 1
+    address: 10.77.0.21
+    rtsp_port: 554
+    rtsp_path: /stream1
+    credentials_ref: cameras.poc_cam1
+
+# One 1 TB recording drive, named by its /dev/disk/by-id path. The reserve is
+# 10 percent of the nominal drive size.
+storage:
+  recording:
+    mount_point: /var/lib/bittern/media
+    drives:
+      - by_id: /dev/disk/by-id/usb-USB_SATA_Recording_Disk_USB-GK41-0:0
+    retention_days: 3
+    free_space_reserve_gb: 100
+
+updates:
+  channel: stable
+
+privacy:
+  tailscale:
+    enabled: false
+    camera_subnet_route: false
+
+hardware:
+  detector:
+    type: coral_usb
+    device: usb
+  video_decode:
+    acceleration: vaapi

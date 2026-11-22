@@ -1,0 +1,72 @@
+# Status and TLS UI daemon unit. The POC payload installs it; the product image has not
+# fixed the final paths yet.
+# The apply implementation must add only the writable paths and capabilities it
+# actually needs instead of weakening this baseline.
+[Unit]
+Description=Bittern management daemon
+Documentation=file:/usr/share/doc/bittern/README.md
+After=local-fs.target network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/bittern
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bitternd --ui \
+    --listen 127.0.0.1:8080 \
+    --ui-listen 0.0.0.0:443 \
+    --config /etc/bittern/appliance.yaml \
+    --ui-certificate /etc/bittern/tls/server.crt \
+    --ui-secrets /etc/bittern/secrets.yaml \
+    --ui-auth-state /var/lib/bittern/auth.json
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=15s
+TimeoutStopSec=15s
+User=root
+Group=root
+UMask=0077
+
+# Bind 443 without granting the rest of the capability set. The status API
+# stays on loopback through --listen; the UI listener is the only LAN port.
+# The nftables ruleset is the network boundary, so IPAddressDeny cannot be
+# limited to loopback here without also blocking the UI.
+#
+# The wizard calls the apply transaction in this process, so the unit grants
+# the live paths apply writes: the generated network, firewall, DHCP, chrony,
+# Frigate unit, config and state files. /etc is writable because atomic
+# replacement of /etc/nftables.conf creates its temporary file beside the
+# target; ProtectSystem=strict still keeps /usr, /boot and the rest read-only.
+# CAP_NET_ADMIN covers nft -c and the firewall health probe. CAP_NET_RAW is
+# only for binding the ONVIF discovery socket to cam0 with SO_BINDTODEVICE, so
+# discovery traffic cannot leave that segment.
+StateDirectory=bittern
+ConfigurationDirectory=bittern
+ConfigurationDirectoryMode=0750
+ReadWritePaths=/etc /var/lib/bittern
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

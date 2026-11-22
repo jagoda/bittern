@@ -1,0 +1,25 @@
+{{define "welcome"}}{{template "head" .}}
+{{template "wizard-progress" .}}
+<h1 data-step-name="welcome">Welcome to Bittern</h1>
+<p class="lede">This short setup checks the appliance connections and adds your first camera.</p>
+{{template "preview-notice" .}}
+<div class="card">
+  <h2>Before you start</h2>
+  <ul>
+    <li>Connect the house network cable to the LAN port.</li>
+    <li>Connect the camera switch to the camera port.</li>
+    <li>Have the camera address ready in case Bittern cannot find it.</li>
+  </ul>
+  <details class="disclosure">
+    <summary>Port labels</summary>
+    <p>The appliance labels the house network port lan0 and the camera port cam0.</p>
+  </details>
+  <form method="post" action="/ui/wizard/network">
+    {{template "csrf" .}}
+    <div class="form-actions">
+      <button type="submit">Check the network</button>
+    </div>
+  </form>
+</div>
+<p>You can stop at any step. Nothing is written until you review the configuration and choose Apply.</p>
+{{template "foot" .}}{{end}}

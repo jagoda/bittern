@@ -1,0 +1,330 @@
+{{define "status-panel"}}
+<div class="status-grid">
+<section class="status-summary" aria-labelledby="status-summary-heading">
+  <h2 id="status-summary-heading">Overall state</h2>
+  <p><span class="state-badge state-{{.Status.State}}">{{overallLabel .Status.State}}</span></p>
+  <p>{{.Status.Reason}}</p>
+  <p class="meta">Last checked {{datetime .Status.GeneratedAt}} UTC. This page is read-only.</p>
+  {{if and .MockPreview .StateOptions}}
+  <nav class="state-links" aria-label="Preview status states">
+    <h3>Preview another state</h3>
+    <ul>
+      {{range .StateOptions}}<li><a href="/ui/status?state={{.State}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a></li>{{end}}
+    </ul>
+  </nav>
+  {{end}}
+</section>
+
+<section class="card status-wide" aria-labelledby="status-config">
+  <div class="section-heading">
+    <h2 id="status-config">Configuration</h2>
+    <span class="state-badge state-{{.Status.Sections.Config.State}}">{{sectionLabel .Status.Sections.Config.State}}</span>
+  </div>
+  {{if ne .Status.Sections.Config.State "unknown"}}
+  <dl class="facts">
+    <dt>Configuration saved</dt>
+    <dd>{{if .Status.Sections.Config.Present}}Saved on the appliance{{else}}Not saved yet{{end}}</dd>
+    <dt>Checked</dt>
+    <dd>{{if .Status.Sections.Config.Valid}}No problems found{{else}}Problems found{{end}}</dd>
+  </dl>
+  {{if .Status.Sections.Config.Errors}}
+  <p class="table-caption" id="status-config-problems">Configuration problems</p>
+  <div class="table-wrap stack-at-phone" role="region" tabindex="0" aria-labelledby="status-config-problems">
+    <table class="table-wide" aria-labelledby="status-config-problems">
+      <thead>
+        <tr>
+          <th scope="col">Setting</th>
+          <th scope="col">Problem</th>
+          <th scope="col">Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Status.Sections.Config.Errors}}
+        <tr>
+          <td class="break-token">{{.Path}}</td>
+          <td>{{.Rule}}</td>
+          <td>{{.Message}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  <dl class="table-stack" aria-labelledby="status-config-problems">
+    {{range .Status.Sections.Config.Errors}}
+    <div class="table-stack-row">
+      <dt class="table-stack-term break-token">{{.Path}}</dt>
+      <dd class="table-stack-value"><span class="table-stack-label">Problem</span> {{.Rule}}</dd>
+      <dd class="table-stack-detail">{{.Message}}</dd>
+    </div>
+    {{end}}
+  </dl>
+  {{else}}
+  <p>No configuration problems.</p>
+  {{end}}
+  {{end}}
+</section>
+
+<section class="card status-wide" aria-labelledby="status-render">
+  <div class="section-heading">
+    <h2 id="status-render">Configuration files</h2>
+    <span class="state-badge state-{{.Status.Sections.Render.State}}">{{sectionLabel .Status.Sections.Render.State}}</span>
+  </div>
+  {{if ne .Status.Sections.Render.State "unknown"}}
+  <dl class="facts">
+    <dt>Saved version</dt>
+    <dd>{{ptrString .Status.Sections.Render.Generation}}</dd>
+    <dt>Files written</dt>
+    <dd>{{.Status.Sections.Render.FileCount}}</dd>
+    <dt>Last written</dt>
+    <dd>{{ptrTime .Status.Sections.Render.LastRender}}</dd>
+  </dl>
+  {{if .Status.Sections.Render.Validation}}
+  <p class="table-caption" id="status-render-checks">Configuration file checks</p>
+  <div class="table-wrap stack-at-phone" role="region" tabindex="0" aria-labelledby="status-render-checks">
+    <table class="render-checks table-wide" aria-labelledby="status-render-checks">
+      <thead>
+        <tr>
+          <th scope="col">Check</th>
+          <th scope="col">State</th>
+          <th scope="col">Message</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Status.Sections.Render.Validation}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td><span class="state-badge state-{{.State}}">{{sectionLabel .State}}</span></td>
+          <td>{{.Message}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  <dl class="table-stack" aria-labelledby="status-render-checks">
+    {{range .Status.Sections.Render.Validation}}
+    <div class="table-stack-row">
+      <dt class="table-stack-term">{{.Name}}</dt>
+      <dd class="table-stack-state"><span class="state-badge state-{{.State}}">{{sectionLabel .State}}</span></dd>
+      <dd class="table-stack-detail">{{.Message}}</dd>
+    </div>
+    {{end}}
+  </dl>
+  {{else}}
+  <p>No configuration file checks have reported yet.</p>
+  {{end}}
+  {{end}}
+</section>
+
+<section class="card" aria-labelledby="status-frigate">
+  <div class="section-heading">
+    <h2 id="status-frigate">Recording service</h2>
+    <span class="state-badge state-{{.Status.Sections.Frigate.State}}">{{sectionLabel .Status.Sections.Frigate.State}}</span>
+  </div>
+  <dl class="facts">
+    {{if ne .Status.Sections.Frigate.State "unknown"}}
+    <dt>Responding</dt>
+    <dd>{{yesno .Status.Sections.Frigate.Reachable}}</dd>
+    <dt>Cameras reported</dt>
+    <dd>{{ptrInt .Status.Sections.Frigate.CameraCount}}</dd>
+    {{end}}
+    <dt>Recording software</dt>
+    <dd>{{recordingSoftwareLabel .Status.Sections.Frigate.Image.State}}</dd>
+  </dl>
+  {{if eq .Status.Sections.Frigate.Image.State "downloading"}}
+  <p>Bittern is downloading the recording software. You can keep working through setup; recording starts when the download finishes and a camera is applied.</p>
+  {{else if eq .Status.Sections.Frigate.Image.State "failed"}}
+  <p>The recording software could not be downloaded. Connect the appliance to the internet and restart it. Bittern tries the download again at the next start.</p>
+  {{else if eq .Status.Sections.Frigate.Image.State "absent"}}
+  <p>The recording software is not on the appliance yet. Bittern downloads it in the background while you work through setup.</p>
+  {{end}}
+</section>
+
+<section class="card" aria-labelledby="status-storage">
+  <div class="section-heading">
+    <h2 id="status-storage">Recording drive</h2>
+    <span class="state-badge state-{{.Status.Sections.Storage.State}}">{{sectionLabel .Status.Sections.Storage.State}}</span>
+  </div>
+  {{if ne .Status.Sections.Storage.State "unknown"}}
+  <dl class="facts">
+    <dt>Recording drive</dt>
+    <dd>{{if .Status.Sections.Storage.Present}}Connected{{else}}Not connected{{end}}</dd>
+    <dt>Free space</dt>
+    <dd>{{bytesPtr .Status.Sections.Storage.FreeBytes}}</dd>
+    <dt>Space kept free</dt>
+    <dd>{{bytesPtr .Status.Sections.Storage.ReserveBytes}}</dd>
+    <dt>Drives known</dt>
+    <dd>{{ptrInt .Status.Sections.Storage.MemberCount}}</dd>
+    <dt>Drives missing</dt>
+    <dd>{{if .Status.Sections.Storage.MissingMembers}}{{join .Status.Sections.Storage.MissingMembers ", "}}{{else}}None{{end}}</dd>
+  </dl>
+  {{if eq .Status.Sections.Storage.DetailState "not-attached"}}
+  <p>The recording drive is not connected. The web pages, the network, and camera management still work; recording is stopped. Connect the drive and restart the appliance, then check again.</p>
+  {{else if eq .Status.Sections.Storage.DetailState "not-mounted"}}
+  <p>The recording drive is connected but Bittern cannot write to it. Recording is stopped. Check the drive, then run the storage setup again.</p>
+  {{else if eq .Status.Sections.Storage.DetailState "write-test-failed"}}
+  <p>The recording drive is connected but Bittern could not write to it. Recording fails until the drive is repaired or replaced.</p>
+  {{else if eq .Status.Sections.Storage.DetailState "ready"}}
+  <p>The recording drive is connected and passed its write test.</p>
+  {{end}}
+  {{end}}
+</section>
+
+<section class="card status-wide" aria-labelledby="status-network">
+  <div class="section-heading">
+    <h2 id="status-network">Network status</h2>
+    <span class="state-badge state-{{.Status.Sections.Network.State}}">{{sectionLabel .Status.Sections.Network.State}}</span>
+  </div>
+  {{if ne .Status.Sections.Network.State "unknown"}}
+  <p class="table-caption" id="status-network-connections">Network connections</p>
+  <div class="table-wrap stack-at-phone" role="region" tabindex="0" aria-labelledby="status-network-connections">
+    <table aria-labelledby="status-network-connections">
+      <thead>
+        <tr>
+          <th scope="col">Connection</th>
+          <th scope="col">Cable</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">House network<br /><span class="break-token">{{ptrString .Status.Sections.Network.LAN0.Address}}</span></th>
+          <td>{{cableLabel .Status.Sections.Network.LAN0}}</td>
+        </tr>
+        <tr>
+          <th scope="row">Camera network<br /><span class="break-token">{{ptrString .Status.Sections.Network.CAM0.Address}}</span></th>
+          <td>{{cableLabel .Status.Sections.Network.CAM0}}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <dl class="table-stack" aria-labelledby="status-network-connections">
+    <div class="table-stack-row">
+      <dt class="table-stack-term">House network</dt>
+      <dd class="table-stack-state">{{cableLabel .Status.Sections.Network.LAN0}}</dd>
+      <dd class="table-stack-detail"><span class="table-stack-label">Address</span> <span class="break-token">{{ptrString .Status.Sections.Network.LAN0.Address}}</span></dd>
+    </div>
+    <div class="table-stack-row">
+      <dt class="table-stack-term">Camera network</dt>
+      <dd class="table-stack-state">{{cableLabel .Status.Sections.Network.CAM0}}</dd>
+      <dd class="table-stack-detail"><span class="table-stack-label">Address</span> <span class="break-token">{{ptrString .Status.Sections.Network.CAM0.Address}}</span></dd>
+    </div>
+  </dl>
+  {{end}}
+</section>
+
+<section class="card" aria-labelledby="status-updates">
+  <div class="section-heading">
+    <h2 id="status-updates">Updates</h2>
+    <span class="state-badge state-{{.Status.Sections.Updates.State}}">{{sectionLabel .Status.Sections.Updates.State}}</span>
+  </div>
+  <dl class="facts">
+    <dt>Installed version</dt>
+    <dd>{{if .Status.Sections.Updates.CurrentSlot}}{{ptrString .Status.Sections.Updates.CurrentSlot}}{{else}}Not reported{{end}}</dd>
+    <dt>Update</dt>
+    <dd>{{if .Status.Sections.Updates.Generation}}Installed{{else}}Not checked{{end}}</dd>
+  </dl>
+</section>
+
+<section class="card" aria-labelledby="status-reset">
+  <div class="section-heading">
+    <h2 id="status-reset">Reset</h2>
+    <span class="state-badge state-{{.Status.Sections.Reset.State}}">{{sectionLabel .Status.Sections.Reset.State}}</span>
+  </div>
+  <dl class="facts">
+    <dt>Last reset</dt>
+    <dd>{{if .Status.Sections.Reset.CompletedAt}}Completed{{else}}No reset recorded{{end}}</dd>
+    <dt>Completed</dt>
+    <dd>{{ptrTime .Status.Sections.Reset.CompletedAt}}</dd>
+  </dl>
+</section>
+
+<section class="card status-wide" aria-labelledby="status-hardware">
+  <div class="section-heading">
+    <h2 id="status-hardware">Hardware</h2>
+    {{with .Status.Sections.Hardware}}<span class="state-badge state-{{.State}}">{{sectionLabel .State}}</span>{{end}}
+  </div>
+  {{with .Status.Sections.Hardware}}
+  <p>Bittern detected the appliance hardware. It has {{humanBytes .MemoryBytes}} of memory.</p>
+  {{else}}
+  <p>This build did not report the hardware.</p>
+  {{end}}
+</section>
+
+<details class="disclosure status-wide">
+  <summary>Technical details</summary>
+  <dl class="facts">
+    <dt>Overall state</dt>
+    <dd><code>{{.Status.State}}</code></dd>
+    <dt>Status generated</dt>
+    <dd>{{datetime .Status.GeneratedAt}} UTC</dd>
+    <dt>Configuration file</dt>
+    <dd><code>{{.Status.Sections.Config.Path}}</code></dd>
+    <dt>Configuration format version</dt>
+    <dd>{{ptrInt .Status.Sections.Config.SchemaVersion}}</dd>
+    <dt>Configuration file present</dt>
+    <dd>{{yesno .Status.Sections.Config.Present}}</dd>
+    <dt>Configuration valid</dt>
+    <dd>{{yesno .Status.Sections.Config.Valid}}</dd>
+    <dt>Configuration state</dt>
+    <dd><code>{{.Status.Sections.Config.State}}</code></dd>
+    <dt>Configuration files state</dt>
+    <dd><code>{{.Status.Sections.Render.State}}</code></dd>
+    <dt>Saved version</dt>
+    <dd>{{ptrString .Status.Sections.Render.Generation}}</dd>
+    <dt>Files written</dt>
+    <dd>{{.Status.Sections.Render.FileCount}}</dd>
+    <dt>Last written</dt>
+    <dd>{{ptrTime .Status.Sections.Render.LastRender}}</dd>
+    <dt>Recording service state</dt>
+    <dd><code>{{.Status.Sections.Frigate.State}}</code></dd>
+    {{if .Status.Sections.Frigate.Version}}<dt>Recording service version</dt>
+    <dd>{{ptrString .Status.Sections.Frigate.Version}}</dd>{{end}}
+    {{if .Status.Sections.Frigate.Image.Digest}}<dt>Recording software digest</dt>
+    <dd><code>{{.Status.Sections.Frigate.Image.Digest}}</code></dd>{{end}}
+    {{if .Status.Sections.Frigate.Image.LastError}}<dt>Recording software download error</dt>
+    <dd>{{.Status.Sections.Frigate.Image.LastError}}</dd>{{end}}
+    {{if .Status.Sections.Frigate.LastError}}<dt>Recording service error</dt>
+    <dd>{{.Status.Sections.Frigate.LastError}}</dd>{{end}}
+    <dt>Recording drive state</dt>
+    <dd><code>{{.Status.Sections.Storage.State}}</code></dd>
+    <dt>Recording drive detail</dt>
+    <dd><code>{{.Status.Sections.Storage.DetailState}}</code></dd>
+    <dt>Recording drive path</dt>
+    <dd><code>{{.Status.Sections.Storage.Path}}</code></dd>
+    <dt>Recording drives known</dt>
+    <dd>{{ptrInt .Status.Sections.Storage.MemberCount}}</dd>
+    <dt>Recording drives missing</dt>
+    <dd>{{if .Status.Sections.Storage.MissingMembers}}{{join .Status.Sections.Storage.MissingMembers ", "}}{{else}}None{{end}}</dd>
+    <dt>Network state</dt>
+    <dd><code>{{.Status.Sections.Network.State}}</code></dd>
+    <dt>House network connection</dt>
+    <dd><code>lan0</code>: {{cableLabel .Status.Sections.Network.LAN0}}{{if .Status.Sections.Network.LAN0.LastError}}; {{.Status.Sections.Network.LAN0.LastError}}{{end}}</dd>
+    <dt>Camera network connection</dt>
+    <dd><code>cam0</code>: {{cableLabel .Status.Sections.Network.CAM0}}{{if .Status.Sections.Network.CAM0.LastError}}; {{.Status.Sections.Network.CAM0.LastError}}{{end}}</dd>
+    <dt>Updates state</dt>
+    <dd><code>{{.Status.Sections.Updates.State}}</code></dd>
+    <dt>Installed version slot</dt>
+    <dd>{{ptrString .Status.Sections.Updates.CurrentSlot}}</dd>
+    <dt>Update generation</dt>
+    <dd>{{ptrInt64 .Status.Sections.Updates.Generation}}</dd>
+    <dt>Reset state</dt>
+    <dd><code>{{.Status.Sections.Reset.State}}</code></dd>
+    <dt>Reset level</dt>
+    <dd>{{ptrString .Status.Sections.Reset.Level}}</dd>
+    <dt>Reset completed</dt>
+    <dd>{{ptrTime .Status.Sections.Reset.CompletedAt}}</dd>
+    {{with .Status.Sections.Hardware}}
+    <dt>Hardware state</dt>
+    <dd><code>{{.State}}</code></dd>
+    <dt>Processor</dt>
+    <dd>{{.CPU.Model}}</dd>
+    <dt>Processor cores</dt>
+    <dd>{{.CPU.Cores}}</dd>
+    <dt>Memory</dt>
+    <dd>{{humanBytes .MemoryBytes}}</dd>
+    <dt>Accelerators</dt>
+    <dd>{{if .Accelerators}}{{join .Accelerators ", "}}{{else}}None detected{{end}}</dd>
+    {{end}}
+  </dl>
+</details>
+</div>
+{{end}}

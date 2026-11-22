@@ -1,0 +1,346 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bittern:schema:appliance:1",
+  "title": "Bittern appliance configuration",
+  "description": "Schema version 1 of appliance.yaml, the single source of truth for a Bittern appliance. Secrets are never stored in this document; camera credentials are referenced from /etc/bittern/secrets.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "identity",
+    "network",
+    "cameras",
+    "storage",
+    "updates",
+    "privacy"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Document schema version. Version 1 is the only version this schema accepts."
+    },
+    "identity": {
+      "$ref": "#/$defs/identity"
+    },
+    "network": {
+      "$ref": "#/$defs/network"
+    },
+    "cameras": {
+      "type": "array",
+      "description": "Camera inventory. May be empty on first boot.",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/camera"
+      }
+    },
+    "storage": {
+      "$ref": "#/$defs/storage"
+    },
+    "updates": {
+      "$ref": "#/$defs/updates"
+    },
+    "privacy": {
+      "$ref": "#/$defs/privacy"
+    }
+  },
+  "$defs": {
+    "ipv4": {
+      "type": "string",
+      "format": "ipv4",
+      "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$",
+      "description": "Dotted-quad IPv4 address."
+    },
+    "ipv4Cidr": {
+      "type": "string",
+      "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/(?:3[0-2]|[12]?[0-9])$",
+      "description": "IPv4 address with a prefix length, for example 10.77.0.1/24."
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostname",
+        "timezone"
+      ],
+      "description": "Stable device identity. Secrets and generated keys are not part of this section.",
+      "properties": {
+        "hostname": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
+          "default": "bittern",
+          "description": "DNS hostname for the appliance."
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "default": "UTC",
+          "description": "IANA time zone name used for logs and schedules."
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lan0",
+        "cam0"
+      ],
+      "description": "The two fixed interface roles from ADR 0005.",
+      "properties": {
+        "lan0": {
+          "$ref": "#/$defs/lan0"
+        },
+        "cam0": {
+          "$ref": "#/$defs/cam0"
+        }
+      }
+    },
+    "lan0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "subnet"
+      ],
+      "description": "House LAN interface. DHCP with a static reservation.",
+      "properties": {
+        "mode": {
+          "const": "dhcp",
+          "description": "lan0 always uses DHCP in schema version 1."
+        },
+        "subnet": {
+          "$ref": "#/$defs/ipv4Cidr",
+          "description": "LAN subnet as a network address, for example 192.168.1.0/24."
+        },
+        "gateway": {
+          "$ref": "#/$defs/ipv4",
+          "description": "Expected LAN gateway. DHCP supplies it at runtime; this value lets the validator check it before apply."
+        }
+      }
+    },
+    "cam0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "address",
+        "dhcp"
+      ],
+      "description": "Isolated camera interface with no default gateway and IPv6 disabled.",
+      "properties": {
+        "mode": {
+          "const": "static",
+          "description": "cam0 always uses a static address in schema version 1."
+        },
+        "address": {
+          "$ref": "#/$defs/ipv4Cidr",
+          "description": "Appliance address on the camera segment, for example 10.77.0.1/24."
+        },
+        "dhcp": {
+          "$ref": "#/$defs/cam0Dhcp"
+        }
+      }
+    },
+    "cam0Dhcp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pool_start",
+        "pool_end",
+        "reservation_start",
+        "reservation_end",
+        "gateway",
+        "ntp_server"
+      ],
+      "description": "DHCP and NTP options served only on cam0.",
+      "properties": {
+        "pool_start": {
+          "$ref": "#/$defs/ipv4",
+          "description": "First address of the dynamic DHCP pool."
+        },
+        "pool_end": {
+          "$ref": "#/$defs/ipv4",
+          "description": "Last address of the dynamic DHCP pool."
+        },
+        "reservation_start": {
+          "$ref": "#/$defs/ipv4",
+          "description": "First address reserved for camera reservations."
+        },
+        "reservation_end": {
+          "$ref": "#/$defs/ipv4",
+          "description": "Last address reserved for camera reservations."
+        },
+        "gateway": {
+          "$ref": "#/$defs/ipv4",
+          "description": "Gateway option advertised to cameras. Usually the cam0 appliance address."
+        },
+        "ntp_server": {
+          "$ref": "#/$defs/ipv4",
+          "description": "NTP server option advertised to cameras. Usually the cam0 appliance address."
+        }
+      }
+    },
+    "camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "address"
+      ],
+      "description": "One camera. Credentials are referenced by key, never included.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Stable camera identifier used in generated configuration."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Display name shown in the UI."
+        },
+        "address": {
+          "$ref": "#/$defs/ipv4",
+          "description": "Camera address on the cam0 subnet."
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the camera is enabled."
+        },
+        "rtsp_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 554,
+          "description": "Camera RTSP port."
+        },
+        "rtsp_path": {
+          "type": "string",
+          "pattern": "^/",
+          "default": "/",
+          "description": "RTSP path beginning with a slash."
+        },
+        "credentials_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "description": "Key in /etc/bittern/secrets.yaml for this camera's credentials. No credential value belongs here."
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recording"
+      ],
+      "description": "Storage roles. Version 1 has one local recording drive and no network storage.",
+      "properties": {
+        "recording": {
+          "$ref": "#/$defs/recording"
+        }
+      }
+    },
+    "recording": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "retention_days",
+        "free_space_reserve_gb"
+      ],
+      "description": "Dedicated recording drive from ADR 0014. Name it by mount point or by device role.",
+      "properties": {
+        "mount_point": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Mount point of the dedicated recording drive, for example /var/lib/bittern/media."
+        },
+        "device_role": {
+          "const": "recording",
+          "description": "Device role to resolve to the recording drive when no mount point is configured."
+        },
+        "retention_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "default": 14,
+          "description": "Days of recordings kept before pruning."
+        },
+        "free_space_reserve_gb": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "default": 50,
+          "description": "Free space kept on the recording drive in GiB."
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "mount_point"
+          ]
+        },
+        {
+          "required": [
+            "device_role"
+          ]
+        }
+      ]
+    },
+    "updates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "channel"
+      ],
+      "description": "Release channel. Update mechanism and update-check policy remain open questions.",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "enum": [
+            "stable",
+            "beta"
+          ],
+          "default": "stable",
+          "description": "Release channel recorded by this device."
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tailscale"
+      ],
+      "description": "Privacy-relevant configuration that is already decided. Telemetry and update-check defaults remain open.",
+      "properties": {
+        "tailscale": {
+          "$ref": "#/$defs/tailscale"
+        }
+      }
+    },
+    "tailscale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "description": "Optional outbound-only remote access from ADR 0009.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether Tailscale remote access is enabled."
+        },
+        "camera_subnet_route": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the opt-in 10.77.0.0/24 subnet route is advertised to the tailnet."
+        }
+      }
+    }
+  }
+}

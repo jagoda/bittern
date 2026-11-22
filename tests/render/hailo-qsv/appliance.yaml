@@ -1,0 +1,59 @@
+# Render fixture: Hailo-8 detector with QSV video decode. The compose output
+# must pass /dev/hailo0 and /dev/dri but never /dev/bus/usb. Cameras have no
+# credentials_ref, so their RTSP URLs are rendered directly and no env file is
+# referenced.
+schema_version: 2
+
+identity:
+  hostname: bittern-hailo
+  timezone: UTC
+
+network:
+  lan0:
+    mode: dhcp
+    subnet: 192.168.60.0/24
+    gateway: 192.168.60.1
+  cam0:
+    mode: static
+    address: 10.99.0.1/24
+    dhcp:
+      pool_start: 10.99.0.50
+      pool_end: 10.99.0.199
+      reservation_start: 10.99.0.10
+      reservation_end: 10.99.0.49
+      gateway: 10.99.0.1
+      ntp_server: 10.99.0.1
+
+cameras:
+  - id: loading_bay
+    name: Loading bay
+    address: 10.99.0.30
+    rtsp_port: 8554
+    rtsp_path: /stream1
+  - id: rear_gate
+    name: Rear gate
+    address: 10.99.0.31
+    rtsp_path: /h264
+
+storage:
+  recording:
+    mount_point: /var/lib/bittern/media
+    drives:
+      - serial: HAILO-TEST-0001
+    retention_days: 30
+    free_space_reserve_gb: 100
+
+updates:
+  channel: stable
+
+privacy:
+  tailscale:
+    enabled: false
+    camera_subnet_route: false
+
+hardware:
+  detector:
+    type: hailo8
+    device: "0000:03:00.0"
+  video_decode:
+    acceleration: qsv

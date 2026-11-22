@@ -1,0 +1,15 @@
+# DHCP service for cameras on cam0. No DNS service and no forwarding.
+port=0
+# Start before cam0 has carrier or an address, then bind when networkd configures it.
+bind-dynamic
+interface=cam0
+dhcp-authoritative
+
+# Dynamic pool. Camera reservations are static addresses outside this pool.
+dhcp-range={{ .PoolStart }},{{ .PoolEnd }},{{ .Netmask }},{{ .LeaseTime }}
+dhcp-option=option:router,{{ .Gateway }}
+dhcp-option=option:ntp-server,{{ .NTPServer }}
+dhcp-option=option:dns-server
+
+# Camera reservations belong to {{ .ReservationStart }} to {{ .ReservationEnd }}.
+# They are not leases and are never served from the dynamic pool.

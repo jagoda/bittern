@@ -1,0 +1,134 @@
+# Bittern product policy for the Frigate engine.
+#
+# This file holds values that are not owner configuration. They are chosen by
+# Bittern, reviewed with the pinned Frigate release, and changed only with the
+# renderer, tests and documentation in the same change. Owner choices such as
+# cameras, addresses and retention live in appliance.yaml.
+#
+# The image digest was re-verified against GHCR on 2026-11-14 through the OCI
+# registry API with an anonymous pull token. Re-verify both the tag and digest
+# before changing the pin.
+schema_version: 1
+
+image:
+  registry: ghcr.io
+  repository: blakeblackshear/frigate
+  tag: 0.18.2
+  digest: sha256:fd60f99ffd4eb6c42360ed4e14953e270586f239309ab3983e55b2e97ffac09a
+  verified: 2026-11-14
+
+runtime:
+  shm_size: 1gb
+  restart: unless-stopped
+  no_new_privileges: true
+  log:
+    driver: json-file
+    max_size: 10m
+    max_file: 3
+  # Frigate uses this for its cache. It is rebuildable and never recorded to
+  # the media pool or the OS drive.
+  cache_tmpfs_size: 1073741824
+
+config:
+  auth_enabled: true
+  # The product config pins reset_admin_password false. The fixture sets it to
+  # true to print a fresh password for its smoke test; that must not reach a
+  # device.
+  auth_reset_admin_password: false
+  mqtt_enabled: false
+  telemetry_version_check: false
+  ipv6_enabled: false
+  listen:
+    # ADR 0016: Frigate's unauthenticated API and authenticated UI are support
+    # paths on loopback, never LAN services.
+    internal: 127.0.0.1:5000
+    external: 127.0.0.1:8971
+  # ADR 0014 and ADR 0018: the media database lives with recordings.
+  database_path: /media/frigate/frigate.db
+  detect_fps: 5
+  snapshots:
+    # Snapshots are a separate Frigate section. Their settings are product
+    # policy; retention currently follows storage.recording.retention_days.
+    enabled: true
+    timestamp: false
+    bounding_box: false
+    quality: 80
+  record:
+    # Continuous and motion recording are on. Continuous, motion, alert and
+    # detection retention all use storage.recording.retention_days. Event-only
+    # recording is not the product default.
+    continuous: true
+    motion: true
+  # Provisional until the schema exposes object selection. Tracking person is
+  # not yet a product decision.
+  objects:
+    - person
+
+# Detector policy per hardware.detector.type. The config key and Frigate type
+# are product choices. devices and groups are passed to compose only for the
+# selected detector.
+#
+# The groups are numeric GIDs for the DRM device nodes: Debian's reference
+# video group is 44 and render is 992. Docker resolves a group_add name against
+# the container image's group file, and the upstream Frigate image has no
+# render entry, so a name fails before the container starts. The image is not
+# ours to change. Numeric GIDs match the device nodes and need no lookup.
+detectors:
+  cpu:
+    name: cpu
+    type: cpu
+    devices: []
+    groups: []
+  openvino:
+    name: ov
+    type: openvino
+    device: GPU
+    devices:
+      - /dev/dri:/dev/dri
+    groups:
+      - "44"   # video
+      - "992"  # render
+  coral_usb:
+    name: coral
+    type: edgetpu
+    device: usb
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    groups: []
+  hailo8:
+    name: hailo
+    type: hailo8l
+    # Frigate expects a Hailo transport name here, not the PCI address that
+    # first boot records in hardware.detector.device.
+    device: PCIe
+    devices:
+      - /dev/hailo0
+    groups: []
+
+# Video decode policy per hardware.video_decode.acceleration. Missing hardware
+# means none, which is the CPU build and passes no GPU device.
+video_decode:
+  auto:
+    hwaccel_args: auto
+    devices: []
+    groups: []
+  none:
+    hwaccel_args: ""
+    devices: []
+    groups: []
+  vaapi:
+    hwaccel_args: preset-vaapi
+    devices:
+      - /dev/dri:/dev/dri
+    groups:
+      - "44"   # video
+      - "992"  # render
+  qsv:
+    # VAAPI is the portable Intel path; QSV is chosen only when the owner or
+    # detection says so. H.264 is the common camera stream for v1.
+    hwaccel_args: preset-intel-qsv-h264
+    devices:
+      - /dev/dri:/dev/dri
+    groups:
+      - "44"   # video
+      - "992"  # render

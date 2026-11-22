@@ -1,0 +1,31 @@
+{{define "storage"}}{{template "head" .}}
+{{template "wizard-progress" .}}
+<h1 data-step-name="storage">Recording drive</h1>
+<p class="lede">Recordings belong on their own drive, separate from the one the appliance runs from.</p>
+{{template "preview-notice" .}}
+<div class="card">
+  <dl class="facts">
+    <dt>Drive</dt>
+    <dd data-storage-present="{{.Storage.Present}}">{{if .Storage.Present}}Connected{{else}}Not found{{end}}</dd>
+    <dt>Free space</dt>
+    <dd data-storage-free="{{.Storage.Free}}">{{.Storage.Free}}</dd>
+    <dt>Space kept free</dt>
+    <dd data-storage-reserve="{{.Storage.Reserve}}">{{.Storage.Reserve}}</dd>
+  </dl>
+  <p>{{.Storage.Detail}}</p>
+  <details class="disclosure">
+    <summary>Technical details</summary>
+    <dl class="facts">
+      <dt>Path</dt>
+      <dd data-storage-path="{{.Storage.Path}}"><code>{{.Storage.Path}}</code></dd>
+    </dl>
+  </details>
+  <form method="post" action="/ui/wizard/camera/continue">
+    {{template "csrf" .}}
+    <div class="form-actions">
+      <button type="submit">Continue to camera</button>
+      <a href="/ui/wizard/network">Back to network</a>
+    </div>
+  </form>
+</div>
+{{template "foot" .}}{{end}}

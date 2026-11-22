@@ -1,0 +1,12 @@
+# Time client on lan0 and NTP server for cameras on cam0 (ADR 0005).
+driftfile /var/lib/chrony/chrony.drift
+makestep 1.0 3
+rtcsync
+
+# Upstream time sources. This is a provisional renderer default because schema
+# version 1 has no field for time sources.
+pool pool.ntp.org iburst
+
+# Serve NTP to the camera segment only.
+bindaddress {{ .BindAddress }}
+allow {{ .CameraSubnet }}

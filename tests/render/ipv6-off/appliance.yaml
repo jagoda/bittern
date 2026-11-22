@@ -1,0 +1,50 @@
+# Render fixture: cam0 is IPv4-only and Tailscale is enabled. Schema version 2
+# has no IPv6 toggle because ADR 0005 always disables IPv6 on cam0; this fixture
+# makes that output explicit and verifies Tailscale adds no inbound service rule.
+# It also covers both .link match forms: lan0 by MAC and cam0 by PCI address.
+schema_version: 2
+
+identity:
+  hostname: bittern-test
+  timezone: UTC
+
+network:
+  lan0:
+    mode: dhcp
+    subnet: 192.168.50.0/24
+    gateway: 192.168.50.1
+    match:
+      mac: aa:bb:cc:dd:ee:01
+  cam0:
+    mode: static
+    address: 10.88.0.1/24
+    match:
+      pci: "0000:02:00.0"
+    dhcp:
+      pool_start: 10.88.0.50
+      pool_end: 10.88.0.199
+      reservation_start: 10.88.0.10
+      reservation_end: 10.88.0.49
+      gateway: 10.88.0.1
+      ntp_server: 10.88.0.1
+
+cameras:
+  - id: front_door
+    name: Front door
+    address: 10.88.0.20
+    credentials_ref: cameras.front_door
+
+storage:
+  recording:
+    drives:
+      - serial: TEST-DISK-0001
+    retention_days: 7
+    free_space_reserve_gb: 25
+
+updates:
+  channel: beta
+
+privacy:
+  tailscale:
+    enabled: true
+    camera_subnet_route: true

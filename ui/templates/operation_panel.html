@@ -1,0 +1,67 @@
+{{define "operation-panel"}}
+{{if not .Operation.Present}}
+<div class="card">
+  <h2>No apply is running</h2>
+  <p>Bittern is not saving a configuration. Start an apply from the review page, or open status to see the appliance.</p>
+  <p class="action-links"><a href="/ui/wizard/review">Return to review</a> <a href="/ui/status">Open status</a></p>
+</div>
+{{else if .Operation.Running}}
+<div class="card">
+  {{if .Operation.Busy}}
+  <div class="alert" role="alert">
+    <h2>An apply is already running</h2>
+    <p>Bittern did not start another apply. This page shows the one that is already running.</p>
+  </div>
+  {{end}}
+  {{if .Operation.StepsTotal}}
+  <progress class="operation-progress" value="{{.Operation.StepsCompleted}}" max="{{.Operation.StepsTotal}}" aria-label="Steps completed">{{.Operation.StepsCompleted}} of {{.Operation.StepsTotal}} steps completed</progress>
+  {{end}}
+  <p><strong>{{.Operation.CurrentLabel}}</strong></p>
+  {{if .Operation.Cameras}}
+  <h2>Cameras in this apply</h2>
+  <ul>
+    {{range .Operation.Cameras}}<li>{{.Name}}{{if .Address}} ({{.Address}}){{end}}</li>{{end}}
+  </ul>
+  {{end}}
+  {{if .Operation.ImageStep}}
+  <div class="notice">
+    <p>Bittern is waiting for the recording software. The download can take several minutes on a slow connection. You can leave this page; the appliance keeps working.</p>
+  </div>
+  {{else if .Operation.ServiceStart}}
+  <div class="notice">
+    <p>Starting the recording service can take a few minutes, especially the first time. You can leave this page; the appliance keeps working.</p>
+  </div>
+  {{end}}
+  {{if or .Operation.ImageStep .Operation.ServiceStart}}
+  <details class="disclosure">
+    <summary>Technical details</summary>
+    <dl class="facts">
+      {{if .Operation.ImageReference}}<dt>Recording software</dt>
+      <dd>{{.Operation.ImageReference}}</dd>{{end}}
+      {{if .Operation.ImageDigest}}<dt>Recording software digest</dt>
+      <dd><code>{{.Operation.ImageDigest}}</code></dd>{{end}}
+      {{if .Operation.CurrentStep}}<dt>Current step</dt>
+      <dd>{{.Operation.CurrentStep}}</dd>{{end}}
+    </dl>
+  </details>
+  {{end}}
+  <dl class="facts">
+    <dt>Status</dt>
+    <dd><span class="state-badge state-{{.Operation.StateClass}}">{{.Operation.StateLabel}}</span></dd>
+    <dt>Started</dt>
+    <dd>{{.Operation.StartedAt}} UTC</dd>
+    <dt>Time taken</dt>
+    <dd>{{.Operation.Elapsed}}</dd>
+    <dt>Steps done</dt>
+    <dd>{{if .Operation.StepsTotal}}{{.Operation.StepsCompleted}} of {{.Operation.StepsTotal}} steps done; {{.Operation.StepsRemaining}} remaining{{else}}Starting the first step{{end}}</dd>
+  </dl>
+  <p>It is safe to close this page. The apply continues on the appliance; open status or return to this page to see the result.</p>
+</div>
+{{else}}
+<div class="card">
+  <h2>Apply finished</h2>
+  <p>The apply has finished. Open the result to see what happened.</p>
+  <p class="action-links"><a href="/ui/wizard/result">Open the result</a> <a href="/ui/status">Open status</a></p>
+</div>
+{{end}}
+{{end}}

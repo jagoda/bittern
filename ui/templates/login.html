@@ -1,0 +1,30 @@
+{{define "login"}}{{template "head" .}}
+<h1>Sign in</h1>
+<p class="lede">Enter the administrator password to open setup and status on this appliance.</p>
+{{if .AuthError}}
+<div class="alert" role="alert" tabindex="-1">
+  <h2>Sign-in failed</h2>
+  <p>{{.AuthError}}</p>
+</div>
+{{end}}
+<div class="card">
+  <form method="post" action="/ui/login">
+    {{template "csrf" .}}
+    <input type="hidden" name="next" value="{{.Next}}" />
+    <fieldset>
+      <legend>Administrator account</legend>
+      <div class="field">
+        <label for="login-username">Username</label>
+        <input id="login-username" name="username" type="text" value="{{.Username}}" autocomplete="username" required="required" />
+      </div>
+      <div class="field">
+        <label for="login-password">Password</label>
+        <input id="login-password" name="password" type="password" autocomplete="current-password" required="required" />
+      </div>
+    </fieldset>
+    <div class="form-actions">
+      <button type="submit">Sign in</button>
+    </div>
+  </form>
+</div>
+{{template "foot" .}}{{end}}

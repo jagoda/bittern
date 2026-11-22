@@ -1,0 +1,13 @@
+{
+  "name": "bittern-browser-check",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Opt-in headless Playwright check for the Bittern UI (ADR 0025)",
+  "type": "module",
+  "scripts": {
+    "check": "node check.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
+  }
+}

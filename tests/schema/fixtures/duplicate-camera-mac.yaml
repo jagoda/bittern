@@ -1,0 +1,44 @@
+schema_version: 1
+
+identity:
+  hostname: bittern
+  timezone: UTC
+
+network:
+  lan0:
+    mode: dhcp
+    subnet: 192.168.1.0/24
+  cam0:
+    mode: static
+    address: 10.77.0.1/24
+    dhcp:
+      pool_start: 10.77.0.50
+      pool_end: 10.77.0.199
+      reservation_start: 10.77.0.10
+      reservation_end: 10.77.0.49
+      gateway: 10.77.0.1
+      ntp_server: 10.77.0.1
+
+cameras:
+  - id: dynamic_camera
+    name: Dynamic camera
+    address: 10.77.0.50
+    mac: aa:bb:cc:dd:ee:50
+
+  - id: second_camera
+    name: Second camera
+    address: 10.77.0.51
+    mac: aa:bb:cc:dd:ee:50
+
+storage:
+  recording:
+    device_role: recording
+    retention_days: 14
+    free_space_reserve_gb: 50
+
+updates:
+  channel: stable
+
+privacy:
+  tailscale:
+    enabled: false

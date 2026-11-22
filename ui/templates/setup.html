@@ -1,0 +1,57 @@
+{{define "setup"}}{{template "head" .}}
+<h1>Set up Bittern</h1>
+<p class="lede">First run is locked until you enter the setup code. Scan the QR on the appliance console with this device, or type the backup code shown there.</p>
+{{if .AuthError}}
+<div class="alert" role="alert" tabindex="-1">
+  <h2>Setup did not complete</h2>
+  <p>{{.AuthError}}</p>
+</div>
+{{end}}
+<div class="card">
+  <form method="post" action="/ui/setup">
+    {{template "csrf" .}}
+    <fieldset>
+      <legend>Setup code or backup code</legend>
+      <div class="field">
+        <label class="visually-hidden" for="setup-token">Setup code or backup code</label>
+        <p class="hint" id="setup-token-hint">Scan the QR on the appliance console with this device, or type the code exactly as the console shows it. A backup code works once and expires after 10 minutes.</p>
+        <input id="setup-token" name="setup_token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required="required" aria-describedby="setup-token-hint" />
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Administrator password</legend>
+      <div class="field">
+        <label class="visually-hidden" for="setup-password">Password</label>
+        <p class="hint" id="setup-password-hint">Use at least 8 characters. The appliance never stores the password itself.</p>
+        <input id="setup-password" name="password" type="password" autocomplete="new-password" minlength="8" required="required" aria-describedby="setup-password-hint" />
+      </div>
+      <div class="field">
+        <label for="setup-password-confirm">Confirm password</label>
+        <input id="setup-password-confirm" name="password_confirm" type="password" autocomplete="new-password" minlength="8" required="required" />
+      </div>
+    </fieldset>
+    <div class="form-actions">
+      <button type="submit">Finish setup</button>
+    </div>
+  </form>
+</div>
+<div class="card">
+  <h2>About the certificate warning</h2>
+  <p>The appliance uses its own security certificate, so the browser shows a warning before this page loads. That warning is expected. Compare the fingerprint the browser shows with the one below before you continue.</p>
+  {{if .CertificateFingerprint}}
+  <dl class="facts">
+    <dt>Fingerprint</dt>
+    <dd><code>{{.CertificateFingerprint}}</code></dd>
+  </dl>
+  {{else}}
+  <p class="hint">The fingerprint is not shown on this connection. Open the appliance address with a secure connection to compare it.</p>
+  {{end}}
+</div>
+<details class="disclosure">
+  <summary>Technical details</summary>
+  <p>To show the setup code again on the appliance console, run <code>sudo bittern setup-token --qr</code>.</p>
+  <p>The setup code is in a root-only file on the appliance. The administrator password is stored as a salted PBKDF2-HMAC-SHA256 hash.</p>
+  <p>The certificate fingerprint is a SHA-256 hash of the certificate.</p>
+</details>
+<script src="/ui/static/setup-fragment.js" defer="defer"></script>
+{{template "foot" .}}{{end}}

@@ -1,0 +1,39 @@
+# Render fixture: no cameras. Frigate with zero cameras is not a valid service,
+# so the renderer must emit no Frigate config, compose file or unit.
+schema_version: 2
+
+identity:
+  hostname: bittern-empty
+  timezone: UTC
+
+network:
+  lan0:
+    mode: dhcp
+    subnet: 192.168.70.0/24
+    gateway: 192.168.70.1
+  cam0:
+    mode: static
+    address: 10.100.0.1/24
+    dhcp:
+      pool_start: 10.100.0.50
+      pool_end: 10.100.0.199
+      reservation_start: 10.100.0.10
+      reservation_end: 10.100.0.49
+      gateway: 10.100.0.1
+      ntp_server: 10.100.0.1
+
+cameras: []
+
+storage:
+  recording:
+    drives: []
+    retention_days: 14
+    free_space_reserve_gb: 50
+
+updates:
+  channel: stable
+
+privacy:
+  tailscale:
+    enabled: false
+    camera_subnet_route: false

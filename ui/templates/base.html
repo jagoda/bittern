@@ -1,0 +1,62 @@
+{{define "head"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{.Title}} | Bittern</title>
+<link rel="stylesheet" href="/ui/static/bittern.css" />
+<script src="/ui/static/htmx-2.0.11.min.js" defer="defer"></script>
+<script src="/ui/static/form-busy.js" defer="defer"></script>
+<script src="/ui/static/picture.js" defer="defer"></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/ui/">Bittern</a>
+    <nav aria-label="Main">
+      <ul>
+        <li><a href="/ui/wizard">Setup</a></li>
+        <li><a href="/ui/cameras">Cameras</a></li>
+        <li><a href="/ui/status">Status</a></li>
+        {{if .Authenticated}}<li>
+          <form method="post" action="/ui/logout" class="inline-form">
+            {{template "csrf" .}}
+            <button type="submit" class="link-button">Sign out</button>
+          </form>
+        </li>{{end}}
+      </ul>
+    </nav>
+  </div>
+</header>
+<main id="main" class="wrap" tabindex="-1">
+{{end}}
+
+{{define "foot"}}
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <p>Bittern is an independent project. Camera video and recordings stay on your appliance.</p>
+    {{if .CertificateFingerprint}}<p>TLS certificate SHA-256 fingerprint: <code>{{.CertificateFingerprint}}</code></p>{{end}}
+  </div>
+</footer>
+</body>
+</html>
+{{end}}
+
+{{define "csrf"}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />{{end}}
+
+{{define "preview-notice"}}{{if .Preview}}<p class="preview-notice" role="status"><strong>Preview build:</strong> sample data only, no system files are written.</p>{{end}}{{end}}
+
+{{define "wizard-progress"}}
+<nav class="steps" aria-label="Setup progress">
+  <ol>
+    <li data-step="1"{{if eq .Step 1}} class="current" aria-current="step"{{end}}>Welcome</li>
+    <li data-step="2"{{if eq .Step 2}} class="current" aria-current="step"{{end}}>Network</li>
+    <li data-step="3"{{if eq .Step 3}} class="current" aria-current="step"{{end}}>Recording</li>
+    <li data-step="4"{{if eq .Step 4}} class="current" aria-current="step"{{end}}>Cameras</li>
+    <li data-step="5"{{if eq .Step 5}} class="current" aria-current="step"{{end}}>Review</li>
+    <li data-step="6"{{if eq .Step 6}} class="current" aria-current="step"{{end}}>Done</li>
+  </ol>
+</nav>
+{{end}}

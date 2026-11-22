@@ -1,0 +1,38 @@
+schema_version: 2
+
+identity:
+  hostname: bittern
+  timezone: UTC
+
+network:
+  lan0:
+    mode: dhcp
+    subnet: 192.168.1.0/24
+    match:
+      mac: aa:bb:cc:dd:ee:01
+      pci: "0000:01:00.0"
+  cam0:
+    mode: static
+    address: 10.77.0.1/24
+    dhcp:
+      pool_start: 10.77.0.50
+      pool_end: 10.77.0.199
+      reservation_start: 10.77.0.10
+      reservation_end: 10.77.0.49
+      gateway: 10.77.0.1
+      ntp_server: 10.77.0.1
+
+cameras: []
+
+storage:
+  recording:
+    drives: []
+    retention_days: 14
+    free_space_reserve_gb: 50
+
+updates:
+  channel: stable
+
+privacy:
+  tailscale:
+    enabled: false

@@ -1,0 +1,55 @@
+# Recording-software image prewarm. The POC payload installs it and the product
+# image bakes it in. It runs once in the background after the network and Docker
+# are up, overlapping with setup, and it is not a dependency of first boot. A
+# failed download is recorded for the status page and the apply refusal; it does
+# not fail first boot. The unit runs at every boot and skips the pull when the
+# pinned image is already present.
+[Unit]
+Description=Bittern recording software image prewarm
+Documentation=file:/usr/share/doc/bittern/README.md
+After=docker.service network-online.target bittern-first-boot.service
+Wants=network-online.target
+Requires=docker.service
+ConditionPathExists=/etc/bittern
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/bittern image prewarm
+TimeoutStartSec=30min
+User=root
+Group=root
+UMask=0022
+StateDirectory=bittern
+ReadWritePaths=/var/lib/bittern
+
+# The Docker CLI talks to /var/run/docker.sock (AF_UNIX). The registry
+# connection belongs to dockerd, not this process, so no network capability is
+# needed. The reference and digest come from the embedded defaults; the unit
+# does not carry a tag or digest.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

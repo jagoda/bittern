@@ -1,0 +1,27 @@
+{{define "camera-remove"}}{{template "head" .}}
+<h1>Remove camera</h1>
+{{template "preview-notice" .}}
+{{if .ApplyError}}
+<div class="alert" role="alert" tabindex="-1">
+  <h2>The camera was not removed</h2>
+  <p>{{.ApplyError}}</p>
+</div>
+{{end}}
+{{range .CameraList.Items}}
+<div class="card">
+  <h2>{{.Name}}</h2>
+  <dl class="facts">
+    <dt>Camera address</dt>
+    <dd>{{.Address}}</dd>
+  </dl>
+  <p>Removing {{.Name}} stops its recording and live view, releases the address Bittern reserved for it, and deletes the sign-in saved on the appliance. Recordings already on the drive are kept.</p>
+  <form method="post" action="/ui/cameras/{{.ID}}/remove">
+    {{template "csrf" $}}
+    <div class="form-actions">
+      <button type="submit" class="button destructive">Remove camera</button>
+      <a href="/ui/cameras">Cancel</a>
+    </div>
+  </form>
+</div>
+{{end}}
+{{template "foot" .}}{{end}}
