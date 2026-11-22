@@ -17,10 +17,10 @@ over TLS ([ADR 0019](../adr/0019-ui-stack.md)). Live video remains open
   for CPU, POC, Hailo plus QSV, and no-camera cases. The QEMU fixture config and compose files are
   still hand-written; its firewall is the renderer golden plus the harness-only SSH rule, so the guest
   loads the renderer's nftables golden rather than a hand-written fixture, and 8971 is loopback-only.
-  There is still no image build, update or reset path, or product container bundle. CI phase one
-  runs in [`.github/workflows/check.yml`](../../.github/workflows/check.yml) under
+  There is still no image build, reset path, or product container bundle; the app bundle update path
+  exists. CI phase one runs in [`.github/workflows/check.yml`](../../.github/workflows/check.yml) under
   [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md): `make check` on push to
-  `main` and on every pull request, then an unsigned POC payload test artifact.
+  `main` and on every pull request, then an unsigned beta bundle test artifact.
 - The release manifest canonical form, verifier and offline `bittern-release` tool exist in
   `agent/internal/release` and `agent/cmd/bittern-release`; the release key ceremony, channel
   publication and update transaction do not. The repository is public at github.com/jagoda/bittern
@@ -28,6 +28,15 @@ over TLS ([ADR 0019](../adr/0019-ui-stack.md)). Live video remains open
   [ADR 0031](../adr/0031-update-channel-on-github-releases.md) records the GitHub Releases channel
   and [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md) records CI. The change
   is recorded in [the channel, CI, and publication note](../notes/2026-11-22-channel-ci-and-publication.md).
+- The BIT-009 update transaction is implemented through slice two: the engine and its 82 named cases,
+  the fixed helper unit, the request record, the agent handoff, the platform, Docker, systemd and
+  sqlite3 adapters, the shared operation lock, and the fixed activation launcher. Two hardening
+  passes followed the audit. The beta channel check, manual rollback, and the status update card
+  landed. The files-only packer, the beta preparation kit, and the tag-triggered draft and publish
+  workflow exist, and the `workflow_dispatch` dry run is green. The QEMU update scenario passes
+  under KVM. No tag was created and no release was published. The tag path and the bench rollout
+  remain unproven; [the beta bench rollout](../runbooks/beta-bench-rollout.md) is the next action.
+  Evidence is in [the session checkpoint note](../notes/2026-11-22-session-checkpoint.md).
 - The QEMU firstboot scenario was re-verified on 2026-11-18 with the baseline units disabled and a
   post-apply reboot: first boot, TLS wizard, generation 2, healthy Frigate, one camera and a JPEG
   snapshot. Evidence is in [the Frigate after reboot note](../notes/2026-11-18-frigate-not-after-reboot.md)
@@ -64,13 +73,16 @@ over TLS ([ADR 0019](../adr/0019-ui-stack.md)). Live video remains open
   contract and daemon; the wizard and status page with vendored HTMX, the BIT-019 setup token QR and
   live setup checks; the persisted apply operation view; the TLS UI listener, sessions, CSRF and
   login rate limiting; the `bittern` CLI; the release manifest canonical form, verifier and offline
-  `bittern-release` tool; `packaging/storage-setup.sh`, run by `install.sh`; render, status and
-  first-boot goldens.
+  `bittern-release` tool; the BIT-009 update engine through slice two with the fixed launcher; the
+  beta channel check, manual rollback and update card; the bundle packer, beta kit and tag-driven
+  publish workflow; `packaging/storage-setup.sh`, run by `install.sh`; render, status and first-boot
+  goldens.
 - Missing: the rest of camera adoption (ONVIF device evidence, a bounded unicast sweep, re-probe),
   the rest of BIT-014 (status operation section, update, reset and prewarm writers, automatic
-  no-JavaScript refresh), the support bundle, the update transaction, the release key ceremony and
-  channel publication, tests for a published bundle, reset, the image, CI, and a separate live
-  verification record for the wired Frigate env file (unknown). The QEMU reboot proves the unit
+  no-JavaScript refresh), the support bundle, the release key ceremony, the first tagged publish and
+  a published bundle, tests against a published release, the pending `appliance.yaml` migration
+  persistence, unit changes through an update, reset, the image, and a separate live verification
+  record for the wired Frigate env file (unknown). The QEMU reboot proves the unit
   lifecycle and Frigate health, not the env file contents. The setup network and storage checks now
   read the live status builder. The QEMU harness and the Frigate fixture ran for the first time on
   2026-11-14 on a KVM-enabled container; the measured numbers and what is still unverified are in
@@ -170,7 +182,10 @@ and its [bug ledger](../notes/2026-11-15-gk41-hardware-run.md#bug-ledger). The c
 scenario also passed on 2026-11-15, as recorded in
 [the install network bootstrap note](../notes/2026-11-15-install-network-bootstrap.md#verification).
 The Level 2 gate landed as item 3 on 2026-11-21, so item 4 is the next queued ticket. The release
-work order below starts before item 4 and is not a renumbering of the list.
+work order below starts before item 4 and is not a renumbering of the list. That work order reached
+step 5 on 2026-11-22. The next action is the [beta bench rollout](../runbooks/beta-bench-rollout.md),
+not another queue item; the open items, in order, are in
+[Open items](#open-items-2026-11-22).
 
 ### Release work order (2026-11-22)
 
@@ -185,7 +200,8 @@ The maintainer fixed this order in session on 2026-11-22. It is recorded in
 | 2 | CI phase one: `make check` on push and pull request, plus an unsigned bundle workflow artifact, with no secrets, no publishing, and SHA-pinned actions. | BIT-042 |
 | 3 | BIT-009 slice one: the update transaction core, the provider-supplied platform generation, the `/var/lib/bittern` write boundary, the base fingerprint, and the test-key path. The manifest, verifier and signing tool are already present. | BIT-009 |
 | 4 | Bundle packer with publish on tag: build the files-only payload and the beta preparation kit with `make beta-payload`, create the draft release, upload `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`, `bittern-beta-kit.tar.gz`, and `SHA256SUMS`, and publish the draft after approval. The CI test key signs CI bundles only; a production release still uses the offline signature from ADR 0029. Landed on 2026-11-22 with the packer, kit, and workflow; no release has been published. The `workflow_dispatch` dry run ran green on 2026-11-22 (run [45064681803](https://github.com/jagoda/bittern/actions/runs/45064681803)) and created no tag, draft, or release. The tag-triggered path with the real `beta` approval remains unproven until the first tag. | BIT-042 phase two |
-| 5 | BIT-009 slice three: the QEMU update scenario with a valid update, an invalid signature, a digest mismatch, a downgrade, and a rollback against the published fixture on the local or bench QEMU path. QEMU stays outside CI until the KVM question is measured. | BIT-009 acceptance |
+| 5 | BIT-009 slice three: the QEMU update scenario with a valid update, an invalid signature, a digest mismatch, a downgrade, and a rollback against the local fixture. The scenario passed under KVM on 2026-11-22; QEMU stays outside CI until the KVM question is measured. | BIT-009 acceptance |
+| 6 | The first tag and bench run: push `app-beta-000001` from a green `main`, approve the `beta` deployment, prepare the bench box from the published kit, install generation 1, publish and install generation 2, and roll back. Record the card at each step. Follow [the beta bench rollout](../runbooks/beta-bench-rollout.md); it has not been run. | BIT-009 and BIT-042 acceptance |
 
 1. **BIT-019 setup token QR.** Landed on 2026-11-17; the USB token copy is gone from every setup
    cycle. It is a prerequisite of BIT-020 because the responsive check must cover the QR,
@@ -216,9 +232,12 @@ The maintainer fixed this order in session on 2026-11-22. It is recorded in
    payload, and do not treat this summary pass as proof of the paths it did not capture. This
    replaces the Level 1 retry.
 4. **BIT-009 app bundle update transaction with rollback.** The first lifecycle item that cannot be
-   skipped, and the third step in the release work order above, after CI phase one. The manifest,
-   verifier and offline signing tool are present; the transaction core, base fingerprint and release
-   path remain. It unlocks BIT-013 and therefore BIT-014, and it stays ahead of the NVR surfaces.
+   skipped, and the third step in the release work order above, after CI phase one. Slices one to
+   four landed on 2026-11-22: the transaction core and its 82 named cases, the production wiring and
+   fixed launcher, the beta channel check and manual rollback, and the update card. The QEMU
+   scenario passes. What remains is the first tagged publish, the bench rollout, and the pending
+   `appliance.yaml` migration persistence. It unlocks BIT-013 and therefore BIT-014, and it stays
+   ahead of the NVR surfaces.
 5. **BIT-013 Frigate image prewarm and offline path.** Release-critical for the first-camera apply
    and a declared dependency of BIT-014. It keeps the cold image pull out of the first apply and out
    of the Level 2 failure path once it lands.
@@ -294,6 +313,32 @@ BIT-010 support-bundle slice, BIT-028 to the remaining BIT-008 evidence and BIT-
 BIT-021, BIT-025 and BIT-026 to BIT-012, and BIT-022 to BIT-015. Kiosk mode stays deferred under
 [OQ-25](../open-questions.md), and the interim path rationale is in
 [the NVR and Tailscale note](../notes/2026-11-15-nvr-tailscale-interim-path.md).
+
+### Open items (2026-11-22)
+
+These are open after step 5. The first is the next action; the rest do not block it.
+
+1. **The first tag and bench run.** The publish dry run is green, and no tag, draft, or release
+   exists. Push `app-beta-000001`, approve the `beta` deployment, and run the two-release sequence in
+   [the beta bench rollout](../runbooks/beta-bench-rollout.md). The tag-triggered publish path and the
+   channel client against a real release are unproven until then.
+2. **The flaky failed-camera-check wizard test.**
+   [BIT-043](#bit-043-stabilise-the-flaky-failed-camera-check-wizard-test) owns the shared state or
+   timing assumption behind `TestWizardShowsFailedCameraCheckAfterApply`. A rerun is not a fix.
+3. **The dry-run environment exception.** [OQ-36](../open-questions.md) records the options and the
+   provisional default: keep the documented temporary `main` policy for a dry run, because it is
+   the smallest reversible change, and decide the no-secret dry-run environment before the next dry
+   run. The environment is unchanged now.
+4. **The pending `appliance.yaml` migration is not persisted.** The update engine writes
+   `/var/lib/bittern/update/<operation-id>/appliance.yaml` and removes it at the end of the
+   transaction; nothing applies it to `/etc/bittern/appliance.yaml`. Do not publish a bundle that
+   needs a schema migration until that path is wired and tested.
+5. **Unit changes are not delivered by the bundle.** The payload is files-only under
+   `/var/lib/bittern/app/bundles/<generation>/files`; units, scripts, and templates come from the
+   kit or the image. A change to a unit needs the kit or the image, not an update.
+6. **OQ-35, the delivery model and supported base.** The image is not yet required, the packaging
+   install path is a bridge, and the first device that is not the maintainer's needs a reproducible
+   supported base. Decide it before that trigger; it does not block the bench rollout.
 
 ## Workstreams
 
@@ -1367,6 +1412,41 @@ with it.
   runbook.
 **Depends on.** ADR 0031, ADR 0032, and the BIT-009 manifest and verifier slice (landed). Phase two
 also depends on the BIT-009 transaction core and the bundle packer. **Size.** M.
+
+### BIT-043 Stabilise the flaky failed-camera-check wizard test
+**Status.** New on 2026-11-22 from
+[the dry run and bench rollout note](../notes/2026-11-22-beta-dry-run-and-bench-rollout.md#a-check-workflow-flake).
+Unqueued; the beta bench rollout stays ahead of it.
+**Goal.** Remove the shared state or timing assumption behind
+`TestWizardShowsFailedCameraCheckAfterApply`, so it passes deterministically instead of passing on a
+rerun.
+**Evidence.** The first `make check` attempt on `8ad23e3` failed this test with missing page text
+and a temporary-directory cleanup error: run
+[45064216205](https://github.com/jagoda/bittern/actions/runs/45064216205), failed job
+[137336635913](https://github.com/jagoda/bittern/actions/runs/45064216205/job/137336635913). The
+unchanged job was rerun and passed as job
+[137337273398](https://github.com/jagoda/bittern/actions/runs/45064216205/job/137337273398), and the
+run finished green. A rerun is not a fix and does not close this ticket.
+**Scope.**
+- Find the shared state or timing assumption. Do not add a retry, a sleep, a longer timeout, or a
+  skip to make the test pass.
+- Start with the apply request path. The handler starts `runApplyOperation` in a goroutine that
+  mutates the wizard session and uses `context.Background()`, waits `applyStartGrace` (100 ms) for
+  the operation to finish before redirecting, and the test's `t.TempDir()` cleanup can run while
+  that goroutine still writes. The snapshot fake and the operation manager are shared between the
+  request and the goroutine.
+- Confirm the mechanism with the race detector or a repeated run under load before changing the
+  test or the handler. Fix the ownership or synchronisation so the test observes one deterministic
+  final state.
+**Acceptance.**
+- The cause is named in this ticket or the linked note, with the code path and the mechanism.
+- The fix removes the shared state or timing assumption; no retry, sleep, timeout increase, or skip
+  is added.
+- The test passes at least 50 consecutive check-workflow runs in CI with the cause named. A local
+  loop is supporting evidence, not the acceptance.
+- The test still asserts the failed camera check after apply; a weakened assertion is not accepted.
+- `make check` passes.
+**Depends on.** None. **Size.** S.
 
 ### BIT-022 Tailscale remote access and Frigate UI support path
 **Goal.** Make Tailscale remote access an owner-managed, audited feature of the Bittern UI, and use a

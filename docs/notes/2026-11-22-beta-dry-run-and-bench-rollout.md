@@ -132,8 +132,9 @@ steady state is tag-only.
 
 This is a named exception, not the normal procedure. The durable fix is a dry-run path that does not
 need the key at a branch ref, or a decision to give a dry-run environment its own reviewed test key.
-It has no ticket yet and is a documented no action until the next dry run is needed. The tag path
-needs no exception, because the tag ref is what the environment admits.
+It is recorded as [OQ-36](../open-questions.md), with the temporary procedure as the provisional
+default and the no-secret dry-run environment as the durable removal. The tag path needs no
+exception, because the tag ref is what the environment admits.
 
 ### A check-workflow flake
 
