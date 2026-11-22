@@ -196,12 +196,17 @@ the OS.
 ### Application bundle, loop 2
 
 1. Check channel, signed manifest, clock, free disk, and current generation.
-2. Download the bundle and verify its signature and digest against a pinned key.
-3. Back up `appliance.yaml`, the Frigate config, and the Frigate database.
-4. Stop Frigate gracefully, activate the staged generation, and run schema and database migrations.
-5. Pull the pinned Frigate digest, start services, and run the health gate.
-6. Commit on success. On failure, restore the previous generation and database backup, then re-run
+2. Read the newest published release in the channel namespace, then download the manifest and
+   signature and verify them against a pinned key before trusting any manifest field.
+3. Download the payload and verify its digest and file list.
+4. Back up `appliance.yaml`, the Frigate config, and the Frigate database.
+5. Stop Frigate gracefully, activate the staged generation, and run schema and database migrations.
+6. Pull the pinned Frigate digest, start services, and run the health gate.
+7. Commit on success. On failure, restore the previous generation and database backup, then re-run
    health. Prune old bundles and record the outcome in the update history shown in the UI.
+
+The app bundle channel is GitHub Releases in `jagoda/bittern`, published from a tag with immutable
+releases and a draft as the atomic publish step ([ADR 0031](adr/0031-update-channel-on-github-releases.md)).
 
 ### OS image, loop 1
 
@@ -211,12 +216,26 @@ the OS.
 4. Run first-boot checks, then mark the slot good on health or revert the boot marker after a failed
    check or watchdog deadline.
 
+### Engine invariants
+
+These hold for the app bundle transaction and for any later OS image provider.
+
+- **The platform generation is abstract.** A provider supplies it. Image metadata can supply it now,
+  and an installer fingerprint can supply it later, without changing the transaction.
+- **The transaction writes only under `/var/lib/bittern`.** It never assumes a writable root and
+  never assumes knowledge of OS slots.
+- **The agent records a base fingerprint in the status contract.** It covers the Debian version, the
+  kernel, the Docker version, device availability, and firmware presence. It is recorded evidence,
+  not a trust input; compatibility checks still use the root-owned image metadata.
+
 Both loops use an anti-rollback generation counter, so a device cannot be downgraded below a
-generation that has run migrations. Channels are `stable`, `beta`, and a security channel for
-security-only releases; security updates can apply automatically in a maintenance window when the
-owner opts in, and feature updates are explicit ([ADR 0021](adr/0021-security-updates.md)). The
-field path for a camera compatibility fix, including its UX, security, and simplicity requirements,
-is in [the managed update path note](notes/2026-11-15-managed-update-path.md).
+generation that has run migrations. The schema channel set is `stable` and `beta`. Beta is the only
+live channel until the first field release ([ADR 0031](adr/0031-update-channel-on-github-releases.md)).
+A separate security channel is proposed in [ADR 0021](adr/0021-security-updates.md) and is not part
+of the current set; security updates can apply automatically in a maintenance window when the owner
+opts in, and feature updates are explicit. The field path for a camera compatibility fix, including
+its UX, security, and simplicity requirements, is in
+[the managed update path note](notes/2026-11-15-managed-update-path.md).
 
 ## Trust boundaries
 

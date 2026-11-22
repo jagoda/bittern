@@ -23,9 +23,12 @@ Pre-implementation. This repository contains the design documentation, schema ve
 reference validator, and the first product code: the Go configuration loader and deterministic
 renderer for networkd, nftables, dnsmasq, chrony, Frigate config, compose, and the Frigate unit,
 read-only hardware detection, the resumable apply and first-boot path, the status daemon, and the
-first-run wizard and status page skeleton with vendored HTMX. There is no image build, CI, or release
-artifact yet. The sequence of work to reach a first appliance release is in
-[the implementation plan](docs/plan/implementation-plan.md). Facts about Frigate are dated
+first-run wizard and status page skeleton with vendored HTMX. There is no image build or release
+artifact yet. CI phase one is planned in [ADR 0032](docs/adr/0032-continuous-integration-and-build-pipeline.md)
+and no workflow exists yet; the release channel is decided in
+[ADR 0031](docs/adr/0031-update-channel-on-github-releases.md) and is not live. The sequence of work
+to reach a first appliance release is in [the implementation plan](docs/plan/implementation-plan.md).
+Facts about Frigate are dated
 2026-11-14 and sourced in [the Frigate assessment](docs/research/frigate-assessment.md).
 
 ## Shape of the appliance

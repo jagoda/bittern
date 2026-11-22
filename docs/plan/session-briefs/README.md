@@ -11,6 +11,7 @@ context to start without reading the whole repository. A brief points at the ADR
 | [P0 config compiler](p0-config-compiler.md) | BIT-001, BIT-002, BIT-003 | `p0/config-compiler` | done |
 | [P0 runtime harness](p0-runtime-harness.md) | BIT-004, BIT-005 | `p0/runtime-harness` | done |
 | [P0 hardware reconnaissance](p0-hardware-recon.md) | OQ-09, OQ-10 (no ticket) | `recon/hardware` | not started |
+| [P0 release channel and engine](p0-release-channel-and-engine.md) | BIT-042, BIT-009 | `p0/release-channel-engine` | in progress |
 
 Status values: `done` means the plan records the work as complete. `in progress` means work has
 started and the plan still lists it as unfinished. `not started` means no work has started. A brief
@@ -28,19 +29,23 @@ Evidence for the statuses:
 - **P0 hardware reconnaissance: not started.** The brief is still `proposed` and has no priority
   decision, and OQ-09 remains open in the [open questions](../../open-questions.md). The
   [BOM note](../../research/bom-2026-11-14.md) is research input, not this brief's deliverable.
+- **P0 release channel and engine: in progress.** The 2026-11-22 decisions are recorded in
+  [ADR 0031](../../adr/0031-update-channel-on-github-releases.md),
+  [ADR 0032](../../adr/0032-continuous-integration-and-build-pipeline.md), and
+  [the publication note](../../notes/2026-11-22-channel-ci-and-publication.md). CI phase one has not
+  started, so the brief stays in progress.
 
 ## Next work
 
-The near-term queue now starts at item 4, BIT-009 app bundle update transaction with rollback.
-Level 2 passed on 2026-11-21 with summary evidence
+The near-term queue now starts with the [release work order](../implementation-plan.md#release-work-order-2026-11-22):
+CI phase one, then the BIT-009 transaction core, then the bundle packer with publish on tag, then
+the QEMU update scenario. The [P0 release channel and engine](p0-release-channel-and-engine.md)
+brief covers that order. Level 2 passed on 2026-11-21 with summary evidence
 ([result note](../../notes/2026-11-21-level2-result.md)); BIT-019 (setup token QR) and BIT-020
 (responsive and mobile-friendly UI) landed on 2026-11-17. The 2026-11-17 Level 2 run failed its
 reboot checks on `systemd-networkd` and `bittern-frigate`, both fixes are in the payload, and the
-gate has since passed. No brief in this directory covers item 4; use the
-[near-term queue](../implementation-plan.md#near-term-queue) and the
-[suggested next-session prompts](../implementation-plan.md#suggested-next-session-prompts) for the
-work orders. The hardware reconnaissance brief is not the Level 2 gate: it stays proposed and feeds
-OQ-09 and OQ-10.
+gate has since passed. The hardware reconnaissance brief is not the Level 2 gate: it stays proposed
+and feeds OQ-09 and OQ-10.
 
 The completed P0 briefs stay listed as records. They are not open work orders.
 

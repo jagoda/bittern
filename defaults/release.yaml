@@ -1,0 +1,19 @@
+# Bittern product policy for the release channel.
+#
+# The update channel is GitHub Releases in jagoda/bittern. The tag scheme,
+# asset names, and draft publication rule are in ADR 0031. The device reads the
+# newest published release in its channel namespace; there is no separate
+# pointer file and no Bittern update-check endpoint.
+#
+# These are product defaults, not owner configuration. The channel itself is
+# recorded in appliance.yaml.
+schema_version: 1
+
+release:
+  # Release page root. Asset URLs are:
+  #   <base_url>/download/<tag>/<asset>
+  # The default repository is jagoda/bittern.
+  base_url: https://github.com/jagoda/bittern/releases
+  # Interval between update checks when checking is enabled. This does not
+  # decide whether a device checks automatically; that policy remains OQ-12.
+  check_interval: 24h

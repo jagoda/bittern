@@ -28,11 +28,21 @@ Out of scope:
 | Path | Purpose |
 | --- | --- |
 | `frigate.yaml` | Pinned Frigate image and runtime policy, detector and decode mappings, compose device and group lists, and the rendered `config.yml` policy that is not owner configuration |
+| `release.yaml` | Release page base URL and update-check interval; the channel and tag scheme are in ADR 0031 |
 
-`frigate.yaml` is embedded into the agent with the templates and schema. The generated copy lives in
-`agent/internal/assets/defaults/`, is gitignored, and is checked for drift by
-`agent/internal/assets/assets_test.go`. Run `make assets` or `agent/scripts/sync-assets.sh` after
+`frigate.yaml` and `release.yaml` are embedded into the agent with the templates and schema. The
+generated copy lives in `agent/internal/assets/defaults/`, is gitignored, and is checked for drift
+by `agent/internal/assets/assets_test.go`. Run `make assets` or `agent/scripts/sync-assets.sh` after
 editing a default.
+
+## Release policy
+
+`defaults/release.yaml` carries the product release endpoint and the interval between update checks.
+The channel is recorded per device in `appliance.yaml`. The update channel is GitHub Releases in
+`jagoda/bittern`; the tag scheme, asset names, and draft publication rule are in
+[ADR 0031](../docs/adr/0031-update-channel-on-github-releases.md). The check interval applies when
+checking is enabled and does not decide the automatic-check policy, which remains
+[OQ-12](../docs/open-questions.md).
 
 ## Frigate policy
 

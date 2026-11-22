@@ -77,6 +77,8 @@ need an ADR. When in doubt, write a short one.
 | 0028 | [A missing recording drive does not block boot](./0028-missing-recording-drive-and-boot.md) | Accepted | 2026-11-21 | Boot continues; Frigate is gated on a real media mount. |
 | 0029 | [Release signing and key custody](./0029-release-signing-and-key-custody.md) | Proposed | 2026-11-21 | Ed25519 manifests, airgapped key file, pinned trust anchor. |
 | 0030 | [A/B from the first image](./0030-ab-from-the-first-image.md) | Proposed | 2026-11-21 | Two OS slots from the first shipped image; shared app partition. |
+| 0031 | [Update channel on GitHub Releases](./0031-update-channel-on-github-releases.md) | Accepted | 2026-11-22 | GitHub Releases channel; immutable drafts; beta only; payload digest decided. |
+| 0032 | [Continuous integration and build pipeline](./0032-continuous-integration-and-build-pipeline.md) | Accepted | 2026-11-22 | CI phase one checks and bundle artifact; tag publish later. |
 
 ## Related documents
 

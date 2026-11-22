@@ -17,7 +17,16 @@ over TLS ([ADR 0019](../adr/0019-ui-stack.md)). Live video remains open
   for CPU, POC, Hailo plus QSV, and no-camera cases. The QEMU fixture config and compose files are
   still hand-written; its firewall is the renderer golden plus the harness-only SSH rule, so the guest
   loads the renderer's nftables golden rather than a hand-written fixture, and 8971 is loopback-only.
-  There is still no image build, CI, update or reset path, or product container bundle.
+  There is still no image build, update or reset path, or product container bundle. CI phase one is
+  planned in [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md) and no workflow
+  exists yet.
+- The release manifest canonical form, verifier and offline `bittern-release` tool exist in
+  `agent/internal/release` and `agent/cmd/bittern-release`; the release key ceremony, channel
+  publication and update transaction do not. The repository is public at github.com/jagoda/bittern
+  as of 2026-11-22, `main` is a single import commit, and immutable releases are enabled.
+  [ADR 0031](../adr/0031-update-channel-on-github-releases.md) records the GitHub Releases channel
+  and [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md) records CI. The change
+  is recorded in [the channel, CI, and publication note](../notes/2026-11-22-channel-ci-and-publication.md).
 - The QEMU firstboot scenario was re-verified on 2026-11-18 with the baseline units disabled and a
   post-apply reboot: first boot, TLS wizard, generation 2, healthy Frigate, one camera and a JPEG
   snapshot. Evidence is in [the Frigate after reboot note](../notes/2026-11-18-frigate-not-after-reboot.md)
@@ -40,24 +49,27 @@ over TLS ([ADR 0019](../adr/0019-ui-stack.md)). Live video remains open
   updates, BIT-010 reset and the mkosi image are release-critical and stay ahead of the NVR
   surfaces. The Level 2 gate passed on 2026-11-21 on a fresh Debian 13 install with the current
   payload; the evidence is a maintainer summary, not a full transcript. The head of the near-term
-  queue is now BIT-009, and another Level 1 retry is not a gate. The result is in
+  queue is now the release work order below, starting with CI phase one; the BIT-009 transaction
+  core follows it, and another Level 1 retry is not a gate. The result is in
   [the Level 2 result note](../notes/2026-11-21-level2-result.md). The reorder and its evidence are
   in
   [the backlog grooming note](../notes/2026-11-15-backlog-grooming.md).
-- Exists: README and AGENTS; vision and architecture; ADRs 0001 to 0027, with ADR 0021 proposed;
-  the design session note; research docs; this plan; open questions; component READMEs; the design
-  system through v0.6, with the v0.3 flow layer binding, and `make design-check`; the four-width
-  browser check under `tests/browser`; schema v2, its validator and migration; the Go
-  config loader and renderer; read-only hardware detection; the apply transaction and first-boot
-  provisioning; the status contract and daemon; the wizard and status page with vendored HTMX,
-  the BIT-019 setup token QR and live setup checks; the persisted apply operation view; the TLS UI
-  listener, sessions, CSRF and login
-  rate limiting; the `bittern` CLI; `packaging/storage-setup.sh`, run by `install.sh`; render,
-  status and first-boot goldens.
+- Exists: README and AGENTS; vision and architecture; ADRs 0001 to 0032, with ADR 0021, ADR 0029
+  and ADR 0030 proposed and ADR 0031 and ADR 0032 accepted on 2026-11-22; the design session note;
+  research docs; this plan; open questions; component READMEs; the design system through v0.6, with
+  the v0.3 flow layer binding, and `make design-check`; the four-width browser check under
+  `tests/browser`; schema v2, its validator and migration; the Go config loader and renderer;
+  read-only hardware detection; the apply transaction and first-boot provisioning; the status
+  contract and daemon; the wizard and status page with vendored HTMX, the BIT-019 setup token QR and
+  live setup checks; the persisted apply operation view; the TLS UI listener, sessions, CSRF and
+  login rate limiting; the `bittern` CLI; the release manifest canonical form, verifier and offline
+  `bittern-release` tool; `packaging/storage-setup.sh`, run by `install.sh`; render, status and
+  first-boot goldens.
 - Missing: the rest of camera adoption (ONVIF device evidence, a bounded unicast sweep, re-probe),
   the rest of BIT-014 (status operation section, update, reset and prewarm writers, automatic
-  no-JavaScript refresh), the support bundle, updates, reset, signing, the image, and a separate
-  live verification record for the wired Frigate env file (unknown). The QEMU reboot proves the unit
+  no-JavaScript refresh), the support bundle, the update transaction, the release key ceremony and
+  channel publication, tests for a published bundle, reset, the image, CI, and a separate live
+  verification record for the wired Frigate env file (unknown). The QEMU reboot proves the unit
   lifecycle and Frigate health, not the env file contents. The setup network and storage checks now
   read the live status builder. The QEMU harness and the Frigate fixture ran for the first time on
   2026-11-14 on a KVM-enabled container; the measured numbers and what is still unverified are in
@@ -156,7 +168,23 @@ recorded as passed in
 and its [bug ledger](../notes/2026-11-15-gk41-hardware-run.md#bug-ledger). The clean-network QEMU
 scenario also passed on 2026-11-15, as recorded in
 [the install network bootstrap note](../notes/2026-11-15-install-network-bootstrap.md#verification).
-The Level 2 gate landed as item 3 on 2026-11-21, so the head of the queue is now item 4.
+The Level 2 gate landed as item 3 on 2026-11-21, so item 4 is the next queued ticket. The release
+work order below starts before item 4 and is not a renumbering of the list.
+
+### Release work order (2026-11-22)
+
+The maintainer fixed this order in session on 2026-11-22. It is recorded in
+[ADR 0031](../adr/0031-update-channel-on-github-releases.md),
+[ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md), and
+[the channel, CI, and publication note](../notes/2026-11-22-channel-ci-and-publication.md).
+
+| Step | Work | Ticket |
+| --- | --- | --- |
+| 1 | Decisions: ADR 0031, ADR 0032, the OQ-34 answer, and OQ-35. No release or workflow is produced. | This change |
+| 2 | CI phase one: `make check` on push and pull request, plus an unsigned bundle workflow artifact, with no secrets, no publishing, and SHA-pinned actions. | BIT-042 |
+| 3 | BIT-009 transaction core: the update transaction, the provider-supplied platform generation, the `/var/lib/bittern` write boundary, the base fingerprint, and the test-key path. The manifest, verifier and signing tool are already present. | BIT-009 |
+| 4 | Bundle packer with publish on tag: build the files-only payload, create the draft release, upload `manifest.json`, `manifest.json.sig`, and `bittern-app.tar.gz`, and publish the draft. The CI test key signs CI bundles only; a production release still uses the offline signature from ADR 0029. | BIT-042 phase two |
+| 5 | QEMU update scenario: a valid update, an invalid signature, a digest mismatch, a downgrade, and a rollback against the published fixture on the local or bench QEMU path. QEMU stays outside CI until the KVM question is measured. | BIT-009 acceptance |
 
 1. **BIT-019 setup token QR.** Landed on 2026-11-17; the USB token copy is gone from every setup
    cycle. It is a prerequisite of BIT-020 because the responsive check must cover the QR,
@@ -172,7 +200,7 @@ The Level 2 gate landed as item 3 on 2026-11-21, so the head of the queue is now
    depends on BIT-019. Updates, logs, support and reset have no routes yet (BIT-010, BIT-030,
    BIT-031), so the check cannot cover them until they exist; the ticket's status paragraph records
    the rest of the open coverage. The head was item 3, the hardware Level 2 gate, until it landed
-   on 2026-11-21; the head is now item 4.
+   on 2026-11-21; the next queued ticket is item 4, after the release work order above.
 3. **Hardware Level 2 on a fresh Debian 13 install.** Landed on 2026-11-21 as a pass with summary
    evidence. The run started from a fresh Debian 13 install with the current payload, mounted a
    prepared ext4 drive labelled `bittern-media` automatically, completed first boot and QR setup,
@@ -186,9 +214,10 @@ The Level 2 gate landed as item 3 on 2026-11-21, so the head of the queue is now
    `systemd-networkd` and `bittern-frigate`; both fixes are in the payload. Do not rerun the old
    payload, and do not treat this summary pass as proof of the paths it did not capture. This
    replaces the Level 1 retry.
-4. **BIT-009 app bundle update transaction with rollback.** The head of the queue since the Level 2
-   pass. Release-critical and the first lifecycle item that cannot be skipped. It unlocks BIT-013
-   and therefore BIT-014, and it stays ahead of the NVR surfaces.
+4. **BIT-009 app bundle update transaction with rollback.** The first lifecycle item that cannot be
+   skipped, and the third step in the release work order above, after CI phase one. The manifest,
+   verifier and offline signing tool are present; the transaction core, base fingerprint and release
+   path remain. It unlocks BIT-013 and therefore BIT-014, and it stays ahead of the NVR surfaces.
 5. **BIT-013 Frigate image prewarm and offline path.** Release-critical for the first-camera apply
    and a declared dependency of BIT-014. It keeps the cold image pull out of the first apply and out
    of the Level 2 failure path once it lands.
@@ -250,6 +279,10 @@ The Level 2 gate landed as item 3 on 2026-11-21, so the head of the queue is now
     above.
 19. **BIT-027 robust ONVIF profiles, PTZ and field interoperability.** A later stream after the NVR
     surfaces; it does not preempt this queue.
+20. **BIT-042 release channel and CI pipeline.** The CI and publication work in the release work
+    order above. It is numbered last here to keep the existing item numbers, but phase one is the
+    first execution step in that order. It depends on ADR 0031 and ADR 0032 and does not move
+    release signing into CI.
 
 The old order put BIT-028 after the NVR surfaces and did not include BIT-014, BIT-009, BIT-010 or the
 image. It also called for a Level 1 retry after Level 1 passed. Those are corrected here. The queue is
@@ -1253,6 +1286,43 @@ defects the UI no longer has.
 - `make link-check style-check` and `make check` pass.
 **Depends on.** None. **Size.** S.
 
+### BIT-042 Release channel and CI pipeline
+**Status.** New from the 2026-11-22 channel and CI decisions. CI phase one is step 2 in the
+[release work order](#release-work-order-2026-11-22); phase two is step 4. No workflow exists yet.
+**Goal.** Put the release channel on GitHub Releases and introduce CI without moving release signing
+into CI, so checks run on every change and the app bundle can be built, signed with a test key, and
+published as a draft release from a tag.
+**Scope.**
+- Phase one: one GitHub Actions workflow on push and pull request. It runs the existing `make check`
+  target and builds the app bundle as an unsigned workflow artifact. It uses no secrets, has no
+  write permission, and does not publish.
+- Pin every third-party action by full commit SHA, including first-party GitHub actions, and record
+  the pins in the workflow review. The repository requires SHA pinning.
+- Phase two: a bundle tag matching [ADR 0031](../adr/0031-update-channel-on-github-releases.md)
+  creates a draft release, uploads `manifest.json`, `manifest.json.sig`, and `bittern-app.tar.gz`,
+  and publishes the draft as one visible flip. The job runs only after the phase one checks pass.
+- Sign CI bundles with a CI-only Ed25519 development key held in Actions secrets. The key signs test
+  bundles only, its public key is pinned only on bench devices, and it is never the release key.
+  Production releases use the offline signature from [ADR 0029](../adr/0029-release-signing-and-key-custody.md);
+  CI never holds the release seed.
+- Keep QEMU scenarios out of CI. The hosted-runner KVM question is unresolved and is not assumed.
+- Add the release base URL and check interval defaults under `defaults/`, and keep the tag scheme,
+  asset names, and draft rule in ADR 0031.
+**Acceptance.**
+- Phase one runs `make check` on push and pull request and fails with the same check and file name a
+  developer sees locally.
+- The phase one bundle artifact is unsigned and labelled as a test artifact; it is not published.
+- Every action in the workflow is pinned by a 40-character commit SHA, and the workflow has no
+  secret and no write permission in phase one.
+- Phase two creates a draft release from a bundle tag, uploads exactly the three named assets, and
+  publishes the draft only after the checks pass.
+- A production release cannot be signed by the CI key: a manifest signed only by the CI test key is
+  rejected by a release trust store.
+- The QEMU and hardware paths stay outside CI and are named as such in the workflow and the release
+  runbook.
+**Depends on.** ADR 0031, ADR 0032, and the BIT-009 manifest and verifier slice (landed). Phase two
+also depends on the BIT-009 transaction core and the bundle packer. **Size.** M.
+
 ### BIT-022 Tailscale remote access and Frigate UI support path
 **Goal.** Make Tailscale remote access an owner-managed, audited feature of the Bittern UI, and use a
 tailnet-only `tailscale serve` endpoint for the loopback Frigate UI as the interim review, event and
@@ -1939,19 +2009,32 @@ reservation in a file Bittern does not own is still left and failed by cleanup.
 **Depends on.** BIT-003, BIT-004. **Size.** L.
 
 ### BIT-009 App bundle update transaction with rollback
+**Status.** First slice in scope and partially landed. The canonical manifest, verifier and offline
+`bittern-release` tool exist. The transaction core is step 3 in the
+[release work order](#release-work-order-2026-11-22), after CI phase one, and the QEMU update
+scenario is step 5. The release path still waits for ADR 0029 acceptance and the key ceremony.
+
 **Goal.** Updates that cannot leave the appliance half-configured. **Scope.**
 - Signed manifest with digest, generation and channel.
 - Transaction: preflight, backup, stop, switch, migrate, start, health, commit or roll back.
+- The platform generation is abstract and supplied by a provider. Image metadata can supply it now,
+  and an installer fingerprint can supply it later, without changing the transaction.
+- The transaction writes only under `/var/lib/bittern`. It never assumes a writable root and never
+  assumes knowledge of OS slots.
+- The status contract records a base fingerprint covering the Debian version, kernel, Docker
+  version, device availability, and firmware presence. It is recorded evidence, not a trust input.
 
-**Release path.** Build and sign a bundle, publish the bundle and its metadata to a channel, and use
-the camera-variant field fix in
-[the managed update path note](../notes/2026-11-15-managed-update-path.md) as the end-to-end case.
-The proposed security-release policy and release automation are in
+**Release path.** Build and sign a bundle, publish the bundle and its metadata to the GitHub Releases
+channel in [ADR 0031](../adr/0031-update-channel-on-github-releases.md), and use the camera-variant
+field fix in [the managed update path note](../notes/2026-11-15-managed-update-path.md) as the
+end-to-end case. The proposed security-release policy and release automation are in
 [ADR 0021](../adr/0021-security-updates.md). The transaction scope above is unchanged.
 
 **Signing and slots.** Signing depends on [ADR 0029](../adr/0029-release-signing-and-key-custody.md),
 proposed, and the slot assumption is [ADR 0030](../adr/0030-ab-from-the-first-image.md), proposed;
-the transaction never writes a bootloader or claims an OS slot.
+the transaction never writes a bootloader or claims an OS slot. The channel and asset layout are in
+[ADR 0031](../adr/0031-update-channel-on-github-releases.md), and CI publication phases are in
+[ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md).
 
 **Acceptance.**
 - An injected start failure restores the previous bundle and config.
@@ -2138,8 +2221,11 @@ Debian installer or a manual payload copy.
 - Produce a signed artifact before any public release. The signing mechanism and key custody are
   recorded before the first release; this ticket does not choose them. An unsigned build is a test
   artifact, not a release.
-- Keep CI out of this ticket. The build is a documented local or release-engineer command, as
-  [ADR 0007](../adr/0007-mkosi-os-image-and-releases.md) allows.
+- Keep CI out of this ticket. CI is owned by [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md)
+  and [BIT-042](#bit-042-release-channel-and-ci-pipeline); the app bundle channel is
+  [ADR 0031](../adr/0031-update-channel-on-github-releases.md). The image build stays a documented
+  local or release-engineer command, as [ADR 0007](../adr/0007-mkosi-os-image-and-releases.md)
+  allows.
 - Do not decide the A/B update mechanism or the shipping SKU: OQ-04, OQ-05 and OQ-09 remain open. A
   single-slot image is a provisional test-image scope for the first boot and upgrade-path test, not
   an answer to OQ-04 or OQ-05; the A/B layout follows those decisions.
@@ -2166,7 +2252,9 @@ stays a test artifact until the ADR is accepted.
   image replaces the manual Debian gate until both pass.
 **Depends on.** BIT-009, BIT-010, BIT-011, BIT-012, BIT-013, BIT-016, BIT-017, BIT-018, and the
 hardware Level 2 manual Debian gate. **Size.** L. The A/B mechanism and the shipping SKU remain
-[OQ-04](../open-questions.md), [OQ-05](../open-questions.md) and [OQ-09](../open-questions.md).
+[OQ-04](../open-questions.md), [OQ-05](../open-questions.md) and [OQ-09](../open-questions.md). The
+delivery model and supported base are [OQ-35](../open-questions.md); the image becomes required
+before the first device that is not the maintainer's.
 
 ## MVP definition of done
 
@@ -2199,8 +2287,20 @@ hardware Level 2 manual Debian gate. **Size.** L. The A/B mechanism and the ship
 ## Suggested next-session prompts
 
 ```text
-Implement BIT-009. Decide no OQ. Deliver the signed app bundle update transaction with rollback and
-the channel publication path, and prove an injected failure restores the previous bundle and config.
+Implement CI phase one for BIT-042. Decide no OQ. Add one GitHub Actions workflow on push and pull
+request that runs make check and builds the app bundle as an unsigned artifact, with no secrets, no
+publishing, and every action pinned by full commit SHA. Update the plan and README status.
+
+Implement the BIT-009 transaction core. Decide no OQ. Add the update transaction, the
+provider-supplied platform generation, the /var/lib/bittern write boundary, the base fingerprint, and
+the test-key path, with the failure cases from the BIT-009 recon note.
+
+Implement the bundle packer and publish-on-tag stage for BIT-042. Decide no OQ. Build the files-only
+payload, create the draft release, upload manifest.json, manifest.json.sig and bittern-app.tar.gz,
+and publish the draft with the CI-only test key. Do not put the release key in CI.
+
+Run the QEMU update scenario for BIT-009. Decide no OQ. Cover a valid update, an invalid signature, a
+digest mismatch, a downgrade and a rollback, and record the evidence. QEMU stays outside CI.
 
 Implement the rest of BIT-013. Decide no OQ. Add the offline archive path and digest verification,
 carry the pinned reference in the payload and OS image metadata, and print the planned pull in the

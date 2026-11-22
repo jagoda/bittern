@@ -89,7 +89,7 @@ only when the probe fails.
 | `cameras` | `items[]` with `id`, `name`, `address`, `mac`, `vendor`, `model`, `enabled`, `stream`, `snapshot`, `recording`, `last_seen`, `detail`, `snapshot_at`, `snapshot_bytes` | The list comes from `appliance.yaml` and the camera health cache, not a live camera call. `snapshot` and `stream` are `unknown` until the wizard or an explicit test has run; `last_seen` is null until a check records it; `recording` follows the Frigate section |
 | `storage` | `path`, `present`, `detail_state`, `free_bytes`, `reserve_bytes`, `member_count`, `missing_members[]` | `present` is evidence that a recording drive for the path is attached, not that the directory exists; `detail_state` is `ready`, `not-attached`, `not-mounted`, or `write-test-failed`, and is empty only when the section is `unknown` or the probe cannot read the mount table; `free_bytes` is null unless the path is mounted, so the OS filesystem is never measured as recording storage; `member_count` reports the single media path known to this build, so a configured multi-drive pool is not enumerated until the pool mount work lands |
 | `network` | `lan0` and `cam0`, each with `address`, `carrier`, `last_error` | `address` and `carrier` are null when the interface or sysfs evidence is unavailable |
-| `updates` | `current_slot`, `generation` | Both are null until BIT-009 implements the update transaction and a current-generation record |
+| `updates` | `current_slot`, `generation`, `base` | `current_slot` and `generation` are null until BIT-009 implements the update transaction and a current-generation record; `base` is null until the transaction records a base fingerprint |
 | `reset` | `level`, `completed_at` | Both are null until BIT-010 implements a reset record |
 | `hardware` | `cpu.model`, `cpu.cores`, `memory_bytes`, `accelerators[]` | The whole section is omitted only when the hardware probe fails; missing files inside the detection roots produce empty fields and an empty accelerator list instead |
 
@@ -113,6 +113,18 @@ count, sorted and unique relative paths, and the generated file header. The
 native `nft -c`, `dnsmasq --test`, `chronyd -p`, and Frigate config checks are
 apply-time gates, not status-time commands, and appear as an `unknown`
 `native-checkers` result.
+
+`updates.base` is the base fingerprint recorded by the update transaction. It
+covers the Debian version, the kernel version, the Docker version, the presence
+of the devices the appliance needs, and firmware presence. It is recorded
+evidence for support and compatibility review, not a trust input; the
+transaction checks the root-owned OS generation metadata instead. The
+transaction writes only under `/var/lib/bittern` and does not assume a writable
+root or knowledge of OS slots. The platform generation is supplied by a
+provider, so image metadata can supply it now and an installer fingerprint can
+supply it later without changing the process. See
+[the architecture update flow](architecture.md#update-flow) and
+[BIT-009](plan/implementation-plan.md#bit-009-app-bundle-update-transaction-with-rollback).
 
 The Frigate section is derived from the validated configuration and the
 rendered state. `camera_count` counts enabled cameras, and `configured` is true
