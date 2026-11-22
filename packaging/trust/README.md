@@ -25,8 +25,15 @@ Public key (hex): `1ff8f35f7c930c5d30101f1f15171818d03eec69d69d974998f6a31f0e3d6
 
 ## Environment tag policy
 
-The `beta` environment allows the tag glob
-`app-beta-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]`, which encodes the
-`app-beta-<6 lowercase hex>` tag form in ADR 0031. The environment policy and the ADR tag scheme
-must change together. A change to either one without the other either blocks a valid tag at deploy
-time or permits a tag the ADR does not define.
+The `beta` environment allows the tag glob `app-beta-*`, which is the documented `*` wildcard form.
+The
+[deployments and environments reference](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
+(accessed 2026-11-22) documents the `*` wildcard and refers further syntax to Ruby `File.fnmatch`;
+it does not document character classes or ranges as supported. The exact tag format is therefore
+validated by the publish workflow before it creates the draft, not by an undocumented glob feature.
+The workflow must accept only `app-beta-` followed by exactly six lowercase hexadecimal characters,
+with generation starting at `000001`, and reject everything else.
+
+The environment policy and the ADR 0031 tag scheme must change together. A change to either one
+without the other either blocks a valid tag at deploy time or permits a tag the ADR does not
+define.
