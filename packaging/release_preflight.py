@@ -186,6 +186,15 @@ def check_main_head(
     return latest
 
 
+def check_secret_presence(ci: bool, ci_presence: str | None) -> None:
+    if ci and ci_presence is None:
+        raise PreflightError(
+            "secret-presence-flag-missing",
+            "the preflight job must declare the beta-draft environment and set "
+            "BITTERN_PREFLIGHT_SECRET_PRESENT from the secret comparison",
+        )
+
+
 def check_secret(
     names: list[str] | None = None, ci_presence: str | None = None
 ) -> None:
@@ -455,13 +464,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ci_presence = os.environ.get("BITTERN_PREFLIGHT_SECRET_PRESENT") if ci else None
     if ci and ci_presence is None:
-        failures.append(
-            PreflightError(
-                "secret-presence-flag-missing",
-                "the preflight job must declare the beta-draft environment and set "
-                "BITTERN_PREFLIGHT_SECRET_PRESENT from the secret comparison",
-            )
-        )
+        attempt(lambda: check_secret_presence(ci, ci_presence))
     else:
         names = None if ci else attempt(lambda: read_secret_names(args.repo))
         try:

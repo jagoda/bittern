@@ -87,7 +87,7 @@ root is repository write access, and `beta` still requires the maintainer's appr
 
 ## Verification
 
-- `make check` passes in the worktree, including the 33 new preflight tests.
+- `make check` passes in the worktree, including the 34 new preflight tests.
 - `go vet ./...` and `gofmt -l` pass for the module; the vendor tree is excluded.
 - `gh workflow view` returns the new release workflow and the changed publish workflow after `main`
   is pushed.
