@@ -40,6 +40,14 @@ dispatched `publish.yml` directly. It covered the direct-dispatch branch and did
 path. The branch that matters, `release.yml` calling `publish.yml` through `workflow_call`, had never
 run.
 
+The first call-path dry run after the event fix, [45084371280](https://github.com/jagoda/bittern/actions/runs/45084371280),
+reached `sign and stage draft` and failed at `Sign the manifest with the CI test key`: the decoded
+key was 0 bytes. A reusable workflow does not receive the caller's secrets implicitly. A following
+attempt with `secrets: inherit`, [45084978003](https://github.com/jagoda/bittern/actions/runs/45084978003),
+failed validation because the environment secret was still not provided to the call. The release
+job now passes `BITTERN_CI_SIGNING_KEY: ${{ secrets.BITTERN_CI_SIGNING_KEY }}` by name and the called
+workflow declares it required, so the draft job's `beta-draft` environment resolves the value.
+
 ## Conditions changed
 
 | Location | Before | After |
@@ -48,6 +56,7 @@ run.
 | `publish.yml` generation check | `if [ "$EVENT_NAME" = "workflow_call" ] && [ "$generation" != "$INPUT_GENERATION" ]` | `if [ -n "$INPUT_GENERATION" ] && [ "$parsed_generation" != "$INPUT_GENERATION" ]`. A supplied generation is compared; a push or direct dispatch has none. |
 | `release.yml` release job | `needs.preflight.result == 'success' && inputs.confirm == needs.preflight.outputs.tag` | `needs.preflight.result == 'success' && (inputs.dry_run || inputs.confirm == needs.preflight.outputs.tag)` |
 | `release.yml` called inputs | `create_tag: true`, `dry_run: false` | `create_tag: ${{ inputs.dry_run == false }}`, `dry_run: ${{ inputs.dry_run }}` |
+| `release.yml` called secrets | None. The called workflow read `secrets.BITTERN_CI_SIGNING_KEY` directly. | `publish.yml` declares `BITTERN_CI_SIGNING_KEY` as required under `workflow_call`; `release.yml` passes `BITTERN_CI_SIGNING_KEY: ${{ secrets.BITTERN_CI_SIGNING_KEY }}` by name. |
 | `publish.yml` publish job | `needs.tag.outputs.dry_run == 'false'` | Unchanged. It already used the normalized `dry_run` output, not the event name. |
 | `publish.yml` dry-run and create-tag steps | `needs.tag.outputs.dry_run` and `needs.tag.outputs.create_tag` | Unchanged. They already used the normalized outputs. |
 
@@ -57,11 +66,40 @@ and is used for the manifest source check, the tag creation, and the release not
 
 ## Dry-run call path result
 
-Run pending.
+| Field | Value |
+| --- | --- |
+| Run | [45085275662](https://github.com/jagoda/bittern/actions/runs/45085275662) |
+| Event | `workflow_dispatch` of `release.yml` at `main` |
+| Source commit | `d5f03a471e4052f31e3a5f79f3d07c36d1c04e5c` |
+| Inputs | `dry_run=true`, empty `confirm` |
+| Conclusion | success |
+
+| Job | Conclusion |
+| --- | --- |
+| `release preflight` | success |
+| `build, tag, draft, publish / validate tag` | success |
+| `build, tag, draft, publish / checks and unsigned test build / make check` | success |
+| `build, tag, draft, publish / checks and unsigned test build / unsigned test build` | success |
+| `build, tag, draft, publish / sign and stage draft` | success |
+| `build, tag, draft, publish / publish the verified draft` | skipped |
+
+Inside `validate tag`, `Select the tag, commit, and release action` succeeded on the input path with
+`dry_run=true` and `create_tag=false`. Inside `sign and stage draft`, `Sign the manifest with the CI
+test key` and `Verify the signature with the CI test anchor` succeeded. `Create the tag at the
+checked commit`, `Create the draft release with exactly five assets`, and `Confirm the draft carries
+exactly the five assets` were skipped. `Confirm the dry run created no tag and no release` succeeded.
+The `publish the verified draft` job was skipped, so the run never waited on the `beta` environment.
 
 ## Proof that nothing was created
 
-Run pending.
+```text
+$ git ls-remote --tags origin
+$ gh release list
+$ gh api repos/jagoda/bittern/git/ref/tags/app-beta-000001
+{"message":"Not Found","documentation_url":"https://docs.github.com/rest/git/refs#get-a-reference","status":"404"}
+```
+
+There is no tag, draft, or release after the run. The tag API returns 404.
 
 ## Finding
 

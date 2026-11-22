@@ -34,8 +34,11 @@ preparation kit, and checksums as a test artifact. The tag-driven
 [`publish.yml`](.github/workflows/publish.yml) builds the same assets, signs the manifest with the
 CI test key, and publishes a beta draft after the protected `beta` environment approval. A
 `workflow_dispatch` dry run validates the tag, runs the checks, signs and verifies the manifest, and
-prints the five asset digests without creating a tag, draft, or release. The release channel is
-decided in [ADR 0031](docs/adr/0031-update-channel-on-github-releases.md) and no release is live. The
+prints the five asset digests without creating a tag, draft, or release. The
+[`release.yml`](.github/workflows/release.yml) dispatch defaults to a dry run that calls the same
+publish workflow and signing step without creating a tag, draft, or release; set `dry_run` false with
+the confirmed tag to publish. The release channel is decided in
+[ADR 0031](docs/adr/0031-update-channel-on-github-releases.md) and no release is live. The
 first maintainer sequence is [the beta bench rollout](docs/runbooks/beta-bench-rollout.md). The
 sequence of work to reach a first appliance release is in
 [the implementation plan](docs/plan/implementation-plan.md). Facts about Frigate are dated

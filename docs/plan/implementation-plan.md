@@ -318,10 +318,12 @@ BIT-021, BIT-025 and BIT-026 to BIT-012, and BIT-022 to BIT-015. Kiosk mode stay
 
 These are open after step 5. The first is the next action; the rest do not block it.
 
-1. **The first tag and bench run.** The publish dry run is green, and no tag, draft, or release
-   exists. Push `app-beta-000001`, approve the `beta` deployment, and run the two-release sequence in
-   [the beta bench rollout](../runbooks/beta-bench-rollout.md). The tag-triggered publish path and the
-   channel client against a real release are unproven until then.
+1. **The first dispatch release and bench run.** The release call-path dry run is green, and no
+   tag, draft, or release exists. Run the release workflow with `dry_run` true, then with `dry_run`
+   false and `app-beta-000001` in `confirm`, approve the `beta` deployment, and run the two-release
+   sequence in [the beta bench rollout](../runbooks/beta-bench-rollout.md). The first publish
+   dispatch, the tag-triggered fallback, and the channel client against a real release are unproven
+   until then.
 2. **The flaky failed-camera-check wizard test.**
    [BIT-043](#bit-043-stabilise-the-flaky-failed-camera-check-wizard-test) owns the shared state or
    timing assumption behind `TestWizardShowsFailedCameraCheckAfterApply`. A rerun is not a fix.

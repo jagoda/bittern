@@ -16,6 +16,7 @@
   [release preflight](../../packaging/release_preflight.py),
   [release workflow](../../.github/workflows/release.yml),
   [publish workflow](../../.github/workflows/publish.yml),
+  [release call path note](2026-11-22-release-call-path.md),
   [OQ-36](../open-questions.md),
   [trust README](../../packaging/trust/README.md),
   [BIT-042](../plan/implementation-plan.md#bit-042-release-channel-and-ci-pipeline)
@@ -105,7 +106,8 @@ is now the normal one; the fallback remains for a release workflow outage or a b
 
 ## Next step
 
-Run `make release-preflight`, dispatch `release.yml` at `main` with the printed tag, approve the
-`beta` deployment, and record the release run and release URLs in
-[the beta bench rollout](../runbooks/beta-bench-rollout.md). The first dispatch release proves the
+Run `make release-preflight`, dispatch `release.yml` at `main` with `dry_run` true to prove the
+call path, then dispatch with `dry_run` false and the printed tag in `confirm`, approve the `beta`
+deployment, and record the release run and release URLs in
+[the beta bench rollout](../runbooks/beta-bench-rollout.md). The first publish dispatch proves the
 tag creation, the draft upload, the approval, and the visible publish.
