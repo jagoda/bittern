@@ -53,19 +53,24 @@ type fakeSystem struct {
 	failStart    map[string]error
 	failStop     map[string]error
 	probes       map[string]apply.ProbeResult
+	probeQueue   map[string][]apply.ProbeResult
 	failProbe    map[string]int
+	delayProbe   map[string]int
+	probeDelay   time.Duration
 	waitErr      map[string]error
 	waitDuration time.Duration
 }
 
 func newFakeSystem() *fakeSystem {
 	return &fakeSystem{
-		active:    map[string]bool{},
-		failStart: map[string]error{},
-		failStop:  map[string]error{},
-		probes:    map[string]apply.ProbeResult{},
-		failProbe: map[string]int{},
-		waitErr:   map[string]error{},
+		active:     map[string]bool{},
+		failStart:  map[string]error{},
+		failStop:   map[string]error{},
+		probes:     map[string]apply.ProbeResult{},
+		probeQueue: map[string][]apply.ProbeResult{},
+		failProbe:  map[string]int{},
+		delayProbe: map[string]int{},
+		waitErr:    map[string]error{},
 	}
 }
 
@@ -95,9 +100,18 @@ func (f *fakeSystem) WaitUnitActive(unit string, timeout time.Duration) error {
 
 func (f *fakeSystem) ProbeHealth(probe apply.Probe) apply.ProbeResult {
 	f.calls = append(f.calls, "health:"+probe.Name)
+	if f.delayProbe[probe.Name] > 0 {
+		f.delayProbe[probe.Name]--
+		time.Sleep(f.probeDelay)
+	}
 	if f.failProbe[probe.Name] > 0 {
 		f.failProbe[probe.Name]--
 		return apply.ProbeResult{Name: probe.Name, Kind: probe.Kind, Status: apply.ProbeFailed, Reason: "injected failure"}
+	}
+	if queue := f.probeQueue[probe.Name]; len(queue) > 0 {
+		result := queue[0]
+		f.probeQueue[probe.Name] = queue[1:]
+		return result
 	}
 	if result, ok := f.probes[probe.Name]; ok {
 		return result
@@ -259,9 +273,9 @@ func newTestEnv(t *testing.T) *testEnv {
 }
 
 func writeTestConfig(path, channel string, camera bool) error {
-	cameras := "[]"
+	cameras := "cameras: []\n"
 	if camera {
-		cameras = "  - id: front_door\n    name: Front door\n    address: 10.77.0.20\n    credentials_ref: cameras.front_door\n"
+		cameras = "cameras:\n  - id: front_door\n    name: Front door\n    address: 10.77.0.20\n    credentials_ref: cameras.front_door\n"
 	}
 	document := fmt.Sprintf(`schema_version: 2
 
@@ -284,7 +298,6 @@ network:
       gateway: 10.77.0.1
       ntp_server: 10.77.0.1
 
-cameras:
 %s
 storage:
   recording:

@@ -120,12 +120,11 @@ func newJournal(options Options, p paths, now time.Time) (*Journal, error) {
 	if options.Source == nil {
 		return nil, errorf("source.missing", "no bundle source is configured")
 	}
-	channel := ""
-	var cfg *config.Config
-	if loaded, _, err := loadConfig(options.ConfigPath); err == nil {
-		cfg = loaded
-		channel = loaded.Updates.Channel
+	cfg, _, err := loadConfig(options.ConfigPath)
+	if err != nil {
+		return nil, err
 	}
+	channel := cfg.Updates.Channel
 	previous := int64(0)
 	if current, err := readCurrent(p.current); err == nil {
 		previous = current
@@ -191,30 +190,16 @@ func newRunner(options Options, p paths, journal *Journal, now time.Time) (*runn
 		now:         now,
 	}
 	if journal.CandidateManifestSHA256 != "" {
+		// The preloaded path uses the same binding accessor as every later
+		// step. A mismatch is left for the step that needs the candidate, so
+		// the failure is journalled and staging is kept for inspection.
 		r.loadCandidate()
 	}
 	return r, nil
 }
 
 func (r *runner) loadCandidate() {
-	if data, err := os.ReadFile(filepath.Join(r.paths.stagingDir(r.journal.OperationID), "manifest.json")); err == nil {
-		if manifest, parseErr := release.ParseManifest(data); parseErr == nil {
-			r.manifestBytes = data
-			r.manifest = manifest
-			r.signature, _ = os.ReadFile(filepath.Join(r.paths.stagingDir(r.journal.OperationID), "manifest.sig"))
-			return
-		}
-	}
-	if r.journal.CandidateGeneration == 0 {
-		return
-	}
-	data, manifest, err := readManifestFromBundle(r.paths.bundleDir(r.journal.CandidateGeneration))
-	if err != nil {
-		return
-	}
-	r.manifestBytes = data
-	r.manifest = manifest
-	r.signature, _ = os.ReadFile(filepath.Join(r.paths.bundleDir(r.journal.CandidateGeneration), "manifest.sig"))
+	_, _ = r.candidateManifest()
 }
 
 func installSteps(cfg *config.Config) []Step {
@@ -229,11 +214,15 @@ func installSteps(cfg *config.Config) []Step {
 		{Key: StepPromote, Kind: kindPromote},
 		{Key: StepBackupConfig, Kind: kindBackupConfig},
 		{Key: StepBackupData, Kind: kindBackupData},
-		{Key: StepStopFrigate, Kind: kindStop, Unit: "bittern-frigate.service"},
-		{Key: StepStopAgent, Kind: kindStop, Unit: "bitternd.service"},
-		{Key: StepActivate, Kind: kindActivate},
-		{Key: StepMigrate, Kind: kindMigrate},
 	}
+	if frigateConfigured(cfg) {
+		steps = append(steps, Step{Key: StepStopFrigate, Kind: kindStop, Unit: "bittern-frigate.service"})
+	}
+	steps = append(steps,
+		Step{Key: StepStopAgent, Kind: kindStop, Unit: "bitternd.service"},
+		Step{Key: StepActivate, Kind: kindActivate},
+		Step{Key: StepMigrate, Kind: kindMigrate},
+	)
 	if frigateConfigured(cfg) {
 		steps = append(steps, Step{Key: StepEnsureImage, Kind: kindEnsureImage, TimeoutSeconds: int((60 * time.Minute).Seconds())})
 	}
@@ -250,21 +239,34 @@ func installSteps(cfg *config.Config) []Step {
 	)
 }
 
-func rollbackSteps() []Step {
-	return []Step{
-		{Key: StepRollbackVerify, Kind: kindRollbackVerify},
-		{Key: StepRollbackStopFrigate, Kind: kindStop, Unit: "bittern-frigate.service"},
-		{Key: StepRollbackStopAgent, Kind: kindStop, Unit: "bitternd.service"},
-		{Key: StepRollbackPointer, Kind: kindRollbackPointer},
-		{Key: StepRollbackConfig, Kind: kindRollbackConfig},
-		{Key: StepRollbackData, Kind: kindRollbackData},
-		{Key: StepRollbackStartAgent, Kind: kindStart, Unit: "bitternd.service", TimeoutSeconds: 60},
-		{Key: StepRollbackStartFrigate, Kind: kindStart, Unit: "bittern-frigate.service"},
-		{Key: StepRollbackHealth, Kind: kindRollbackHealth, TimeoutSeconds: 300},
-		{Key: StepRollbackRecord, Kind: kindRollbackRecord},
-		{Key: StepRollbackPrune, Kind: kindRollbackPrune},
-		{Key: StepRollbackFinish, Kind: kindFinish},
+func rollbackSteps(frigate bool) []Step {
+	steps := []Step{{Key: StepRollbackVerify, Kind: kindRollbackVerify}}
+	if frigate {
+		steps = append(steps, Step{Key: StepRollbackStopFrigate, Kind: kindStop, Unit: "bittern-frigate.service"})
 	}
+	steps = append(steps,
+		Step{Key: StepRollbackStopAgent, Kind: kindStop, Unit: "bitternd.service"},
+		Step{Key: StepRollbackPointer, Kind: kindRollbackPointer},
+		Step{Key: StepRollbackConfig, Kind: kindRollbackConfig},
+		Step{Key: StepRollbackData, Kind: kindRollbackData},
+		Step{Key: StepRollbackStartAgent, Kind: kindStart, Unit: "bitternd.service", TimeoutSeconds: 60},
+	)
+	if frigate {
+		steps = append(steps, Step{Key: StepRollbackStartFrigate, Kind: kindStart, Unit: "bittern-frigate.service"})
+	}
+	return append(steps,
+		Step{Key: StepRollbackHealth, Kind: kindRollbackHealth, TimeoutSeconds: 300},
+		Step{Key: StepRollbackRecord, Kind: kindRollbackRecord},
+		Step{Key: StepRollbackPrune, Kind: kindRollbackPrune},
+		Step{Key: StepRollbackFinish, Kind: kindFinish},
+	)
+}
+
+// planStartsFrigate reports the install or rollback plan's record of the same
+// frigateConfigured predicate. Rollback mirrors the install plan rather than
+// re-reading a config that may have changed after the plan was journalled.
+func planStartsFrigate(steps []Step) bool {
+	return hasStep(steps, StepStartFrigate) || hasStep(steps, StepRollbackStartFrigate)
 }
 
 func frigateConfigured(cfg *config.Config) bool {
@@ -360,6 +362,10 @@ func (r *runner) execute(start int) (Result, error) {
 }
 
 func (r *runner) finishedResult() (Result, error) {
+	if len(r.journal.Steps) == 0 {
+		err := errorf("journal.steps", "the journal has no steps; refusing to report committed")
+		return r.result(ResultFailed, err), err
+	}
 	switch r.journal.Phase {
 	case PhaseRollback:
 		failure := r.journal.Failure
@@ -418,7 +424,7 @@ func (r *runner) fail(step Step, cause error) (Result, error) {
 		r.journal.NextStep = step.Key
 		r.journal.UpdatedAt = r.options.Now().UTC().Format(time.RFC3339)
 		_ = writeJournal(r.paths.journal, r.journal)
-		if step.Kind == kindRollbackVerify {
+		if step.Kind == kindRollbackVerify || (step.Kind == kindRollbackPointer && causesRule(cause, "rollback.previous")) {
 			manifest, manifestBytes := r.candidateForHistory()
 			record := r.buildHistory(ResultStateUnknown, manifest, manifestBytes, r.options.Now().UTC())
 			_ = r.writeHistory(record)
@@ -449,16 +455,19 @@ func (r *runner) fail(step Step, cause error) (Result, error) {
 		manifest, manifestBytes := r.candidateForHistory()
 		record := r.buildHistory(resultKind, manifest, manifestBytes, r.options.Now().UTC())
 		_ = r.writeHistory(record)
-		_ = removeAll(r.paths.stagingDir(r.journal.OperationID))
+		if !causesRule(cause, "journal.candidate-mismatch") {
+			_ = removeAll(r.paths.stagingDir(r.journal.OperationID))
+		}
 		_ = removeJournal(r.paths.journal)
 		result := r.result(resultKind, cause)
 		result.Status = resultKind
 		return result, fmt.Errorf("update: %s failed: %w", step.Key, cause)
 	}
 
+	frigate := planStartsFrigate(r.journal.Steps)
 	r.journal.Phase = PhaseRollback
 	r.journal.State = StateRunning
-	r.journal.Steps = rollbackSteps()
+	r.journal.Steps = rollbackSteps(frigate)
 	r.journal.NextStep = StepRollbackVerify
 	r.journal.LastCompletedStep = ""
 	r.journal.LiveTouched = true
@@ -478,11 +487,19 @@ func isRejection(err error) bool {
 	return errors.As(err, &releaseError)
 }
 
-func (r *runner) candidateForHistory() (*release.Manifest, []byte) {
-	if r.manifest != nil {
-		return r.manifest, r.manifestBytes
+func causesRule(err error, rule string) bool {
+	var updateError *Error
+	if errors.As(err, &updateError) && updateError.Rule == rule {
+		return true
 	}
-	r.loadCandidate()
+	var releaseError *release.Error
+	return errors.As(err, &releaseError) && releaseError.Rule == rule
+}
+
+func (r *runner) candidateForHistory() (*release.Manifest, []byte) {
+	if _, err := r.candidateManifest(); err != nil {
+		return nil, nil
+	}
 	return r.manifest, r.manifestBytes
 }
 
@@ -556,12 +573,14 @@ func (r *runner) start(step Step) error {
 		return err
 	}
 	if waiter, ok := r.options.System.(UnitWaiter); ok && step.TimeoutSeconds > 0 {
-		return waiter.WaitUnitActive(step.Unit, time.Duration(step.TimeoutSeconds)*time.Second)
+		if err := waiter.WaitUnitActive(step.Unit, time.Duration(step.TimeoutSeconds)*time.Second); err != nil {
+			return err
+		}
 	}
 	probe := apply.Probe{Name: step.Key, Kind: apply.ProbeUnit, Target: step.Unit}
 	result := r.options.System.ProbeHealth(probe)
-	if result.Status == apply.ProbeFailed {
-		return errorf("unit.start", "%s did not become active: %s", step.Unit, result.Reason)
+	if result.Status != apply.ProbePassed {
+		return errorf("unit.start", "%s did not report a positive health result: %s (%s)", step.Unit, result.Status, result.Reason)
 	}
 	return nil
 }
@@ -591,6 +610,9 @@ func (r *runner) commit() error {
 		return err
 	}
 	if present && state.CommittedGeneration == r.journal.CandidateGeneration {
+		if state.CommittedManifestSHA256 != r.journal.CandidateManifestSHA256 {
+			return errorf("commit.candidate-mismatch", "the committed generation %d names manifest %s, not the candidate %s", state.CommittedGeneration, state.CommittedManifestSHA256, r.journal.CandidateManifestSHA256)
+		}
 		r.journal.State = StateCommitted
 		return nil
 	}

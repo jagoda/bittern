@@ -1,6 +1,7 @@
 package update
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"io"
@@ -204,21 +205,50 @@ func (r *runner) verifyManifestStep() error {
 	return nil
 }
 
-func (r *runner) ensureManifest() (*release.Manifest, error) {
+// candidateManifest is the single accessor for the journalled candidate. It
+// returns a manifest only when its digest and generation both equal the values
+// the verification gate stored in the journal. Every path, including the
+// runner's preloaded manifest, goes through this check.
+func (r *runner) candidateManifest() (*release.Manifest, error) {
+	if r.journal.CandidateGeneration == 0 || r.journal.CandidateManifestSHA256 == "" {
+		return nil, errorf("journal.candidate-missing", "the journal has no verified candidate manifest")
+	}
 	if r.manifest != nil {
+		if r.manifest.Generation != r.journal.CandidateGeneration || sha256Hex(r.manifestBytes) != r.journal.CandidateManifestSHA256 {
+			return nil, errorf("journal.candidate-mismatch", "the loaded candidate manifest no longer matches the journal")
+		}
 		return r.manifest, nil
 	}
 	staging := r.paths.stagingDir(r.journal.OperationID)
-	data, err := os.ReadFile(filepath.Join(staging, "manifest.json"))
-	if err != nil {
-		return nil, errorf("manifest.missing", "the staged manifest is missing: %v", err)
+	if data, err := os.ReadFile(filepath.Join(staging, "manifest.json")); err == nil {
+		return r.bindCandidate(data, filepath.Join(staging, "manifest.sig"))
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
+	directory := r.paths.bundleDir(r.journal.CandidateGeneration)
+	data, err := os.ReadFile(filepath.Join(directory, "manifest.json"))
+	if err != nil {
+		return nil, errorf("manifest.missing", "the candidate manifest is missing: %v", err)
+	}
+	return r.bindCandidate(data, filepath.Join(directory, "manifest.sig"))
+}
+
+func (r *runner) bindCandidate(data []byte, signaturePath string) (*release.Manifest, error) {
 	manifest, err := release.ParseManifest(data)
 	if err != nil {
 		return nil, err
 	}
-	if r.journal.CandidateManifestSHA256 != "" && sha256Hex(data) != r.journal.CandidateManifestSHA256 {
-		return nil, errorf("journal.candidate-mismatch", "the staged manifest changed after verification")
+	digest := sha256Hex(data)
+	if digest != r.journal.CandidateManifestSHA256 {
+		return nil, errorf("journal.candidate-mismatch", "the candidate manifest digest %s does not match the journal candidate %s", digest, r.journal.CandidateManifestSHA256)
+	}
+	if manifest.Generation != r.journal.CandidateGeneration {
+		return nil, errorf("journal.candidate-mismatch", "the candidate manifest generation %d does not match the journal candidate %d", manifest.Generation, r.journal.CandidateGeneration)
+	}
+	if signature, err := os.ReadFile(signaturePath); err == nil {
+		r.signature = signature
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
 	r.manifestBytes = data
 	r.manifest = manifest
@@ -226,7 +256,7 @@ func (r *runner) ensureManifest() (*release.Manifest, error) {
 }
 
 func (r *runner) fetchPayload() error {
-	manifest, err := r.ensureManifest()
+	manifest, err := r.candidateManifest()
 	if err != nil {
 		return err
 	}
@@ -292,7 +322,7 @@ func copyReaderAtomic(path string, reader io.Reader, expected int64, mode fs.Fil
 }
 
 func (r *runner) verifyPayload() error {
-	manifest, err := r.ensureManifest()
+	manifest, err := r.candidateManifest()
 	if err != nil {
 		return err
 	}
@@ -329,7 +359,7 @@ func hashFileDigest(path string) ([sha256.Size]byte, int64, error) {
 }
 
 func (r *runner) extract() error {
-	manifest, err := r.ensureManifest()
+	manifest, err := r.candidateManifest()
 	if err != nil {
 		return err
 	}
@@ -343,7 +373,7 @@ func (r *runner) extract() error {
 }
 
 func (r *runner) verifyFiles() error {
-	manifest, err := r.ensureManifest()
+	manifest, err := r.candidateManifest()
 	if err != nil {
 		return err
 	}
@@ -359,7 +389,7 @@ func (r *runner) verifyFiles() error {
 }
 
 func (r *runner) promote() error {
-	manifest, err := r.ensureManifest()
+	manifest, err := r.candidateManifest()
 	if err != nil {
 		return err
 	}
@@ -686,18 +716,25 @@ func (r *runner) activate() error {
 		return err
 	}
 	generation := r.journal.CandidateGeneration
-	if generation == 0 {
-		return errorf("activate.candidate", "the candidate generation is zero")
+	if generation == 0 || r.journal.CandidateManifestSHA256 == "" {
+		return errorf("activate.candidate", "the journal has no verified candidate generation and manifest")
 	}
-	data, manifest, err := readManifestFromBundle(r.paths.bundleDir(generation))
+	directory := r.paths.bundleDir(generation)
+	data, manifest, err := readManifestFromBundle(directory)
 	if err != nil {
 		return errorf("activate.bundle", "read the candidate bundle: %v", err)
 	}
-	signature, err := os.ReadFile(filepath.Join(r.paths.bundleDir(generation), "manifest.sig"))
+	if digest := sha256Hex(data); digest != r.journal.CandidateManifestSHA256 {
+		return errorf("journal.candidate-mismatch", "the candidate bundle manifest digest %s does not match the journal candidate %s", digest, r.journal.CandidateManifestSHA256)
+	}
+	if manifest.Generation != generation {
+		return errorf("journal.candidate-mismatch", "the candidate bundle manifest generation %d does not match the journal candidate %d", manifest.Generation, generation)
+	}
+	signature, err := os.ReadFile(filepath.Join(directory, "manifest.sig"))
 	if err != nil {
 		return errorf("activate.bundle", "read the candidate signature: %v", err)
 	}
-	if err := verifyBundle(r.paths.bundleDir(generation), data, signature, trust, manifest); err != nil {
+	if err := verifyBundle(directory, data, signature, trust, manifest); err != nil {
 		return err
 	}
 	current, err := readCurrent(r.paths.current)
@@ -711,6 +748,15 @@ func (r *runner) activate() error {
 }
 
 func (r *runner) health(rollback bool) error {
+	deadline := time.Now().Add(r.options.HealthTimeout)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	checkDeadline := func() error {
+		if err := ctx.Err(); err != nil {
+			return errorf("health.timeout", "the health gate exceeded %s: %v", r.options.HealthTimeout, err)
+		}
+		return nil
+	}
 	generation := r.journal.CandidateGeneration
 	if rollback {
 		generation = r.journal.PreviousGeneration
@@ -742,11 +788,24 @@ func (r *runner) health(rollback bool) error {
 	if err != nil {
 		return errorf("health.bundle-integrity", "read the active bundle: %v", err)
 	}
-	if !rollback && r.journal.CandidateManifestSHA256 != "" && sha256Hex(data) != r.journal.CandidateManifestSHA256 {
-		return errorf("health.bundle-integrity", "the active bundle manifest digest does not match the candidate journal")
+	if err := checkDeadline(); err != nil {
+		return err
 	}
-	if rollback && r.journal.PreviousManifestSHA256 != "" && sha256Hex(data) != r.journal.PreviousManifestSHA256 {
-		return errorf("health.bundle-integrity", "the previous bundle manifest digest does not match state.json")
+	if !rollback {
+		if manifest.Generation != r.journal.CandidateGeneration {
+			return errorf("health.bundle-integrity", "the active bundle generation %d does not match the candidate journal %d", manifest.Generation, r.journal.CandidateGeneration)
+		}
+		if r.journal.CandidateManifestSHA256 == "" || sha256Hex(data) != r.journal.CandidateManifestSHA256 {
+			return errorf("health.bundle-integrity", "the active bundle manifest digest does not match the candidate journal")
+		}
+	}
+	if rollback {
+		if manifest.Generation != generation {
+			return errorf("health.bundle-integrity", "the previous bundle generation %d does not match the rollback journal %d", manifest.Generation, generation)
+		}
+		if r.journal.PreviousManifestSHA256 != "" && sha256Hex(data) != r.journal.PreviousManifestSHA256 {
+			return errorf("health.bundle-integrity", "the previous bundle manifest digest does not match state.json")
+		}
 	}
 	signature, err := os.ReadFile(filepath.Join(directory, "manifest.sig"))
 	if err != nil {
@@ -758,14 +817,26 @@ func (r *runner) health(rollback bool) error {
 	r.appendHealth(HealthRecord{Name: "bundle-integrity", State: "passed"})
 
 	agentProbe := apply.Probe{Name: "agent-unit", Kind: apply.ProbeUnit, Target: "bitternd.service"}
+	if err := checkDeadline(); err != nil {
+		return err
+	}
 	agentResult := r.options.System.ProbeHealth(agentProbe)
+	if err := checkDeadline(); err != nil {
+		return err
+	}
 	r.appendHealth(HealthRecord{Name: "agent-unit", State: string(agentResult.Status), Reason: r.redactor.String(agentResult.Reason)})
 	if agentResult.Status != apply.ProbePassed {
 		return errorf("health.agent-unit", "the agent unit is %s: %s", agentResult.Status, agentResult.Reason)
 	}
-	if hasStep(r.journal.Steps, StepStartFrigate) || rollback {
+	if planStartsFrigate(r.journal.Steps) {
 		probe := apply.FrigateHealthProbe()
+		if err := checkDeadline(); err != nil {
+			return err
+		}
 		result := r.options.System.ProbeHealth(probe)
+		if err := checkDeadline(); err != nil {
+			return err
+		}
 		r.appendHealth(HealthRecord{Name: "frigate-api", State: string(result.Status), Reason: r.redactor.String(result.Reason)})
 		if result.Status != apply.ProbePassed {
 			return errorf("health.frigate-api", "the Frigate API is %s: %s", result.Status, result.Reason)
@@ -828,6 +899,12 @@ func (r *runner) rollbackVerifyPrevious() error {
 }
 
 func (r *runner) rollbackPointer() error {
+	// A resume that starts at the pointer step must not trust that an earlier
+	// process verified the previous bundle. Re-run the same verification
+	// before moving the pointer.
+	if err := r.rollbackVerifyPrevious(); err != nil {
+		return err
+	}
 	return writeCurrent(r.paths.current, r.journal.PreviousGeneration)
 }
 
