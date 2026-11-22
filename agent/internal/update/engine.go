@@ -143,6 +143,12 @@ func normalizeOptions(options Options) Options {
 	if options.System == nil {
 		options.System = unsupportedSystem{}
 	}
+	if options.BaselineBinary == "" {
+		options.BaselineBinary = defaultBaselineBinary
+	}
+	if options.Reason == "" {
+		options.Reason = "manual rollback requested"
+	}
 	return options
 }
 
@@ -175,7 +181,9 @@ func newJournal(options Options, p paths, now time.Time) (*Journal, error) {
 	if err != nil {
 		return nil, err
 	}
-	if state.CommittedGeneration != 0 && previous == 0 {
+	if _, statErr := os.Stat(p.current); errors.Is(statErr, os.ErrNotExist) && state.CommittedGeneration != 0 {
+		// A missing pointer is the legacy first-install shape. An explicit 0
+		// pointer is a baseline revert and must stay 0.
 		previous = state.CommittedGeneration
 	}
 	id, err := operationID(now, previous)
@@ -236,8 +244,10 @@ func validateJournal(journal *Journal, cfg *config.Config) error {
 		expected = installSteps(cfg)
 	case PhaseRollback:
 		expected = rollbackSteps(frigateConfigured(cfg))
+	case PhaseManualRollback:
+		expected = manualRollbackSteps(frigateConfigured(cfg))
 	default:
-		return errorf("journal.phase", "the journal phase %q is not install or rollback", journal.Phase)
+		return errorf("journal.phase", "the journal phase %q is not install, rollback, or manual-rollback", journal.Phase)
 	}
 	switch journal.State {
 	case StateRunning, StateFailed, StateRollbackFailed, StateCommitted, StateRolledBack:
@@ -429,7 +439,7 @@ func isLiveKind(kind string) bool {
 func (r *runner) execute(start int) (Result, error) {
 	for index := start; index < len(r.journal.Steps); index++ {
 		step := r.journal.Steps[index]
-		if r.journal.Phase == PhaseInstall && !r.journal.LiveTouched && isLiveKind(step.Kind) {
+		if (r.journal.Phase == PhaseInstall || r.journal.Phase == PhaseManualRollback) && !r.journal.LiveTouched && isLiveKind(step.Kind) {
 			r.journal.LiveTouched = true
 		}
 		r.journal.NextStep = step.Key
@@ -534,6 +544,9 @@ func (r *runner) result(status string, cause error) Result {
 func (r *runner) fail(step Step, cause error) (Result, error) {
 	failure := r.redactor.String(cause.Error())
 	r.logf("update: step %s failed: %s", step.Key, failure)
+	if r.journal.Phase == PhaseManualRollback {
+		return r.failManualRollback(step, cause)
+	}
 	if r.journal.Phase == PhaseRollback {
 		r.journal.State = StateRollbackFailed
 		r.journal.RollbackFailedStep = step.Key
@@ -720,6 +733,16 @@ func (r *runner) executeStep(step Step) error {
 		return r.record(ResultRolledBack)
 	case kindRollbackPrune:
 		return r.rollbackPrune()
+	case kindManualPreflight:
+		return r.manualPreflight()
+	case kindManualVerify:
+		return r.manualVerify()
+	case kindManualPointer:
+		return r.manualPointer()
+	case kindManualHealth:
+		return r.manualHealth()
+	case kindManualRecord:
+		return r.manualRecord()
 	default:
 		return errorf("step.unknown", "unknown step kind %q", step.Kind)
 	}

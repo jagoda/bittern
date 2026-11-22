@@ -203,13 +203,54 @@ type InterfaceSection struct {
 	LastError string  `json:"last_error"`
 }
 
-// UpdatesSection reports the committed app bundle generation and the base
-// fingerprint. The OS slot stays null until the image work claims it.
+// UpdatesSection reports the running and committed app bundle state, the last
+// channel check, the rollback target, and the newest operation. The OS slot
+// stays null until the image work claims it.
 type UpdatesSection struct {
-	State             SectionState `json:"state"`
-	CurrentSlot       *string      `json:"current_slot"`
-	CurrentGeneration *int64       `json:"current_generation"`
-	Base              *UpdatesBase `json:"base"`
+	State               SectionState            `json:"state"`
+	CurrentSlot         *string                 `json:"current_slot"`
+	CurrentVersion      *string                 `json:"current_version"`
+	CurrentGeneration   *int64                  `json:"current_generation"`
+	RunningGeneration   *int64                  `json:"running_generation"`
+	CommittedGeneration *int64                  `json:"committed_generation"`
+	CommittedVersion    *string                 `json:"committed_version"`
+	Channel             *string                 `json:"channel"`
+	LastCheck           UpdateCheckSection      `json:"last_check"`
+	AvailableVersion    *string                 `json:"available_version"`
+	AvailableGeneration *int64                  `json:"available_generation"`
+	Rollback            UpdateRollbackSection   `json:"rollback"`
+	LastOperation       *UpdateOperationSection `json:"last_operation"`
+	Base                *UpdatesBase            `json:"base"`
+}
+
+// UpdateCheckSection is the last on-demand channel check result.
+type UpdateCheckSection struct {
+	CheckedAt *string `json:"checked_at"`
+	Result    string  `json:"result"`
+	Reason    string  `json:"reason"`
+	Cached    bool    `json:"cached"`
+}
+
+// UpdateRollbackSection reports whether a rollback target exists. Generation 0
+// is the baseline and has no version.
+type UpdateRollbackSection struct {
+	Available  bool    `json:"available"`
+	Generation *int64  `json:"generation"`
+	Version    *string `json:"version"`
+}
+
+// UpdateOperationSection is the newest update or rollback history record.
+type UpdateOperationSection struct {
+	OperationID        string  `json:"operation_id"`
+	Kind               string  `json:"kind"`
+	Result             string  `json:"result"`
+	FailedStep         string  `json:"failed_step"`
+	Reason             string  `json:"reason"`
+	FinishedAt         *string `json:"finished_at"`
+	FromGeneration     *int64  `json:"from_generation"`
+	ToGeneration       *int64  `json:"to_generation"`
+	RestoredGeneration *int64  `json:"restored_generation"`
+	Baseline           bool    `json:"baseline"`
 }
 
 // UpdatesBase is the base fingerprint recorded by the update transaction. It

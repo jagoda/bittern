@@ -36,8 +36,9 @@ var ErrBusy = oplock.ErrBusy
 
 // Transaction phases.
 const (
-	PhaseInstall  = "install"
-	PhaseRollback = "rollback"
+	PhaseInstall        = "install"
+	PhaseRollback       = "rollback"
+	PhaseManualRollback = "manual-rollback"
 )
 
 // Journal states.
@@ -95,6 +96,17 @@ const (
 	StepRollbackRecord       = "rollback-record"
 	StepRollbackPrune        = "rollback-prune"
 	StepRollbackFinish       = "rollback-finish"
+
+	StepManualPreflight    = "manual-rollback-preflight"
+	StepManualVerify       = "manual-rollback-verify"
+	StepManualStopFrigate  = "manual-rollback-stop-frigate"
+	StepManualStopAgent    = "manual-rollback-stop-agent"
+	StepManualPointer      = "manual-rollback-pointer"
+	StepManualStartAgent   = "manual-rollback-start-agent"
+	StepManualStartFrigate = "manual-rollback-start-frigate"
+	StepManualHealth       = "manual-rollback-health"
+	StepManualRecord       = "manual-rollback-record"
+	StepManualFinish       = "manual-rollback-finish"
 )
 
 // Step kinds. The key identifies the journal step, the kind selects the
@@ -127,6 +139,12 @@ const (
 	kindRollbackHealth  = "rollback-health"
 	kindRollbackRecord  = "rollback-record"
 	kindRollbackPrune   = "rollback-prune"
+
+	kindManualPreflight = "manual-rollback-preflight"
+	kindManualVerify    = "manual-rollback-verify"
+	kindManualPointer   = "manual-rollback-pointer"
+	kindManualHealth    = "manual-rollback-health"
+	kindManualRecord    = "manual-rollback-record"
 )
 
 // Error is an engine rejection with a stable rule name. Release verification
@@ -254,6 +272,8 @@ type Journal struct {
 	CandidateManifestSHA256 string `json:"candidate_manifest_sha256"`
 	PreviousGeneration      int64  `json:"previous_generation"`
 	PreviousManifestSHA256  string `json:"previous_manifest_sha256"`
+	Baseline                bool   `json:"baseline,omitempty"`
+	Reason                  string `json:"reason,omitempty"`
 	LiveTouched             bool   `json:"live_touched"`
 	NextStep                string `json:"next_step"`
 	LastCompletedStep       string `json:"last_completed_step"`
@@ -312,6 +332,7 @@ type RollbackRecord struct {
 	FailedStep         string `json:"failed_step"`
 	Failure            string `json:"failure"`
 	RestoredGeneration int64  `json:"restored_generation"`
+	Baseline           bool   `json:"baseline,omitempty"`
 }
 
 // BackupRecord records the backup location and data state in history.
@@ -350,6 +371,7 @@ type History struct {
 	FinishedAt    string         `json:"finished_at"`
 	FailedStep    string         `json:"failed_step"`
 	Failure       string         `json:"failure"`
+	Reason        string         `json:"reason,omitempty"`
 	Rollback      RollbackRecord `json:"rollback"`
 	Backup        BackupRecord   `json:"backup"`
 	Health        []HealthRecord `json:"health"`
@@ -394,6 +416,8 @@ type Options struct {
 	HealthTimeout    time.Duration
 	Secrets          []string
 	SecretsPath      string
+	Reason           string
+	BaselineBinary   string
 	BeforeStep       func(Step) error
 	AfterStep        func(Step) error
 	Logger           func(format string, args ...any)

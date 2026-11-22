@@ -19,15 +19,22 @@ import (
 const updateUnit = "bittern-update.service"
 
 type updateCLI struct {
-	stdout          io.Writer
-	stderr          io.Writer
-	systemctl       func(args ...string) error
-	systemctlOutput func(args ...string) (string, error)
-	sleep           func(time.Duration)
-	now             func() time.Time
-	stateRoot       string
-	pollInterval    time.Duration
-	followTimeout   time.Duration
+	stdout           io.Writer
+	stderr           io.Writer
+	systemctl        func(args ...string) error
+	systemctlOutput  func(args ...string) (string, error)
+	sleep            func(time.Duration)
+	now              func() time.Time
+	stateRoot        string
+	configPath       string
+	trustImageDir    string
+	trustRotationDir string
+	platformPath     string
+	apiURL           string
+	checkChannel     func(update.CheckOptions) (update.CheckResult, error)
+	fetchCandidate   func(update.CheckOptions, update.CheckCandidate) (string, error)
+	pollInterval     time.Duration
+	followTimeout    time.Duration
 }
 
 func defaultUpdateCLI() *updateCLI {
@@ -44,21 +51,28 @@ func defaultUpdateCLI() *updateCLI {
 			output, err := exec.Command("systemctl", args...).Output()
 			return strings.TrimSpace(string(output)), err
 		},
-		sleep:         time.Sleep,
-		now:           time.Now,
-		stateRoot:     "/var/lib/bittern",
-		pollInterval:  time.Second,
-		followTimeout: 2 * time.Hour,
+		sleep:          time.Sleep,
+		now:            time.Now,
+		stateRoot:      "/var/lib/bittern",
+		configPath:     "/etc/bittern/appliance.yaml",
+		checkChannel:   update.CheckChannel,
+		fetchCandidate: update.FetchCandidate,
+		pollInterval:   time.Second,
+		followTimeout:  2 * time.Hour,
 	}
 }
 
 func runUpdate(args []string) error {
 	if len(args) == 0 {
-		return errors.New("update needs a subcommand: install, status, cancel, or helper")
+		return errors.New("update needs a subcommand: check, install, rollback, status, cancel, or helper")
 	}
 	switch args[0] {
+	case "check":
+		return runUpdateCheck(args[1:])
 	case "install":
 		return runUpdateInstall(args[1:])
+	case "rollback":
+		return runUpdateRollback(args[1:])
 	case "status":
 		return runUpdateStatus(args[1:])
 	case "cancel":
@@ -78,18 +92,55 @@ func runUpdateInstallWith(args []string, cli *updateCLI) error {
 	flags := flag.NewFlagSet("update install", flag.ContinueOnError)
 	flags.SetOutput(cli.stderr)
 	noFollow := flags.Bool("no-follow", false, "start the unit and return without following the journal")
+	stateRoot := flags.String("state-root", cli.stateRoot, "state root for the request, journal, and history")
+	configPath := flags.String("config", cli.configPath, "appliance.yaml used for the channel and compatibility checks")
+	trustImageDir := flags.String("trust-image-dir", cli.trustImageDir, "image trust store directory")
+	trustRotationDir := flags.String("trust-rotation-dir", cli.trustRotationDir, "rotation trust store directory")
+	platformPath := flags.String("platform-path", cli.platformPath, "platform generation metadata file")
+	apiURL := flags.String("api-url", cli.apiURL, "GitHub Releases API URL (default: the product default)")
+	forceCheck := flags.Bool("force-check", false, "ignore the minimum check interval")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 1 {
-		return errors.New("update install needs exactly one source directory")
+	if flags.NArg() > 1 {
+		return errors.New("update install takes one local source directory or no source for the channel")
 	}
-	source, err := filepath.Abs(flags.Arg(0))
-	if err != nil {
-		return fmt.Errorf("resolve the source directory: %w", err)
+	source := ""
+	if flags.NArg() == 1 {
+		absolute, err := filepath.Abs(flags.Arg(0))
+		if err != nil {
+			return fmt.Errorf("resolve the source directory: %w", err)
+		}
+		source = absolute
+	} else {
+		options := update.CheckOptions{
+			StateRoot:        *stateRoot,
+			ConfigPath:       *configPath,
+			TrustImageDir:    *trustImageDir,
+			TrustRotationDir: *trustRotationDir,
+			PlatformPath:     *platformPath,
+			APIURL:           *apiURL,
+			Force:            *forceCheck,
+			Now:              cli.now,
+		}
+		checked, err := cli.checkChannel(options)
+		printCheck(cli.stdout, checked)
+		if err != nil {
+			return err
+		}
+		if checked.Result != update.CheckUpdateAvailable || checked.Available == nil {
+			return fmt.Errorf("no verified update is available in the configured channel")
+		}
+		source, err = cli.fetchCandidate(options, *checked.Available)
+		if err != nil {
+			return fmt.Errorf("download the verified update: %w", err)
+		}
 	}
-	handoff, err := update.PrepareHandoff(cli.stateRoot, source, cli.now())
+	handoff, err := update.PrepareHandoff(*stateRoot, source, cli.now())
 	if err != nil {
+		if update.IsIncomingSource(*stateRoot, source) {
+			_ = os.RemoveAll(source)
+		}
 		return err
 	}
 	switch {
@@ -102,14 +153,111 @@ func runUpdateInstallWith(args []string, cli *updateCLI) error {
 	}
 	if err := cli.systemctl("start", "--no-block", updateUnit); err != nil {
 		if handoff.WroteRequest {
-			_ = update.RemoveRequest(update.RequestPath(cli.stateRoot))
+			_ = update.RemoveRequest(update.RequestPath(*stateRoot))
+		}
+		if update.IsIncomingSource(*stateRoot, source) {
+			_ = os.RemoveAll(source)
 		}
 		return fmt.Errorf("start %s: %w", updateUnit, err)
 	}
 	if *noFollow {
 		return nil
 	}
-	return cli.follow(cli.stateRoot, handoff)
+	return cli.follow(*stateRoot, handoff)
+}
+
+func runUpdateCheck(args []string) error {
+	return runUpdateCheckWith(args, defaultUpdateCLI())
+}
+
+func runUpdateCheckWith(args []string, cli *updateCLI) error {
+	flags := flag.NewFlagSet("update check", flag.ContinueOnError)
+	flags.SetOutput(cli.stderr)
+	stateRoot := flags.String("state-root", cli.stateRoot, "state root for the check record")
+	configPath := flags.String("config", cli.configPath, "appliance.yaml used for the channel and compatibility checks")
+	trustImageDir := flags.String("trust-image-dir", cli.trustImageDir, "image trust store directory")
+	trustRotationDir := flags.String("trust-rotation-dir", cli.trustRotationDir, "rotation trust store directory")
+	platformPath := flags.String("platform-path", cli.platformPath, "platform generation metadata file")
+	apiURL := flags.String("api-url", cli.apiURL, "GitHub Releases API URL (default: the product default)")
+	force := flags.Bool("force", false, "ignore the minimum check interval")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %v", flags.Args())
+	}
+	options := update.CheckOptions{
+		StateRoot:        *stateRoot,
+		ConfigPath:       *configPath,
+		TrustImageDir:    *trustImageDir,
+		TrustRotationDir: *trustRotationDir,
+		PlatformPath:     *platformPath,
+		APIURL:           *apiURL,
+		Force:            *force,
+		Now:              cli.now,
+	}
+	checked, err := cli.checkChannel(options)
+	printCheck(cli.stdout, checked)
+	return err
+}
+
+func runUpdateRollback(args []string) error {
+	return runUpdateRollbackWith(args, defaultUpdateCLI())
+}
+
+func runUpdateRollbackWith(args []string, cli *updateCLI) error {
+	flags := flag.NewFlagSet("update rollback", flag.ContinueOnError)
+	flags.SetOutput(cli.stderr)
+	noFollow := flags.Bool("no-follow", false, "start the unit and return without following the journal")
+	stateRoot := flags.String("state-root", cli.stateRoot, "state root for the request, journal, and history")
+	reason := flags.String("reason", "", "why the appliance is being rolled back")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %v", flags.Args())
+	}
+	handoff, err := update.PrepareRollbackHandoff(*stateRoot, *reason, cli.now())
+	if err != nil {
+		return err
+	}
+	switch {
+	case handoff.Interrupted:
+		fmt.Fprintf(cli.stdout, "resuming manual rollback operation %s\n", handoff.OperationID)
+	case handoff.WroteRequest:
+		fmt.Fprintf(cli.stdout, "queued manual rollback request %s\n", handoff.Request.RequestID)
+	default:
+		fmt.Fprintf(cli.stdout, "starting pending manual rollback request %s\n", handoff.Request.RequestID)
+	}
+	if err := cli.systemctl("start", "--no-block", updateUnit); err != nil {
+		if handoff.WroteRequest {
+			_ = update.RemoveRequest(update.RequestPath(*stateRoot))
+		}
+		return fmt.Errorf("start %s: %w", updateUnit, err)
+	}
+	if *noFollow {
+		return nil
+	}
+	return cli.follow(*stateRoot, handoff)
+}
+
+func printCheck(w io.Writer, checked update.CheckResult) {
+	if checked.Channel != "" {
+		fmt.Fprintf(w, "channel: %s\n", checked.Channel)
+	}
+	if checked.CheckedAt != "" {
+		fmt.Fprintf(w, "checked: %s\n", checked.CheckedAt)
+	}
+	fmt.Fprintf(w, "check: %s\n", checked.Result)
+	if checked.Cached {
+		fmt.Fprintln(w, "source: cached result; no network request")
+	}
+	if checked.Available != nil {
+		fmt.Fprintf(w, "available: version %s, generation %d, tag %s\n", checked.Available.Version, checked.Available.Generation, checked.Available.Tag)
+	}
+	if checked.Reason != "" {
+		fmt.Fprintf(w, "reason: %s\n", checked.Reason)
+	}
 }
 
 func (c *updateCLI) follow(stateRoot string, handoff update.Handoff) error {
@@ -211,8 +359,14 @@ func printHistory(w io.Writer, record *update.History) {
 	if record.Failure != "" {
 		fmt.Fprintf(w, "  reason: %s\n", record.Failure)
 	}
+	if record.Reason != "" {
+		fmt.Fprintf(w, "  rollback reason: %s\n", record.Reason)
+	}
 	if record.Rollback.Result != "" {
 		fmt.Fprintf(w, "  rollback: %s, restored generation %d\n", record.Rollback.Result, record.Rollback.RestoredGeneration)
+	}
+	if record.Rollback.Baseline {
+		fmt.Fprintln(w, "  target: baseline (no active bundle)")
 	}
 	if record.FinishedAt != "" {
 		fmt.Fprintf(w, "  finished: %s\n", record.FinishedAt)
@@ -222,7 +376,7 @@ func printHistory(w io.Writer, record *update.History) {
 func runUpdateStatus(args []string) error {
 	flags := flag.NewFlagSet("update status", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	stateRoot := flags.String("state-root", "/var/lib/bittern", "state root for the journal, request, and history")
+	stateRoot := flags.String("state-root", "/var/lib/bittern", "state root for the journal, request, check, and history")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -248,7 +402,42 @@ func runUpdateStatus(args []string) error {
 	if present {
 		fmt.Printf("committed: generation %d (%s), channel %s, at %s\n", state.CommittedGeneration, state.CommittedVersion, state.Channel, state.CommittedAt)
 	} else {
-		fmt.Println("committed: no update state")
+		fmt.Println("committed: generation 0 (kit baseline, no active bundle)")
+	}
+	running, runningVersion, runningErr := update.RunningGeneration(*stateRoot)
+	switch {
+	case runningErr != nil:
+		fmt.Printf("running: unreadable (%v)\n", runningErr)
+	case running == 0:
+		fmt.Println("running: baseline (no active bundle)")
+	default:
+		fmt.Printf("running: generation %d (%s)\n", running, runningVersion)
+	}
+	check, checkPresent, checkErr := update.ReadCheck(*stateRoot)
+	if checkErr != nil {
+		fmt.Printf("last check: unreadable (%v)\n", checkErr)
+	} else if !checkPresent || check.Result == update.CheckNever {
+		fmt.Println("last check: never")
+	} else {
+		fmt.Printf("last check: %s at %s\n", check.Result, check.CheckedAt)
+		if check.Available != nil {
+			fmt.Printf("  available: generation %d (%s)\n", check.Available.Generation, check.Available.Version)
+		}
+		if check.Reason != "" {
+			fmt.Printf("  reason: %s\n", check.Reason)
+		}
+	}
+	if present && runningErr == nil && running == state.CommittedGeneration {
+		if target, version, baseline, targetErr := update.RollbackTarget(*stateRoot, state.CommittedGeneration); targetErr == nil {
+			switch {
+			case baseline:
+				fmt.Println("rollback target: baseline (generation 0)")
+			case target > 0:
+				fmt.Printf("rollback target: generation %d (%s)\n", target, version)
+			default:
+				fmt.Println("rollback target: none")
+			}
+		}
 	}
 	if journal != nil {
 		fmt.Printf("operation: %s %s/%s, next step %s, candidate generation %d, live touched %t\n",
@@ -293,6 +482,8 @@ func runUpdateHelper(args []string) error {
 	if len(args) != 0 {
 		return errors.New("the update helper takes no arguments")
 	}
+	request, _ := update.ReadRequest(update.RequestPath("/var/lib/bittern"))
+	rollback := request.Source == update.RequestSourceManualRollback
 	logger := logging.PrintfLogger{Logger: logging.New(os.Stdout, redact.New())}
 	result, err := update.RunHelper(update.HelperOptions{Logger: logger.Printf})
 	if result.OperationID != "" {
@@ -301,8 +492,11 @@ func runUpdateHelper(args []string) error {
 	if err != nil {
 		return err
 	}
-	if result.Status != update.ResultCommitted {
-		return fmt.Errorf("update %s", result.Status)
+	if result.Status == update.ResultCommitted {
+		return nil
 	}
-	return nil
+	if rollback && result.Status == update.ResultRolledBack {
+		return nil
+	}
+	return fmt.Errorf("update %s", result.Status)
 }

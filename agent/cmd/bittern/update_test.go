@@ -153,3 +153,97 @@ func TestUpdateCancelRemovesPendingRequest(t *testing.T) {
 		t.Fatalf("request exists after cancel = %t, %v", exists, err)
 	}
 }
+
+func TestUpdateInstallFromTheChannelQueuesTheVerifiedCandidate(t *testing.T) {
+	stateRoot := t.TempDir()
+	source := t.TempDir()
+	fake := newFakeUpdateCLI(t)
+	fake.cli.stateRoot = stateRoot
+	fake.cli.checkChannel = func(update.CheckOptions) (update.CheckResult, error) {
+		return update.CheckResult{
+			Check: update.Check{
+				Result:    update.CheckUpdateAvailable,
+				Channel:   "beta",
+				CheckedAt: "2026-11-22T12:00:00Z",
+				Available: &update.CheckCandidate{Tag: "app-beta-000001", Generation: 1, Version: "0.1.1"},
+			},
+		}, nil
+	}
+	fake.cli.fetchCandidate = func(update.CheckOptions, update.CheckCandidate) (string, error) {
+		return source, nil
+	}
+	if err := runUpdateInstallWith([]string{"--no-follow"}, fake.cli); err != nil {
+		t.Fatal(err)
+	}
+	request, err := update.ReadRequest(update.RequestPath(stateRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Source != update.RequestSourceLocalFile || request.SourcePath != source {
+		t.Fatalf("request = %+v, want a local-file request for %s", request, source)
+	}
+	if len(fake.calls) != 1 || fake.calls[0][0] != "start" || fake.calls[0][2] != updateUnit {
+		t.Fatalf("systemctl calls = %v, want start --no-block %s", fake.calls, updateUnit)
+	}
+}
+
+func TestUpdateInstallRefusesWhenNoVerifiedCandidateIsAvailable(t *testing.T) {
+	fake := newFakeUpdateCLI(t)
+	fake.cli.stateRoot = t.TempDir()
+	fake.cli.checkChannel = func(update.CheckOptions) (update.CheckResult, error) {
+		return update.CheckResult{Check: update.Check{Result: update.CheckUpToDate}}, nil
+	}
+	fake.cli.fetchCandidate = func(update.CheckOptions, update.CheckCandidate) (string, error) {
+		t.Fatal("install fetched a candidate when the check was up to date")
+		return "", nil
+	}
+	if err := runUpdateInstallWith([]string{"--no-follow"}, fake.cli); err == nil {
+		t.Fatal("install accepted an up-to-date check")
+	}
+	if len(fake.calls) != 0 {
+		t.Fatalf("install started the unit without a candidate: %v", fake.calls)
+	}
+}
+
+func TestUpdateCheckPrintsTheStoredResult(t *testing.T) {
+	fake := newFakeUpdateCLI(t)
+	fake.cli.stateRoot = t.TempDir()
+	fake.cli.checkChannel = func(update.CheckOptions) (update.CheckResult, error) {
+		return update.CheckResult{
+			Check: update.Check{
+				Result:    update.CheckUpdateAvailable,
+				Channel:   "beta",
+				CheckedAt: "2026-11-22T12:00:00Z",
+				Available: &update.CheckCandidate{Tag: "app-beta-000001", Generation: 1, Version: "0.1.1"},
+			},
+		}, nil
+	}
+	if err := runUpdateCheckWith([]string{}, fake.cli); err != nil {
+		t.Fatal(err)
+	}
+	output := fake.cli.stdout.(*bytes.Buffer).String()
+	for _, want := range []string{"channel: beta", "check: update-available", "generation 1"} {
+		if !bytes.Contains([]byte(output), []byte(want)) {
+			t.Fatalf("check output %q does not contain %q", output, want)
+		}
+	}
+}
+
+func TestUpdateRollbackQueuesTheManualRequest(t *testing.T) {
+	stateRoot := t.TempDir()
+	fake := newFakeUpdateCLI(t)
+	fake.cli.stateRoot = stateRoot
+	if err := runUpdateRollbackWith([]string{"--no-follow", "--reason", "bench test"}, fake.cli); err != nil {
+		t.Fatal(err)
+	}
+	request, err := update.ReadRequest(update.RequestPath(stateRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Source != update.RequestSourceManualRollback || request.Reason != "bench test" {
+		t.Fatalf("request = %+v, want a manual rollback with the reason", request)
+	}
+	if len(fake.calls) != 1 || fake.calls[0][0] != "start" || fake.calls[0][2] != updateUnit {
+		t.Fatalf("systemctl calls = %v, want start --no-block %s", fake.calls, updateUnit)
+	}
+}

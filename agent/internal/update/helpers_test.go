@@ -50,17 +50,18 @@ type bundleSpec struct {
 }
 
 type fakeSystem struct {
-	calls        []string
-	active       map[string]bool
-	failStart    map[string]error
-	failStop     map[string]error
-	probes       map[string]apply.ProbeResult
-	probeQueue   map[string][]apply.ProbeResult
-	failProbe    map[string]int
-	delayProbe   map[string]int
-	probeDelay   time.Duration
-	waitErr      map[string]error
-	waitDuration time.Duration
+	calls         []string
+	active        map[string]bool
+	failStart     map[string]error
+	failStartOnce map[string]int
+	failStop      map[string]error
+	probes        map[string]apply.ProbeResult
+	probeQueue    map[string][]apply.ProbeResult
+	failProbe     map[string]int
+	delayProbe    map[string]int
+	probeDelay    time.Duration
+	waitErr       map[string]error
+	waitDuration  time.Duration
 	// restartVersion models the fixed launcher: a restart reads the activation
 	// pointer and the active bundle's manifest version.
 	restartVersion func(unit string) string
@@ -71,6 +72,7 @@ func newFakeSystem() *fakeSystem {
 	return &fakeSystem{
 		active:         map[string]bool{},
 		failStart:      map[string]error{},
+		failStartOnce:  map[string]int{},
 		failStop:       map[string]error{},
 		probes:         map[string]apply.ProbeResult{},
 		probeQueue:     map[string][]apply.ProbeResult{},
@@ -92,6 +94,10 @@ func (f *fakeSystem) StopUnit(unit string) error {
 
 func (f *fakeSystem) RestartUnit(unit string) error {
 	f.calls = append(f.calls, "restart:"+unit)
+	if f.failStartOnce[unit] > 0 {
+		f.failStartOnce[unit]--
+		return fmt.Errorf("injected start failure for %s", unit)
+	}
 	if err := f.failStart[unit]; err != nil {
 		return err
 	}
@@ -190,21 +196,22 @@ func (f *fakeImage) EnsureImage(reference, digest string, timeout time.Duration)
 }
 
 type testEnv struct {
-	root          string
-	stateRoot     string
-	configPath    string
-	frigateConfig string
-	trustDir      string
-	rotationDir   string
-	public        ed25519.PublicKey
-	private       ed25519.PrivateKey
-	base          Base
-	platform      Platform
-	system        *fakeSystem
-	data          *fakeData
-	image         *fakeImage
-	options       Options
-	sourceCounter int
+	root           string
+	stateRoot      string
+	configPath     string
+	frigateConfig  string
+	trustDir       string
+	rotationDir    string
+	baselineBinary string
+	public         ed25519.PublicKey
+	private        ed25519.PrivateKey
+	base           Base
+	platform       Platform
+	system         *fakeSystem
+	data           *fakeData
+	image          *fakeImage
+	options        Options
+	sourceCounter  int
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -215,7 +222,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	frigateConfig := filepath.Join(stateRoot, "frigate", "config.yml")
 	trustDir := filepath.Join(root, "trust-image")
 	rotationDir := filepath.Join(root, "trust-rotation")
-	for _, dir := range []string{trustDir, filepath.Dir(configPath), filepath.Dir(frigateConfig)} {
+	baselineBinary := filepath.Join(root, "baseline", "bitternd")
+	for _, dir := range []string{trustDir, filepath.Dir(configPath), filepath.Dir(frigateConfig), filepath.Dir(baselineBinary)} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -240,6 +248,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err := os.WriteFile(frigateConfig, []byte("old: frigate-config\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(baselineBinary, []byte("#!/bin/sh\necho baseline\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(baselineBinary, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	secretsPath := filepath.Join(filepath.Dir(configPath), "secrets.yaml")
 	secretsDocument := "cameras:\n  front_door:\n    rtsp_url: rtsp://viewer:test@10.77.0.20:554/stream1\n"
 	if err := os.WriteFile(secretsPath, []byte(secretsDocument), 0o600); err != nil {
@@ -249,14 +263,15 @@ func newTestEnv(t *testing.T) *testEnv {
 	data := &fakeData{}
 	image := &fakeImage{}
 	env := &testEnv{
-		root:          root,
-		stateRoot:     stateRoot,
-		configPath:    configPath,
-		frigateConfig: frigateConfig,
-		trustDir:      trustDir,
-		rotationDir:   rotationDir,
-		public:        publicKey,
-		private:       privateKey,
+		root:           root,
+		stateRoot:      stateRoot,
+		configPath:     configPath,
+		frigateConfig:  frigateConfig,
+		trustDir:       trustDir,
+		rotationDir:    rotationDir,
+		baselineBinary: baselineBinary,
+		public:         publicKey,
+		private:        privateKey,
 		base: Base{
 			DebianVersion: "13.1",
 			Kernel:        "6.12.0-amd64",
@@ -284,6 +299,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Now:              func() time.Time { return time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC) },
 		MinFreeBytes:     1,
 		HealthTimeout:    5 * time.Minute,
+		BaselineBinary:   baselineBinary,
 	}
 	return env
 }

@@ -55,3 +55,37 @@ func TestParseBetaTagRejectsMalformedTags(t *testing.T) {
 		})
 	}
 }
+
+func TestParseChannelTagUsesTheDeviceChannelNamespace(t *testing.T) {
+	cases := []struct {
+		tag     string
+		channel string
+		want    int64
+	}{
+		{tag: "app-beta-000001", channel: ChannelBeta, want: 1},
+		{tag: "app-stable-0000ff", channel: ChannelStable, want: 255},
+	}
+	for _, test := range cases {
+		t.Run(test.tag, func(t *testing.T) {
+			generation, err := ParseChannelTag(test.tag, test.channel)
+			if err != nil {
+				t.Fatalf("ParseChannelTag(%q, %q): %v", test.tag, test.channel, err)
+			}
+			if generation != test.want {
+				t.Fatalf("generation = %d, want %d", generation, test.want)
+			}
+		})
+	}
+}
+
+func TestParseChannelTagRejectsTheOtherChannelAndUnknownChannels(t *testing.T) {
+	if _, err := ParseChannelTag("app-stable-000001", ChannelBeta); err == nil {
+		t.Fatal("a stable tag parsed in the beta namespace")
+	}
+	if _, err := ParseChannelTag("app-beta-000001", ChannelStable); err == nil {
+		t.Fatal("a beta tag parsed in the stable namespace")
+	}
+	if _, err := TagPrefix("security"); err == nil {
+		t.Fatal("an unknown channel returned a tag prefix")
+	}
+}

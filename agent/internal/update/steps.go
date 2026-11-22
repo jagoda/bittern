@@ -62,29 +62,31 @@ func (r *runner) preflight() error {
 	if err != nil {
 		return err
 	}
-	if statePresent && state.CommittedGeneration != current {
-		return errorf("state.inconsistent", "state.json names generation %d but the activation pointer names %d", state.CommittedGeneration, current)
+	if statePresent && state.CommittedGeneration < current {
+		return errorf("state.inconsistent", "state.json names generation %d but the activation pointer names the newer generation %d", state.CommittedGeneration, current)
 	}
 	if !statePresent && current != 0 {
 		return errorf("state.inconsistent", "the activation pointer names generation %d but state.json is missing", current)
 	}
+	previousDigest := ""
 	if current > 0 {
 		directory := r.paths.bundleDir(current)
 		if info, err := os.Stat(directory); err != nil || !info.IsDir() {
-			return errorf("state.inconsistent", "the committed generation %d has no bundle directory", current)
+			return errorf("state.inconsistent", "the running generation %d has no bundle directory", current)
 		}
 		data, manifest, err := readManifestFromBundle(directory)
 		if err != nil {
-			return errorf("state.inconsistent", "the committed generation %d has no valid manifest: %v", current, err)
+			return errorf("state.inconsistent", "the running generation %d has no valid manifest: %v", current, err)
 		}
 		if manifest.Generation != current {
-			return errorf("state.inconsistent", "the committed bundle manifest names generation %d, not %d", manifest.Generation, current)
+			return errorf("state.inconsistent", "the running bundle manifest names generation %d, not %d", manifest.Generation, current)
 		}
-		if statePresent && state.CommittedManifestSHA256 != "" && sha256Hex(data) != state.CommittedManifestSHA256 {
+		previousDigest = sha256Hex(data)
+		if statePresent && state.CommittedGeneration == current && state.CommittedManifestSHA256 != "" && previousDigest != state.CommittedManifestSHA256 {
 			return errorf("state.inconsistent", "the committed bundle manifest digest does not match state.json")
 		}
 		if info, err := os.Stat(filepath.Join(directory, "files")); err != nil || !info.IsDir() {
-			return errorf("state.inconsistent", "the committed generation %d has no bundle files tree", current)
+			return errorf("state.inconsistent", "the running generation %d has no bundle files tree", current)
 		}
 	}
 	base, err := r.options.Base.Collect()
@@ -102,7 +104,7 @@ func (r *runner) preflight() error {
 	}
 	r.journal.Channel = cfg.Updates.Channel
 	r.journal.PreviousGeneration = current
-	r.journal.PreviousManifestSHA256 = state.CommittedManifestSHA256
+	r.journal.PreviousManifestSHA256 = previousDigest
 	r.journal.Platform = platform
 	r.journal.Base = base
 	r.journal.SchemaBefore = cfg.SchemaVersion

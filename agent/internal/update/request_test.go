@@ -334,3 +334,43 @@ func TestUpdateHandoffReplacesAStaleRequestForTheJournalledSource(t *testing.T) 
 		t.Fatalf("request source = %s, want the journalled %s", request.SourcePath, sourceA)
 	}
 }
+
+func TestUpdateRequestManualRollbackRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	request, err := NewRollbackRequest("bench test", requestNow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Source != RequestSourceManualRollback || request.SourcePath != "" || request.Reason != "bench test" {
+		t.Fatalf("request = %+v", request)
+	}
+	path := RequestPath(dir)
+	if err := WriteRequest(path, request); err != nil {
+		t.Fatal(err)
+	}
+	read, err := ReadRequest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read != request {
+		t.Fatalf("read request = %+v, want %+v", read, request)
+	}
+}
+
+func TestUpdateRequestManualRollbackRequiresAReason(t *testing.T) {
+	if _, err := NewRollbackRequest("", requestNow()); err == nil {
+		t.Fatal("an empty rollback reason was accepted")
+	} else {
+		requireRule(t, err, "request.reason")
+	}
+	request := Request{
+		SchemaVersion: RequestSchemaVersion,
+		RequestID:     "20261122T120000Z-deadbeef",
+		Source:        RequestSourceManualRollback,
+		SourcePath:    "/srv/bundle",
+		Reason:        "bench test",
+		RequestedAt:   "2026-11-22T12:00:00Z",
+	}
+	err := request.Validate()
+	requireRule(t, err, "request.source")
+}

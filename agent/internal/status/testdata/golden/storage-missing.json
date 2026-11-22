@@ -98,7 +98,26 @@
     "updates": {
       "state": "ok",
       "current_slot": null,
+      "current_version": "0.1.7",
       "current_generation": 7,
+      "running_generation": 7,
+      "committed_generation": 7,
+      "committed_version": "0.1.7",
+      "channel": "beta",
+      "last_check": {
+        "checked_at": null,
+        "result": "never",
+        "reason": "",
+        "cached": false
+      },
+      "available_version": null,
+      "available_generation": null,
+      "rollback": {
+        "available": false,
+        "generation": null,
+        "version": null
+      },
+      "last_operation": null,
       "base": {
         "debian_version": "13.1",
         "kernel": "6.12.0-amd64",

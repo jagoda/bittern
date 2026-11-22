@@ -40,8 +40,8 @@ checks read the live status builder; `--ui-mock` selects mock status states and 
 without `--ui-mock` the applier persists `appliance.yaml` and calls the BIT-011 apply transaction.
 `--ui-mock` keeps the stub. First boot generates a one-time setup token, the owner sets the
 administrator password on the first visit, and later visits use the login page. Camera discovery is
-wired to the wizard; there is no full CLI, update, or reset yet. The package boundaries above still describe the intended
-daemon.
+wired to the wizard; the update CLI and on-demand channel check are present, but there is no reset
+yet. The package boundaries above still describe the intended daemon.
 
 | Path | Role |
 | --- | --- |
@@ -329,6 +329,23 @@ reason. A syntax error in the ruleset is still a failure. `internal/apply.Inspec
 is the read-only state hook used by the status builder. The render section reports the applied
 generation from `<state-root>/current` and the last transaction state from the latest manifest and
 journal, including a failed or rolled-back attempt.
+
+## Update CLI
+
+`bittern update` drives the fixed `bittern-update.service` helper. The helper still takes no
+arguments; it reads one 0600 request record.
+
+| Command | Behavior |
+| --- | --- |
+| `bittern update check [--force]` | On-demand GitHub Releases check for the device channel. Writes `update/check.json`, prints the result, and exits non-zero for a rate limit, offline failure, or rejection |
+| `bittern update install [SOURCE] [--no-follow]` | With no source, checks the channel, downloads the verified candidate, writes a local-file request, and starts the helper. With a source directory, uses the existing local-file path |
+| `bittern update rollback --reason TEXT [--no-follow]` | Writes a manual-rollback request and starts the helper. The target is the retained previous bundle, or the baseline when no bundle below the committed generation exists |
+| `bittern update status` | Prints the committed and running generations, the last check, the rollback target, the active journal, and the newest history result |
+
+A kit-prepared device has committed generation 0, no active bundle, and the baseline binary running.
+Status reports that state as `ok`, not unknown. After a manual rollback the committed generation stays
+at the newer value and the next update must exceed it. See [status.md](../docs/status.md) and
+[the update channel and rollback slice note](../docs/notes/2026-11-22-update-channel-and-manual-rollback-slice.md).
 
 ## UI apply path
 

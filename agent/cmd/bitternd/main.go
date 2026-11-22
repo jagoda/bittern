@@ -123,8 +123,9 @@ func run() error {
 	}
 	logger := logging.New(os.Stderr, redactor)
 	builder := status.New(*configPath, status.Options{
-		Probes:   status.DefaultProbes(),
-		Redactor: redactor,
+		Probes:          status.DefaultProbes(),
+		Redactor:        redactor,
+		BaselineVersion: version,
 	})
 	var uiHandler http.Handler
 	var tlsMaterial tlsutil.Material

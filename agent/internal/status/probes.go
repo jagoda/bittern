@@ -179,14 +179,26 @@ type NetworkProbeFunc func(context.Context) NetworkObservation
 // Probe calls f.
 func (f NetworkProbeFunc) Probe(ctx context.Context) NetworkObservation { return f(ctx) }
 
-// UpdateObservation is the committed app bundle generation and base
+// UpdateObservation is the running and committed app bundle state, the last
+// channel check, the rollback target, the newest operation, and the base
 // fingerprint.
 type UpdateObservation struct {
-	Known      bool
-	Slot       *string
-	Generation *int64
-	Base       *UpdatesBase
-	LastError  string
+	Known               bool
+	Baseline            bool
+	Slot                *string
+	CurrentVersion      *string
+	CurrentGeneration   *int64
+	RunningGeneration   *int64
+	CommittedGeneration *int64
+	CommittedVersion    *string
+	Channel             *string
+	LastCheck           UpdateCheckSection
+	AvailableVersion    *string
+	AvailableGeneration *int64
+	Rollback            UpdateRollbackSection
+	LastOperation       *UpdateOperationSection
+	Base                *UpdatesBase
+	LastError           string
 }
 
 // UpdateProbe reports update state.
@@ -709,14 +721,19 @@ func probeInterface(ctx context.Context, name string) InterfaceObservation {
 	return observation
 }
 
-// UpdateStateProbe reads the committed update state from the state root. A
-// missing state file is an explicit unknown, not a zero generation.
+// UpdateStateProbe reads the running and committed update state from the state
+// root. A missing state file is the kit baseline: committed generation 0, no
+// active bundle, and the baseline build version. It is a known state, not
+// unknown and not an unimplemented placeholder.
 type UpdateStateProbe struct {
-	StateRoot string
+	StateRoot       string
+	ConfigPath      string
+	BaselineVersion string
+	BaselineBinary  string
 }
 
-// Probe returns the committed generation and base fingerprint, or unknown when
-// no update has committed.
+// Probe returns the running and committed state, the last check, the rollback
+// target, and the newest operation.
 func (p *UpdateStateProbe) Probe(ctx context.Context) UpdateObservation {
 	if ctx != nil {
 		select {
@@ -729,13 +746,149 @@ func (p *UpdateStateProbe) Probe(ctx context.Context) UpdateObservation {
 	if err != nil {
 		return UpdateObservation{LastError: err.Error()}
 	}
-	if !present {
-		return UpdateObservation{}
+	current, currentVersion, err := update.RunningGeneration(p.StateRoot)
+	if err != nil {
+		return UpdateObservation{LastError: err.Error()}
 	}
-	generation := state.CommittedGeneration
-	observation := UpdateObservation{Known: true, Generation: &generation}
+	observation := UpdateObservation{
+		Known:               true,
+		Baseline:            !present,
+		CurrentGeneration:   int64Pointer(current),
+		RunningGeneration:   int64Pointer(current),
+		CommittedGeneration: int64ValuePointer(state.CommittedGeneration),
+	}
+	if current == 0 {
+		observation.CurrentGeneration = nil
+		observation.RunningGeneration = nil
+		if p.BaselineVersion != "" {
+			version := p.BaselineVersion
+			observation.CurrentVersion = &version
+		}
+	} else if currentVersion != "" {
+		version := currentVersion
+		observation.CurrentVersion = &version
+	}
+	if present && state.CommittedVersion != "" {
+		version := state.CommittedVersion
+		observation.CommittedVersion = &version
+	}
+	channel := state.Channel
+	if channel == "" && p.ConfigPath != "" {
+		if cfg, _, loadErr := loadStatusConfig(p.ConfigPath); loadErr == nil {
+			channel = cfg.Updates.Channel
+		}
+	}
+	if channel != "" {
+		observation.Channel = &channel
+	}
+	check, _, checkErr := update.ReadCheck(p.StateRoot)
+	if checkErr != nil {
+		observation.LastError = checkErr.Error()
+	} else {
+		observation.LastCheck = updateCheckSection(check)
+		if check.Result == update.CheckUpdateAvailable && check.Available != nil {
+			version := check.Available.Version
+			generation := check.Available.Generation
+			observation.AvailableVersion = &version
+			observation.AvailableGeneration = &generation
+		}
+	}
+	if current > 0 && current == state.CommittedGeneration {
+		targetGeneration, targetVersion, baseline, targetErr := update.RollbackTarget(p.StateRoot, state.CommittedGeneration)
+		if targetErr != nil {
+			observation.LastError = targetErr.Error()
+		} else {
+			if baseline {
+				if update.BaselineBinaryExists(p.BaselineBinary) {
+					observation.Rollback = UpdateRollbackSection{Available: true, Generation: int64ValuePointer(0)}
+				}
+			} else {
+				version := targetVersion
+				observation.Rollback = UpdateRollbackSection{
+					Available:  true,
+					Generation: int64Pointer(targetGeneration),
+					Version:    &version,
+				}
+			}
+		}
+	}
+	record, err := update.LatestHistory(p.StateRoot)
+	if err != nil {
+		observation.LastError = err.Error()
+	} else if record != nil {
+		observation.LastOperation = updateOperationSection(record)
+	}
 	observation.Base = updateBase(state.Base)
 	return observation
+}
+
+func int64Pointer(value int64) *int64 {
+	if value == 0 {
+		return nil
+	}
+	pointer := value
+	return &pointer
+}
+
+func int64ValuePointer(value int64) *int64 {
+	pointer := value
+	return &pointer
+}
+
+func loadStatusConfig(path string) (*config.Config, []byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg, validationErrors := config.Parse(data)
+	if len(validationErrors) > 0 {
+		return nil, data, validationErrors[0]
+	}
+	return cfg, data, nil
+}
+
+func updateCheckSection(check update.Check) UpdateCheckSection {
+	section := UpdateCheckSection{Result: check.Result, Reason: check.Reason, Cached: check.Cached}
+	if section.Result == "" {
+		section.Result = update.CheckNever
+	}
+	if check.CheckedAt != "" {
+		checkedAt := check.CheckedAt
+		section.CheckedAt = &checkedAt
+	}
+	return section
+}
+
+func updateOperationSection(record *update.History) *UpdateOperationSection {
+	if record == nil {
+		return nil
+	}
+	section := &UpdateOperationSection{
+		OperationID: record.OperationID,
+		Kind:        record.Kind,
+		Result:      record.Result,
+		FailedStep:  record.FailedStep,
+		Reason:      record.Failure,
+		Baseline:    record.Rollback.Baseline,
+	}
+	if section.Reason == "" {
+		section.Reason = record.Reason
+	}
+	if record.FinishedAt != "" {
+		finished := record.FinishedAt
+		section.FinishedAt = &finished
+	}
+	if record.From != nil {
+		section.FromGeneration = &record.From.Generation
+	}
+	if record.To != nil {
+		section.ToGeneration = &record.To.Generation
+	}
+	if record.Rollback.RestoredGeneration > 0 || record.Rollback.Baseline {
+		restored := record.Rollback.RestoredGeneration
+		section.RestoredGeneration = &restored
+	}
+	return section
 }
 
 func updateBase(base update.Base) *UpdatesBase {

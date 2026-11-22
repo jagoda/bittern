@@ -91,7 +91,7 @@ only when the probe fails.
 | `cameras` | `items[]` with `id`, `name`, `address`, `mac`, `vendor`, `model`, `enabled`, `stream`, `snapshot`, `recording`, `last_seen`, `detail`, `snapshot_at`, `snapshot_bytes` | The list comes from `appliance.yaml` and the camera health cache, not a live camera call. `snapshot` and `stream` are `unknown` until the wizard or an explicit test has run; `last_seen` is null until a check records it; `recording` follows the Frigate section |
 | `storage` | `path`, `present`, `detail_state`, `free_bytes`, `reserve_bytes`, `member_count`, `missing_members[]` | `present` is evidence that a recording drive for the path is attached, not that the directory exists; `detail_state` is `ready`, `not-attached`, `not-mounted`, or `write-test-failed`, and is empty only when the section is `unknown` or the probe cannot read the mount table; `free_bytes` is null unless the path is mounted, so the OS filesystem is never measured as recording storage; `member_count` reports the single media path known to this build, so a configured multi-drive pool is not enumerated until the pool mount work lands |
 | `network` | `lan0` and `cam0`, each with `address`, `carrier`, `last_error` | `address` and `carrier` are null when the interface or sysfs evidence is unavailable |
-| `updates` | `current_slot`, `current_generation`, `base` | `current_slot` is always null until the OS A/B work claims it; `current_generation` and `base` are null until an update transaction commits and writes `/var/lib/bittern/update/state.json` |
+| `updates` | `state`, `current_slot`, `current_version`, `current_generation`, `running_generation`, `committed_generation`, `committed_version`, `channel`, `last_check`, `available_version`, `available_generation`, `rollback`, `last_operation`, `base` | `current_slot` is always null until the OS A/B work claims it; `current_version` and `current_generation` are the running bundle and are null on a kit baseline; `committed_generation` is 0 on a kit baseline; `base` is null until the first update commits; `last_check.result` is `never` before the first check |
 | `reset` | `level`, `completed_at` | Both are null until BIT-010 implements a reset record |
 | `hardware` | `cpu.model`, `cpu.cores`, `memory_bytes`, `accelerators[]` | The whole section is omitted only when the hardware probe fails; missing files inside the detection roots produce empty fields and an empty accelerator list instead |
 
@@ -118,10 +118,7 @@ apply-time gates, not status-time commands, and appear as an `unknown`
 
 `updates.base` is the base fingerprint recorded by the update transaction. It
 covers the Debian version, the kernel version, the Docker version, the presence
-of the devices the appliance needs, and firmware presence. `updates.current_generation`
-is the committed app bundle generation from the same record. Both are null until
-an update commits. The field is named `current_generation` to distinguish it from
-`render.generation`, which is the configuration generation. The base fingerprint
+of the devices the appliance needs, and firmware presence. The base fingerprint
 is recorded evidence for support and compatibility review, not a trust input; the
 transaction checks the root-owned OS generation metadata instead. The transaction
 writes only under `/var/lib/bittern` and does not assume a writable root or
@@ -132,6 +129,68 @@ daemon does not host the update worker, so it does not set the overall `updating
 state; the separate `bittern-update.service` owns the account and the journal.
 See [the architecture update flow](architecture.md#update-flow) and
 [BIT-009](plan/implementation-plan.md#bit-009-app-bundle-update-transaction-with-rollback).
+
+### App bundle state, channel check, and rollback
+
+The status probe is read-only. It reads
+`<state-root>/update/state.json`, the activation pointer `<state-root>/app/current`,
+the running bundle manifest, the retained bundle directories, the check record
+`<state-root>/update/check.json`, and the newest update history record. It never
+calls GitHub and never takes the update transaction lock. The check itself is an
+on-demand command; the status page does not trigger one.
+
+A kit-prepared appliance is the baseline. It has no `state.json` and no activation
+pointer, and the fixed launcher runs `/usr/bin/bitternd`. The `updates` section is
+`ok`, not `unknown`: `current_version` is the baseline build version,
+`current_generation` and `running_generation` are null, `committed_generation` is
+0, `committed_version` is null, `rollback.available` is false, and
+`last_check.result` is `never`. The first published release is a real update from
+generation 0 to generation 1.
+
+| Field | Meaning |
+| --- | --- |
+| `current_version` | Version of the bundle named by the activation pointer, or the baseline build version when the pointer is 0 or absent |
+| `current_generation` | Generation named by the activation pointer; null on the baseline |
+| `running_generation` | Explicit name for the activation pointer generation; null on the baseline |
+| `committed_generation` | Committed anti-rollback generation from `state.json`; 0 on the baseline |
+| `committed_version` | Version committed in `state.json`; null before the first update |
+| `channel` | Device channel from `appliance.yaml`, or the last committed channel when the config cannot be read |
+| `last_check.checked_at` | UTC RFC 3339 time of the last check attempt; null before the first check |
+| `last_check.result` | `never`, `update-available`, `up-to-date`, `rate-limited`, `offline`, or `failed` |
+| `last_check.reason` | Redacted explanation for a non-success result; empty on success |
+| `last_check.cached` | True when the check returned a stored record without a network request |
+| `available_version` | Verified candidate version; only set for `update-available` |
+| `available_generation` | Verified candidate generation; only set for `update-available` |
+| `rollback.available` | A rollback target exists while the running generation equals the committed generation |
+| `rollback.generation` | Retained target generation, or 0 for the baseline |
+| `rollback.version` | Retained target version; null for the baseline |
+| `last_operation.operation_id` | Newest history record |
+| `last_operation.kind` | `app-bundle-update` or `app-bundle-rollback` |
+| `last_operation.result` | `committed`, `rolled-back`, `rejected`, `failed`, or `state-unknown` |
+| `last_operation.failed_step` | Failing step when the operation failed |
+| `last_operation.reason` | Redacted failure or rollback reason |
+| `last_operation.finished_at` | UTC RFC 3339 completion time |
+| `last_operation.from_generation` | Generation before the operation |
+| `last_operation.to_generation` | Candidate or restored generation |
+| `last_operation.restored_generation` | Generation restored by a rollback, 0 for a baseline revert |
+| `last_operation.baseline` | True when the rollback target was the baseline |
+
+After a manual rollback, `current_generation` and `running_generation` name the
+retained previous bundle, while `committed_generation` and `committed_version`
+stay at the newer committed release. The next update must have a generation
+greater than the committed generation. After a baseline revert,
+`current_generation` and `running_generation` are null, `current_version` is the
+baseline build version, `committed_generation` stays at the newer value, and
+`last_operation.baseline` is true.
+
+The channel check record is schema 1 at mode 0644. It contains the channel, the
+check time, the result, a redacted reason, and the verified candidate version,
+generation, tag, manifest digest, key id, and source commit. A failure record
+contains no candidate. A rate limit, an offline device, a 404, a malformed
+response, a bad signature, a tag mismatch, a channel mismatch, or an incompatible
+manifest never reports `up-to-date`. The check result is a status fact only; an
+install is a separate explicit command or UI action. Automatic periodic checking
+remains open under [OQ-12](open-questions.md).
 
 The Frigate section is derived from the validated configuration and the
 rendered state. `camera_count` counts enabled cameras, and `configured` is true

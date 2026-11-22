@@ -79,9 +79,17 @@ func testBuilder(t *testing.T) *status.Builder {
 				}
 			}),
 			Updates: status.UpdateProbeFunc(func(context.Context) status.UpdateObservation {
+				version := "0.1.7"
+				channel := "beta"
 				return status.UpdateObservation{
-					Known:      true,
-					Generation: &generation,
+					Known:               true,
+					CurrentVersion:      &version,
+					CurrentGeneration:   &generation,
+					RunningGeneration:   &generation,
+					CommittedGeneration: &generation,
+					CommittedVersion:    &version,
+					Channel:             &channel,
+					LastCheck:           status.UpdateCheckSection{Result: "never"},
 					Base: &status.UpdatesBase{
 						DebianVersion: "13.1",
 						Kernel:        "6.12.0-amd64",

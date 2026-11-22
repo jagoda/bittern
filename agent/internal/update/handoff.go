@@ -126,3 +126,43 @@ func CancelRequest(stateRoot string) (bool, error) {
 	}
 	return true, nil
 }
+
+// PrepareRollbackHandoff writes the fixed manual-rollback request. It refuses
+// while another journal is active and never starts a transaction itself. The
+// helper takes the same lock for the rollback.
+func PrepareRollbackHandoff(stateRoot, reason string, now time.Time) (Handoff, error) {
+	options := normalizeOptions(Options{StateRoot: stateRoot})
+	p := options.paths()
+	lock, err := oplock.Acquire(p.lock)
+	if err != nil {
+		return Handoff{}, err
+	}
+	defer func() { _ = lock.Release() }()
+
+	journal, err := readJournal(p.journal)
+	if err != nil {
+		return Handoff{}, err
+	}
+	if journal != nil {
+		return Handoff{}, errorf("rollback.busy", "an update operation %s is active; finish it before rolling back", journal.OperationID)
+	}
+	request, requestErr := ReadRequest(p.request)
+	requestPresent := requestErr == nil
+	if requestErr != nil && !errors.Is(requestErr, os.ErrNotExist) {
+		return Handoff{}, requestErr
+	}
+	if requestPresent {
+		if request.Source != RequestSourceManualRollback {
+			return Handoff{}, errorf("request.conflict", "the pending request %s is not a manual rollback; cancel it first", p.request)
+		}
+		return Handoff{Request: request}, nil
+	}
+	request, err = NewRollbackRequest(reason, now)
+	if err != nil {
+		return Handoff{}, err
+	}
+	if err := WriteRequest(p.request, request); err != nil {
+		return Handoff{}, err
+	}
+	return Handoff{Request: request, WroteRequest: true}, nil
+}

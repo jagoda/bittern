@@ -13,6 +13,7 @@ import (
 )
 
 const kindAppBundleUpdate = "app-bundle-update"
+const kindAppBundleRollback = "app-bundle-rollback"
 const historyRetention = 20
 
 func previousEndpoint(p paths, generation int64, digest string) *Endpoint {

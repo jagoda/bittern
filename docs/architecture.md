@@ -207,6 +207,10 @@ the OS.
 
 The app bundle channel is GitHub Releases in `jagoda/bittern`, published from a tag with immutable
 releases and a draft as the atomic publish step ([ADR 0031](adr/0031-update-channel-on-github-releases.md)).
+An on-demand check reports a verified candidate as a status fact and never installs it
+automatically. An explicit manual rollback moves the running pointer to the retained previous bundle,
+or to the kit baseline when no previous bundle exists, without lowering the committed generation; the
+next update must still exceed it.
 
 ### OS image, loop 1
 

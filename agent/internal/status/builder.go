@@ -15,14 +15,16 @@ import (
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/redact"
 	"bittern.invalid/agent/internal/render"
+	"bittern.invalid/agent/internal/update"
 )
 
 // Options configures a Builder. Zero values use the production defaults.
 type Options struct {
-	Probes    Probes
-	Redactor  *redact.Redactor
-	Now       func() time.Time
-	StateRoot string
+	Probes          Probes
+	Redactor        *redact.Redactor
+	Now             func() time.Time
+	StateRoot       string
+	BaselineVersion string
 }
 
 // Builder assembles the status document from read-only probes.
@@ -66,7 +68,11 @@ func New(configPath string, options Options) *Builder {
 		probes.Network = defaults.Network
 	}
 	if probes.Updates == nil {
-		probes.Updates = &UpdateStateProbe{StateRoot: stateRoot}
+		probes.Updates = &UpdateStateProbe{
+			StateRoot:       stateRoot,
+			ConfigPath:      configPath,
+			BaselineVersion: options.BaselineVersion,
+		}
 	}
 	if probes.Reset == nil {
 		probes.Reset = defaults.Reset
@@ -532,13 +538,29 @@ func interfaceSection(role string, observation InterfaceObservation, reasons *[]
 
 func buildUpdates(observation UpdateObservation) UpdatesSection {
 	section := UpdatesSection{
-		State:             SectionUnknown,
-		CurrentSlot:       observation.Slot,
-		CurrentGeneration: observation.Generation,
-		Base:              observation.Base,
+		State:               SectionUnknown,
+		CurrentSlot:         observation.Slot,
+		CurrentVersion:      observation.CurrentVersion,
+		CurrentGeneration:   observation.CurrentGeneration,
+		RunningGeneration:   observation.RunningGeneration,
+		CommittedGeneration: observation.CommittedGeneration,
+		CommittedVersion:    observation.CommittedVersion,
+		Channel:             observation.Channel,
+		LastCheck:           observation.LastCheck,
+		AvailableVersion:    observation.AvailableVersion,
+		AvailableGeneration: observation.AvailableGeneration,
+		Rollback:            observation.Rollback,
+		LastOperation:       observation.LastOperation,
+		Base:                observation.Base,
 	}
-	if observation.Known && observation.Generation != nil {
+	if section.LastCheck.Result == "" {
+		section.LastCheck.Result = update.CheckNever
+	}
+	switch {
+	case observation.Known:
 		section.State = SectionOK
+	case observation.LastError != "":
+		section.State = SectionFailed
 	}
 	return section
 }

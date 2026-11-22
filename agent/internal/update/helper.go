@@ -31,6 +31,7 @@ type HelperOptions struct {
 	DatabasePath     string
 	SQLitePath       string
 	DockerPath       string
+	BaselineBinary   string
 
 	System   UnitSystem
 	Data     DataSnapshot
@@ -94,6 +95,9 @@ func RunHelper(options HelperOptions) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if request.Source == RequestSourceManualRollback {
+		return runRollbackHelper(options, p, request, journal)
+	}
 	sourcePath := request.SourcePath
 	if journal != nil {
 		if journal.SourcePath == "" {
@@ -146,20 +150,54 @@ func RunHelper(options HelperOptions) (Result, error) {
 	}
 
 	result, installErr := Install(installOptions)
+	return finishHelperRequest(options, p, request, sourcePath, result, installErr)
+}
 
+func runRollbackHelper(options HelperOptions, p paths, request Request, journal *Journal) (Result, error) {
+	if journal != nil && journal.Phase != PhaseManualRollback {
+		return Result{Status: ResultFailed}, errorf("rollback.busy", "an update operation %s is active; finish it before rolling back", journal.OperationID)
+	}
+	rollbackOptions := Options{
+		StateRoot:        options.StateRoot,
+		ConfigPath:       options.ConfigPath,
+		FrigateConfig:    options.FrigateConfig,
+		TrustImageDir:    options.TrustImageDir,
+		TrustRotationDir: options.TrustRotationDir,
+		SecretsPath:      options.SecretsPath,
+		Now:              options.Now,
+		Logger:           options.Logger,
+		Reason:           request.Reason,
+		BaselineBinary:   options.BaselineBinary,
+	}
+	if options.System != nil {
+		rollbackOptions.System = options.System
+	} else {
+		rollbackOptions.System = &ExecSystem{Runner: apply.NewExecSystem()}
+	}
+	if options.Base != nil {
+		rollbackOptions.Base = options.Base
+	}
+	result, rollbackErr := Rollback(rollbackOptions)
+	return finishHelperRequest(options, p, request, "", result, rollbackErr)
+}
+
+func finishHelperRequest(options HelperOptions, p paths, request Request, sourcePath string, result Result, runErr error) (Result, error) {
 	journalAfter, readErr := readJournal(p.journal)
 	if readErr != nil {
 		return result, readErr
 	}
-	if journalAfter == nil && !errors.Is(installErr, ErrBusy) {
+	if journalAfter == nil && !errors.Is(runErr, ErrBusy) {
 		if err := RemoveRequest(options.RequestPath); err != nil {
 			return result, fmt.Errorf("update: remove the request %s: %w", options.RequestPath, err)
 		}
+		if request.Source == RequestSourceLocalFile {
+			removeIncomingSource(options.StateRoot, sourcePath)
+		}
 	}
-	if installErr == nil && journalAfter != nil {
+	if runErr == nil && journalAfter != nil {
 		return result, errorf("helper.journal", "the transaction reported success but the journal %s remains", p.journal)
 	}
-	return result, installErr
+	return result, runErr
 }
 
 func resolveDatabasePath(options HelperOptions) (string, error) {

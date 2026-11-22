@@ -35,7 +35,9 @@ const usage = `usage:
   bittern setup-token [--qr] [--state-root DIR] [--config-root DIR] [--auth-state PATH]
   bittern image status [--state-path PATH]
   bittern image prewarm [--state-path PATH]
-  bittern update install SOURCE [--no-follow]
+  bittern update check [--force]
+  bittern update install [SOURCE] [--no-follow]
+  bittern update rollback --reason TEXT [--no-follow]
   bittern update status [--state-root DIR]
   bittern update cancel [--state-root DIR]
   bittern update helper

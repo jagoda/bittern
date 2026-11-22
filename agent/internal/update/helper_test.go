@@ -22,6 +22,7 @@ func helperOptions(t *testing.T, env *testEnv) HelperOptions {
 		TrustImageDir:    env.trustDir,
 		TrustRotationDir: env.rotationDir,
 		PlatformPath:     filepath.Join(env.root, "platform.json"),
+		BaselineBinary:   env.baselineBinary,
 		System:           env.system,
 		Data:             env.data,
 		Image:            env.image,
@@ -220,5 +221,43 @@ func TestUpdateHelperRejectsASymlinkSource(t *testing.T) {
 	requireRule(t, err, "request.source")
 	if _, statErr := os.Stat(RequestPath(env.stateRoot)); statErr != nil {
 		t.Fatalf("a rejected source removed the request: %v", statErr)
+	}
+}
+
+func TestUpdateHelperRunsAManualRollbackFromTheRequest(t *testing.T) {
+	env := newTestEnv(t)
+	env.system.restartVersion = func(unit string) string {
+		if unit != "bitternd.service" {
+			return ""
+		}
+		return env.runningAgentVersion(t)
+	}
+	env.mustInstall(t, env.writeValidBundle(t, 1))
+	request, err := NewRollbackRequest("bench rollback", requestNow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteRequest(RequestPath(env.stateRoot), request); err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunHelper(helperOptions(t, env))
+	if err != nil {
+		t.Fatalf("rollback helper failed: %v\nresult: %+v", err, result)
+	}
+	if result.Status != ResultRolledBack {
+		t.Fatalf("result = %+v, want rolled-back", result)
+	}
+	if got := readCurrentForTest(t, env.stateRoot); got != 0 {
+		t.Fatalf("pointer = %d, want the baseline 0", got)
+	}
+	if _, err := os.Stat(RequestPath(env.stateRoot)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rollback request remains after a final transaction: %v", err)
+	}
+	record, err := LatestHistory(env.stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record == nil || record.Kind != kindAppBundleRollback || !record.Rollback.Baseline {
+		t.Fatalf("history = %+v, want a baseline rollback record", record)
 	}
 }

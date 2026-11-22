@@ -89,9 +89,18 @@ func healthyProbes(t *testing.T) Probes {
 			}
 		}),
 		Updates: UpdateProbeFunc(func(context.Context) UpdateObservation {
+			generation := int64(7)
+			version := "0.1.7"
+			channel := "beta"
 			return UpdateObservation{
-				Known:      true,
-				Generation: func() *int64 { value := int64(7); return &value }(),
+				Known:               true,
+				CurrentVersion:      &version,
+				CurrentGeneration:   &generation,
+				RunningGeneration:   &generation,
+				CommittedGeneration: &generation,
+				CommittedVersion:    &version,
+				Channel:             &channel,
+				LastCheck:           UpdateCheckSection{Result: "never"},
 				Base: &UpdatesBase{
 					DebianVersion: "13.1",
 					Kernel:        "6.12.0-amd64",

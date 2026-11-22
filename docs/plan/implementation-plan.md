@@ -2053,8 +2053,8 @@ landed on 2026-11-22 as the `agent/internal/update` package, with `engine.go`, `
 landed on 2026-11-22: the fixed `bittern-update.service`, the 0600 request record, the
 `bittern update install` handoff, the real platform, systemd, Docker and `sqlite3` adapters, the
 status `updates` section, and the shared `internal/oplock`. Its evidence and limits are in
-[the slice two note](../notes/2026-11-22-update-engine-slice-two.md); the GitHub Releases channel
-client and the UI update card remain open in slice two. The canonical manifest, verifier and offline
+[the slice two note](../notes/2026-11-22-update-engine-slice-two.md); the UI update card remains
+open. The canonical manifest, verifier and offline
 `bittern-release` tool exist. Slice one was step 3 in the
 [release work order](#release-work-order-2026-11-22), after CI phase one, and the QEMU update
 scenario is slice three and step 5. The QEMU update scenario landed on 2026-11-22: generation 1
@@ -2064,6 +2064,11 @@ lower generation are rejected before any unit stops. The Frigate database restor
 recording evidence, the published camera-variant bundle, and TCG timing remain open. Evidence and the
 two beta-kit workarounds are in [the QEMU update scenario note](../notes/2026-11-22-qemu-update-scenario.md).
 The release path still waits for ADR 0029 acceptance and the key ceremony.
+The channel check, channel install, manual rollback, and status fields landed on 2026-11-22 in
+[the update channel and manual rollback slice](../notes/2026-11-22-update-channel-and-manual-rollback-slice.md).
+That slice is on-demand only: automatic periodic checking remains OQ-12. The first published release
+is the baseline 0 to generation 1 update; a bundle rollback needs a second release to retain a
+previous bundle.
 
 **Goal.** Updates that cannot leave the appliance half-configured. **Scope.**
 - Signed manifest with digest, generation and channel.
@@ -2094,6 +2099,7 @@ the transaction never writes a bootloader or claims an OS slot. The channel and 
 | 1 | Engine core with a local-file bundle source and unit tests. This is the update transaction, the provider-supplied platform generation, the `/var/lib/bittern` write boundary, the base fingerprint, and the test-key path. | Landed on 2026-11-22 in `agent/internal/update`; the section 13 matrix is 82 named cases. The install and rollback plans in the specification are implemented, including the journal ordering, atomic pointer and commit writes, verification gates, activation model, rollback path, history, and lock. The section 13 named cases pass: the per-step power-cut matrix, the rejection matrix, lock contention, idempotency, a cut during rollback, and the no-live-write-on-rejection assertion. All writes stay within the Scope boundary; the engine does not write `/etc`, a bootloader or an OS slot. A rejection leaves the pointer, committed state, and unit state unchanged. Slice one has no production entry point, no systemd helper, no QEMU scenario, no GitHub channel client, no UI and no packer. |
 | 2 | Production wiring: the fixed helper unit, the daemon request and operation record, the status `updates` section, the GitHub Releases channel client, and the UI update card, progress, result and history. The BIT-042 phase two packer and the real `DataSnapshot` adapter are dependencies, not new BIT-009 scope. | The helper runs one argument-free transaction from a 0600 request and survives a process cut. Apply and update take the same cross-process lock and cannot overlap. A resumed install reaches the same operation id, and a committed update is idempotent. The channel client discovers the newest release in the device channel, rejects a channel or tag mismatch, treats a rate limit as retry-later, and verifies the signed manifest before fetching the payload. Status reports the committed generation and base fingerprint, leaves `current_slot` null, and the UI shows the result, failing step and previous version on phone and desktop widths. The Frigate database snapshot restores under the ADR 0008 backup order. |
 | 3 | QEMU update scenario, release-path evidence, and the end-to-end case. | A valid update, an invalid signature, a digest mismatch, a downgrade and a rollback pass against the fixture on the local or bench QEMU path. The database backup restores; the failing step is reported; a committed update is idempotent. A bundle with the camera-variant fix and its regression test can be published to the channel and installed by an appliance already on that channel. The evidence is recorded in a dated note. QEMU stays outside CI until the KVM question is measured. |
+| 4 | On-demand channel check, channel install, manual rollback, and status fields. Design delta in [the update channel and manual rollback note](../notes/2026-11-22-update-channel-check-and-manual-rollback.md); evidence in [the slice note](../notes/2026-11-22-update-channel-and-manual-rollback-slice.md). | A verified GitHub Releases candidate is reported as a status fact and never auto-installs; generation 0 is the kit baseline and any published generation is an update; manual rollback restores a retained bundle or the baseline without lowering the committed generation; the status document reports running and committed generations, last check, available candidate, rollback target, and last operation. The fake channel covers drafts, the other channel, tag mismatch, lower and higher generations, a bad signature, rate limits, offline, and malformed responses. |
 **Depends on.** BIT-005, BIT-006. **Size.** L.
 
 ### BIT-010 Factory reset and support bundle skeleton
