@@ -183,9 +183,9 @@ The maintainer fixed this order in session on 2026-11-22. It is recorded in
 | --- | --- | --- |
 | 1 | Decisions: ADR 0031, ADR 0032, the OQ-34 answer, and OQ-35. No release or workflow is produced. | This change |
 | 2 | CI phase one: `make check` on push and pull request, plus an unsigned bundle workflow artifact, with no secrets, no publishing, and SHA-pinned actions. | BIT-042 |
-| 3 | BIT-009 transaction core: the update transaction, the provider-supplied platform generation, the `/var/lib/bittern` write boundary, the base fingerprint, and the test-key path. The manifest, verifier and signing tool are already present. | BIT-009 |
+| 3 | BIT-009 slice one: the update transaction core, the provider-supplied platform generation, the `/var/lib/bittern` write boundary, the base fingerprint, and the test-key path. The manifest, verifier and signing tool are already present. | BIT-009 |
 | 4 | Bundle packer with publish on tag: build the files-only payload and the beta preparation kit with `make beta-payload`, create the draft release, upload `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`, `bittern-beta-kit.tar.gz`, and `SHA256SUMS`, and publish the draft after approval. The CI test key signs CI bundles only; a production release still uses the offline signature from ADR 0029. | BIT-042 phase two |
-| 5 | QEMU update scenario: a valid update, an invalid signature, a digest mismatch, a downgrade, and a rollback against the published fixture on the local or bench QEMU path. QEMU stays outside CI until the KVM question is measured. | BIT-009 acceptance |
+| 5 | BIT-009 slice three: the QEMU update scenario with a valid update, an invalid signature, a digest mismatch, a downgrade, and a rollback against the published fixture on the local or bench QEMU path. QEMU stays outside CI until the KVM question is measured. | BIT-009 acceptance |
 
 1. **BIT-019 setup token QR.** Landed on 2026-11-17; the USB token copy is gone from every setup
    cycle. It is a prerequisite of BIT-020 because the responsive check must cover the QR,
@@ -2034,10 +2034,12 @@ reservation in a file Bittern does not own is still left and failed by cleanup.
 **Depends on.** BIT-003, BIT-004. **Size.** L.
 
 ### BIT-009 App bundle update transaction with rollback
-**Status.** First slice in scope and partially landed. The canonical manifest, verifier and offline
-`bittern-release` tool exist. The transaction core is step 3 in the
+**Status.** Slice zero is specified in
+[the update transaction specification](../notes/2026-11-22-update-transaction-spec.md). The canonical
+manifest, verifier and offline `bittern-release` tool exist. Slice one is step 3 in the
 [release work order](#release-work-order-2026-11-22), after CI phase one, and the QEMU update
-scenario is step 5. The release path still waits for ADR 0029 acceptance and the key ceremony.
+scenario is slice three and step 5. The release path still waits for ADR 0029 acceptance and the key
+ceremony.
 
 **Goal.** Updates that cannot leave the appliance half-configured. **Scope.**
 - Signed manifest with digest, generation and channel.
@@ -2061,12 +2063,13 @@ the transaction never writes a bootloader or claims an OS slot. The channel and 
 [ADR 0031](../adr/0031-update-channel-on-github-releases.md), and CI publication phases are in
 [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md).
 
-**Acceptance.**
-- An injected start failure restores the previous bundle and config.
-- The database backup restores; unsigned or wrong-generation manifests are rejected.
-- The failing step is reported; a committed update is idempotent.
-- A bundle with the camera-variant fix and its regression test can be published to a channel and
-  installed by an appliance already on that channel.
+**Slices.**
+| Slice | Work | Acceptance |
+| --- | --- | --- |
+| 0 | The specification in [the update transaction specification](../notes/2026-11-22-update-transaction-spec.md): scope, paths, steps, durability, verification, activation, rollback, health, history, locking, idempotency, invariants, tests, and open questions. | The note is reviewed and committed. It records no conflict with an Accepted ADR and decides no point an ADR already owns. `make link-check` and `make style-check` pass. No code, workflow, systemd unit, UI or packer is part of the slice. |
+| 1 | Engine core with a local-file bundle source and unit tests. This is the update transaction, the provider-supplied platform generation, the `/var/lib/bittern` write boundary, the base fingerprint, and the test-key path. | The install and rollback plans in the specification are implemented, including the journal ordering, atomic pointer and commit writes, verification gates, activation model, rollback path, history, and lock. The section 13 named cases pass: the per-step power-cut matrix, the rejection matrix, lock contention, idempotency, a cut during rollback, and the no-live-write-on-rejection assertion. All writes stay within the Scope boundary; the engine does not write `/etc`, a bootloader or an OS slot. A rejection leaves the pointer, committed state, and unit state unchanged. Slice one has no production entry point, no systemd helper, no QEMU scenario, no GitHub channel client, no UI and no packer. |
+| 2 | Production wiring: the fixed helper unit, the daemon request and operation record, the status `updates` section, the GitHub Releases channel client, and the UI update card, progress, result and history. The BIT-042 phase two packer and the real `DataSnapshot` adapter are dependencies, not new BIT-009 scope. | The helper runs one argument-free transaction from a 0600 request and survives a process cut. Apply and update take the same cross-process lock and cannot overlap. A resumed install reaches the same operation id, and a committed update is idempotent. The channel client discovers the newest release in the device channel, rejects a channel or tag mismatch, treats a rate limit as retry-later, and verifies the signed manifest before fetching the payload. Status reports the committed generation and base fingerprint, leaves `current_slot` null, and the UI shows the result, failing step and previous version on phone and desktop widths. The Frigate database snapshot restores under the ADR 0008 backup order. |
+| 3 | QEMU update scenario, release-path evidence, and the end-to-end case. | A valid update, an invalid signature, a digest mismatch, a downgrade and a rollback pass against the fixture on the local or bench QEMU path. The database backup restores; the failing step is reported; a committed update is idempotent. A bundle with the camera-variant fix and its regression test can be published to the channel and installed by an appliance already on that channel. The evidence is recorded in a dated note. QEMU stays outside CI until the KVM question is measured. |
 **Depends on.** BIT-005, BIT-006. **Size.** L.
 
 ### BIT-010 Factory reset and support bundle skeleton
