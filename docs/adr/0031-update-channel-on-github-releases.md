@@ -3,7 +3,8 @@
 *Application bundles are published as immutable GitHub Releases in `jagoda/bittern`, discovered by a
 generation tag, and beta is the only live channel until the first field release.*
 
-- Status: Accepted
+- Status: Accepted; tag-as-publish-signal decision superseded in part by
+  [ADR-0033](./0033-dispatch-driven-release-trigger.md)
 - Date: 2026-11-22
 - Deciders: maintainer
 - Related: [ADR 0007](./0007-mkosi-os-image-and-releases.md),

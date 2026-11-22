@@ -1,24 +1,32 @@
-# CI phase two, per ADR 0031 and ADR 0032. A beta application bundle tag runs
-# the phase one checks, builds the unsigned assets, signs the manifest with the
-# CI-only test key, and uploads exactly the five release assets to a draft. A
-# tag push runs the workflow file at the tagged commit, not the copy on main,
-# and the beta-draft environment policy scopes the key to that ref. A second
-# job, gated by the protected beta environment, verifies the draft's asset names
-# and recorded digests and then publishes the existing draft.
+# CI phase two, per ADR 0031, ADR 0032, and ADR 0033. There are three paths:
+#
+# - A manual dispatch of release.yml (ADR 0033) runs the release preflight,
+#   computes the next generation, and calls this workflow with that tag. This
+#   workflow runs the phase one checks, builds the unsigned assets, signs the
+#   manifest with the CI-only test key, creates the tag at the checked commit,
+#   and uploads exactly the five release assets to a draft. The tag is created
+#   only after the build and signature succeed.
+# - A push of an app-beta-* tag is the fallback path. The tag exists before the
+#   run, so this workflow validates it, builds, signs, and creates the draft
+#   against the existing tag. It does not compute the generation.
+# - A workflow_dispatch of this workflow is the dry run. It validates the tag,
+#   builds and signs the same bytes, verifies the signature, prints the five
+#   asset digests, and creates no tag, draft, or release.
+#
+# The draft job runs in beta-draft, which scopes the CI test key to the ref and
+# holds no required reviewer. The publish job runs in the protected beta
+# environment, verifies the draft's asset names and recorded digests, and flips
+# the existing draft to published after the maintainer approves. The tag push
+# fallback runs the workflow file at the tagged commit, not the copy on main.
 #
 # No release private key is present. The CI test key is held by the draft job
 # through the beta-draft environment, and its public half is
 # packaging/trust/beta-ci.pub. The approval gate is the separate beta
 # environment. beta-draft has no required reviewer because it publishes
-# nothing; it scopes the key to tag-triggered runs on this repository.
-# QEMU and hardware tests stay outside CI.
-#
-# A workflow_dispatch run is the dry run. It validates the supplied tag with the
-# same Go parser, runs the same checks, builds the same assets, signs the
-# manifest with the CI test key, verifies the signature against the shipped
-# anchor, and prints the five asset digests. It creates no tag, no draft, and no
-# release and uploads nothing. The tag push trigger remains the only publish
-# path; a dispatch that would publish is refused before any check runs.
+# nothing. The release workflow's preflight job and its draft job both run at
+# the dispatch ref, main, so both environments need the main branch policy in
+# addition to the app-beta-* tag policy. QEMU and hardware tests stay outside
+# CI.
 name: publish
 
 on:
@@ -41,6 +49,33 @@ on:
         required: true
         type: boolean
         default: true
+  # The release workflow calls this workflow with the tag and generation the
+  # preflight computed. create_tag is true only on that path; the tag push
+  # fallback already has its tag, and the dry run never creates one.
+  workflow_call:
+    inputs:
+      tag:
+        description: Application bundle tag computed by the release preflight
+        required: true
+        type: string
+      generation:
+        description: Generation the preflight computed for the tag
+        required: true
+        type: string
+      commit:
+        description: Commit the preflight checked and the tag must point at
+        required: true
+        type: string
+      create_tag:
+        description: Create the tag after the build and signature succeed
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: Run every step except creating a tag or a release
+        required: false
+        type: boolean
+        default: false
 
 # One run per tag, and never cancel a run that may be waiting for approval.
 concurrency:
@@ -61,6 +96,7 @@ jobs:
       generation: ${{ steps.parse.outputs.generation }}
       tag: ${{ steps.select.outputs.tag }}
       dry_run: ${{ steps.select.outputs.dry_run }}
+      create_tag: ${{ steps.select.outputs.create_tag }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -86,6 +122,9 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_GENERATION: ${{ inputs.generation }}
+          INPUT_COMMIT: ${{ inputs.commit }}
+          INPUT_CREATE_TAG: ${{ inputs.create_tag }}
         run: |
           set -eu
           case "$EVENT_NAME" in
@@ -99,6 +138,7 @@ jobs:
               esac
               tag="$REF_NAME"
               dry_run=false
+              create_tag=false
               ;;
             workflow_dispatch)
               case "$REF" in
@@ -121,6 +161,42 @@ jobs:
                   exit 1
                   ;;
               esac
+              create_tag=false
+              ;;
+            workflow_call)
+              case "$REF" in
+                refs/heads/main) ;;
+                *)
+                  printf 'the reusable release path requires refs/heads/main, not %s\n' "$REF" >&2
+                  exit 1
+                  ;;
+              esac
+              tag="$INPUT_TAG"
+              case "$INPUT_DRY_RUN" in
+                true) dry_run=true ;;
+                false) dry_run=false ;;
+                *)
+                  printf 'the dry_run input is %s, not true or false\n' "$INPUT_DRY_RUN" >&2
+                  exit 1
+                  ;;
+              esac
+              case "$INPUT_CREATE_TAG" in
+                true) create_tag=true ;;
+                false) create_tag=false ;;
+                *)
+                  printf 'the create_tag input is %s, not true or false\n' "$INPUT_CREATE_TAG" >&2
+                  exit 1
+                  ;;
+              esac
+              if [ "$create_tag" = "true" ] && [ "$dry_run" = "true" ]; then
+                printf 'a reusable run cannot create a tag in a dry run\n' >&2
+                exit 1
+              fi
+              if [ "$INPUT_COMMIT" != "$GITHUB_SHA" ]; then
+                printf 'the preflight commit %s does not equal the workflow commit %s\n' \
+                  "$INPUT_COMMIT" "$GITHUB_SHA" >&2
+                exit 1
+              fi
               ;;
             *)
               printf 'the publish workflow does not run on the %s event\n' "$EVENT_NAME" >&2
@@ -136,8 +212,10 @@ jobs:
           esac
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
           printf 'dry_run=%s\n' "$dry_run" >> "$GITHUB_OUTPUT"
+          printf 'create_tag=%s\n' "$create_tag" >> "$GITHUB_OUTPUT"
           printf 'selected tag: %s\n' "$tag"
           printf 'dry run: %s\n' "$dry_run"
+          printf 'create tag: %s\n' "$create_tag"
 
       # The first command that can fail is the repository's own tag parser. It
       # rejects uppercase hex, five or seven characters, an empty suffix, a
@@ -147,10 +225,17 @@ jobs:
         id: parse
         env:
           TAG: ${{ steps.select.outputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_GENERATION: ${{ inputs.generation }}
         run: |
           set -eu
           make bittern-release
           generation="$(agent/bin/bittern-release tag "$TAG")"
+          if [ "$EVENT_NAME" = "workflow_call" ] && [ "$generation" != "$INPUT_GENERATION" ]; then
+            printf 'the Go parser read generation %s, the preflight computed %s\n' \
+              "$generation" "$INPUT_GENERATION" >&2
+            exit 1
+          fi
           printf 'generation=%s\n' "$generation" >> "$GITHUB_OUTPUT"
 
   checks:
@@ -168,12 +253,10 @@ jobs:
     needs: [tag, checks]
     runs-on: ubuntu-24.04
     # beta-draft holds the CI test key and has no required reviewer, so the
-    # draft exists before the beta approval. It uses the same app-beta-* tag
-    # policy as beta. The approval gate is beta on the publish job. The dry run
-    # decodes the same key and therefore runs in this environment too; a
-    # dispatch at a branch ref needs that ref admitted for the run, and the
-    # tag-only policy is restored afterwards. The dry-run note records that
-    # one-off procedure; the steady state stays tag-only.
+    # draft exists before the beta approval. The approval gate is beta on the
+    # publish job. The dispatch release and the dry run both run at main, so
+    # beta-draft must admit main in addition to app-beta-*; the tag push path
+    # uses the tag policy. The preflight verifies both refs before any build.
     environment:
       name: beta-draft
     permissions:
@@ -338,6 +421,32 @@ jobs:
             printf '```sh\nsha256sum -c SHA256SUMS\n```\n'
           } > "$RUNNER_TEMP/release-notes.md"
 
+      # The dispatch release creates the tag here, after the checks, the build,
+      # the signature, and the signature verification have all succeeded. The
+      # tag push fallback already has its tag, and the dry run never creates
+      # one. The remote check is a race guard: a concurrent release that took
+      # this generation fails before the draft is created.
+      - name: Create the tag at the checked commit
+        if: needs.tag.outputs.create_tag == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          set -eu
+          commit="$GITHUB_SHA"
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q .; then
+            printf 'tag %s already exists; a release tag is never moved or reused\n' "$TAG" >&2
+            exit 1
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/$TAG" -f sha="$commit" >/dev/null
+          created="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')"
+          if [ "$created" != "$commit" ]; then
+            printf 'the created tag %s points at %s, not %s\n' "$TAG" "$created" "$commit" >&2
+            exit 1
+          fi
+          printf 'created tag %s at %s\n' "$TAG" "$commit"
+
       - name: Create the draft release with exactly five assets
         if: needs.tag.outputs.dry_run != 'true'
         env:
@@ -412,18 +521,20 @@ jobs:
 
   publish:
     name: publish the verified draft
-    # A dry run never reaches the approval gate, and the tag push is the only
-    # path that does. The branch policy on beta would refuse a dispatch anyway;
-    # the explicit condition keeps the run from waiting on it.
+    # A dry run never reaches the approval gate. The tag push fallback and the
+    # dispatch release both do, because both set dry_run to false. The branch
+    # policy on beta decides whether the dispatch ref, main, is admitted; the
+    # explicit condition keeps the dry run from waiting on it.
     needs: [tag, draft]
     if: needs.tag.outputs.dry_run == 'false'
     runs-on: ubuntu-24.04
     # The beta environment carries the required reviewer and the app-beta-*
-    # tag policy. The draft already exists, so an unapproved run leaves it in
-    # place and publishes nothing. This job takes no build action.
+    # tag and main branch policies. The draft already exists, so an unapproved
+    # run leaves it in place and publishes nothing. This job takes no build
+    # action and never receives the CI test key.
     environment:
       name: beta
-      url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ needs.tag.outputs.tag }}
     permissions:
       contents: write
     steps:
@@ -434,18 +545,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_DIGESTS: ${{ needs.draft.outputs.digests }}
+          TAG: ${{ needs.tag.outputs.tag }}
         run: |
           set -eu
           if [ -z "$EXPECTED_DIGESTS" ]; then
             printf 'the draft job recorded no asset digests\n' >&2
             exit 1
           fi
-          is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')"
+          is_draft="$(gh release view "$TAG" --json isDraft --jq '.isDraft')"
           if [ "$is_draft" != "true" ]; then
-            printf 'release %s is not a draft\n' "$GITHUB_REF_NAME" >&2
+            printf 'release %s is not a draft\n' "$TAG" >&2
             exit 1
           fi
-          actual="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | LC_ALL=C sort)"
+          actual="$(gh release view "$TAG" --json assets --jq '.assets[].name' | LC_ALL=C sort)"
           expected="$(printf '%s\n' \
             manifest.json \
             manifest.json.sig \
@@ -458,7 +570,7 @@ jobs:
           fi
           printf '%s' "$EXPECTED_DIGESTS" | base64 --decode > "$RUNNER_TEMP/expected.sha256"
           mkdir -p "$RUNNER_TEMP/draft-assets"
-          gh release download "$GITHUB_REF_NAME" --dir "$RUNNER_TEMP/draft-assets"
+          gh release download "$TAG" --dir "$RUNNER_TEMP/draft-assets"
           count="$(find "$RUNNER_TEMP/draft-assets" -maxdepth 1 -type f | wc -l)"
           if [ "$count" -ne 5 ]; then
             printf 'the draft download has %s files, not 5\n' "$count" >&2
@@ -471,4 +583,5 @@ jobs:
       - name: Publish the draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$GITHUB_REF_NAME" --draft=false
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false

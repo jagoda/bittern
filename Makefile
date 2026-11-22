@@ -43,7 +43,7 @@ SCHEMA_MIN ?= 1
 SCHEMA_MAX ?= 2
 UPDATER_MIN ?= 1
 
-.PHONY: help check schema link-check style-check design-check bundle-check cleanup-test storage-test unit-enablement-check version-check qemu-test qemu-firstboot qemu-firstboot-stock qemu-firstboot-clean qemu-firstboot-late-camera qemu-adoption qemu-update qemu-stop assets test render detect render-poc status ui-test ui-browser-check bitternd bittern-release apply-test first-boot-poc beta-payload
+.PHONY: help check schema link-check style-check design-check bundle-check cleanup-test storage-test unit-enablement-check version-check release-preflight qemu-test qemu-firstboot qemu-firstboot-stock qemu-firstboot-clean qemu-firstboot-late-camera qemu-adoption qemu-update qemu-stop assets test render detect render-poc status ui-test ui-browser-check bitternd bittern-release apply-test first-boot-poc beta-payload
 
 help:
 	@printf '%s\n' \
@@ -59,6 +59,7 @@ help:
 		'  make storage-test Test packaging/storage-setup.sh against fixture disks' \
 		'  make unit-enablement-check  Check units enabled by the payload against the QEMU reboot assertions' \
 		'  make version-check  Check the factory baseline and bundle version stamps stay distinct' \
+		'  make release-preflight  Check the release preconditions and print the next generation' \
 		'  make qemu-test   Boot the two-NIC QEMU harness and run its tests' \
 		'  make qemu-firstboot  Run first boot, the TLS wizard and one camera in QEMU' \
 		'  make qemu-firstboot-stock  Run first boot from stock NIC names in QEMU' \
@@ -112,6 +113,7 @@ check:
 	$(PYTHON) tests/storage/test_storage_setup.py || status=1; \
 	$(PYTHON) tests/checks/unit_enablement.py || status=1; \
 	$(PYTHON) tests/checks/release_asset_names.py || status=1; \
+	$(PYTHON) tests/release/test_release_preflight.py || status=1; \
 	$(SUBMAKE) version-check || status=1; \
 	$(SUBMAKE) test || status=1; \
 	exit $$status
@@ -145,6 +147,16 @@ version-check:
 		*) printf 'bundle version %s is not a published beta version\n' "$$bundle" >&2; exit 1 ;; \
 	esac; \
 	printf 'version stamp: baseline %s; bundle %s\n' "$$baseline" "$$bundle"
+
+# Release preflight per ADR 0033. This target is read-only: it verifies the
+# main check run, the beta-draft secret name, the environment ref policies,
+# computes the next generation, validates the tag with the same Go parser the
+# publish workflow uses, and prints the next action. It creates no tag, draft,
+# or release. Pass RELEASE_PREFLIGHT_ARGS=--plan for the explicit plan banner,
+# or RELEASE_PREFLIGHT_ARGS=--tag-path for the tag-push fallback checks.
+RELEASE_PREFLIGHT_ARGS ?=
+release-preflight: bittern-release
+	@$(PYTHON) packaging/release_preflight.py $(RELEASE_PREFLIGHT_ARGS)
 
 qemu-test:
 	@$(PYTHON) tests/qemu/run.py test

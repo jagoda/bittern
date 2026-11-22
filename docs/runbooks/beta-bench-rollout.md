@@ -1,27 +1,34 @@
 # Beta bench rollout
 
 - Date: 2026-11-22
-- Status: maintainer checklist for the first two published beta generations. The publish workflow dry
-  run is green, but this sequence has not been run against published releases. The tag-triggered
-  publish with the real `beta` approval remains unproven until the first tag is pushed
+- Status: maintainer checklist for the first two published beta generations. The release workflow
+  dispatch is the normal path and the tag push is the fallback. The publish workflow dry run is
+  green, but neither publish path has been run against a published release. The dispatch preflight
+  needs the `main` branch policy on `beta-draft` and `beta`; it refuses until that policy is applied.
+  The `beta` approval remains unproven until the first release is approved
 - Bench: Debian 13 (trixie) amd64, minimal, one management NIC on the house LAN, camera NIC
   unplugged, local console attached
 - Payload: the published `bittern-beta-kit.tar.gz` and the `app-beta-000001` and `app-beta-000002`
   releases
 - Related: [ADR 0031](../adr/0031-update-channel-on-github-releases.md),
   [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md),
+  [ADR 0033](../adr/0033-dispatch-driven-release-trigger.md),
   [ADR 0029](../adr/0029-release-signing-and-key-custody.md),
+  [release workflow](../../.github/workflows/release.yml),
+  [publish workflow](../../.github/workflows/publish.yml),
+  [release preflight](../../packaging/release_preflight.py),
   [beta payload and publish note](../notes/2026-11-22-beta-payload-and-publish.md),
   [dry run and bench rollout note](../notes/2026-11-22-beta-dry-run-and-bench-rollout.md),
+  [dispatch release trigger note](../notes/2026-11-22-dispatch-release-trigger.md),
   [update channel and manual rollback note](../notes/2026-11-22-update-channel-check-and-manual-rollback.md),
   [beta kit README](../../packaging/README-beta-kit.md),
   [BIT-009](../plan/implementation-plan.md#bit-009-app-bundle-update-transaction-with-rollback),
   [BIT-042](../plan/implementation-plan.md#bit-042-release-channel-and-ci-pipeline)
 
 This runbook answers one question: how does a maintainer take two published beta generations and
-prove the tag-to-draft-to-publish path, the kit install, the update card, the second update, and the
-manual rollback on a bench box? It is the first field-like rollout. It is not the hardware release
-gate and it does not exercise a camera.
+prove the dispatch-to-tag-to-draft-to-publish path, the kit install, the update card, the second
+update, and the manual rollback on a bench box? It is the first field-like rollout. It is not the
+hardware release gate and it does not exercise a camera.
 
 The sequence uses two releases because a manual rollback needs a previous bundle. Generation 1 is the
 first update from the kit baseline, which is generation 0. Generation 2 proves that a changed bundle
@@ -30,59 +37,33 @@ the committed generation stays forward.
 
 ## Preconditions
 
-Run every check before creating a tag. Do not work around a failed precondition.
+Run the release preflight before dispatching a release. Do not work around a failed precondition.
 
-- [ ] `main` is green at the commit to tag.
-
-```sh
-gh run list --workflow check.yml --branch main --limit 1
-```
-
-Expected: `completed success`. If `main` moved after the run, tag the exact commit whose run is
-green, not the new head.
-
-- [ ] The `beta-draft` secret is present. List the name only; never print the value.
+- [ ] The release preflight passes.
 
 ```sh
-gh secret list --env beta-draft
+make release-preflight
 ```
 
-Expected: `BITTERN_CI_SIGNING_KEY`. The key id and public anchor are in
-[the trust README](../../packaging/trust/README.md).
+Expected: every check passes, and the last lines print the computed tag, the commit, the generation,
+and the next action. The preflight verifies the `check.yml` run on the exact `main` head, the
+`BITTERN_CI_SIGNING_KEY` name in `beta-draft`, the `app-beta-*` tag policy on both environments, the
+`beta` reviewer and admin bypass, the next generation, and the tag absence. It validates the tag with
+the same Go parser the publish workflow uses. It creates no tag, draft, or release.
 
-- [ ] Both environments are tag-scoped to `app-beta-*`.
+The dispatch runs at `main`, so both environments must admit `main` in addition to `app-beta-*`. A
+missing branch policy is reported as `environment-dispatch-ref`; apply the policy before the first
+dispatch rather than working around it. If any check fails, fix the named precondition and run the
+preflight again.
+
+- [ ] For the tag-push fallback only, the tag-path preflight passes.
 
 ```sh
-for env in beta beta-draft; do
-  printf '%s: ' "$env"
-  gh api "repos/jagoda/bittern/environments/$env/deployment-branch-policies" \
-    --jq '[.branch_policies[] | "\(.type) \(.name)"] | join(", ")'
-done
+make release-preflight RELEASE_PREFLIGHT_ARGS=--tag-path
 ```
 
-Expected: `tag app-beta-*` for each environment. Neither environment allows a branch. A maintainer
-dry run at a branch ref is a separate, one-off exception recorded in
-[the dry run note](../notes/2026-11-22-beta-dry-run-and-bench-rollout.md); it is not part of this
-rollout.
-
-- [ ] The `beta` environment requires the maintainer as reviewer.
-
-```sh
-gh api repos/jagoda/bittern/environments/beta \
-  --jq '.protection_rules[] | select(.type == "required_reviewers") | .reviewers[].reviewer.login'
-```
-
-Expected: `jagoda`. `can_admins_bypass` is false, so no publish job can skip the approval.
-
-- [ ] No tag or release exists at the target generation.
-
-```sh
-git ls-remote --tags origin 'app-beta-000001' 'app-beta-000002'
-gh release list --limit 20
-```
-
-Expected: no output from the first command and no releases from the second. Never move or reuse a
-tag. If a tag exists, the next generation is the one to publish.
+Expected: the same checks without the `main` branch requirement. The fallback tags the commit the
+preflight prints; it does not compute a generation in CI.
 
 - [ ] The bench box is a known Debian 13 amd64 machine with the management NIC on the house LAN.
 
@@ -110,27 +91,27 @@ Record the run as you go:
 | Date and maintainer | |
 | Bench box and management address | |
 | `main` commit for generation 1 | |
-| Generation 1 publish run ID and URL | |
+| Generation 1 release run ID and URL | |
 | Generation 1 release URL | |
 | Visible change for generation 2 | |
-| Generation 2 publish run ID and URL | |
+| Generation 2 release run ID and URL | |
 | Generation 2 release URL | |
 | Rollback result and `bittern update status` path | |
 
-## Publish generation 1
+## Dispatch generation 1
 
-Tag the checked commit and push the tag. The tag push, not a dispatch, is the publish path.
+The release workflow computes the generation, builds and signs, creates the tag, stages the draft,
+and waits for the `beta` approval. Do not create the tag by hand on this path.
 
 ```sh
 cd /path/to/bittern
 git switch main
 git pull --ff-only
 git status --short        # must be empty
-release_commit="$(git rev-parse HEAD)"
-git tag app-beta-000001 "$release_commit"
-git push origin app-beta-000001
+make release-preflight    # prints app-beta-000001 and the next action
+gh workflow run release.yml --ref main -f confirm=app-beta-000001
 sleep 5
-run_id="$(gh run list --workflow publish.yml --event push --limit 1 \
+run_id="$(gh run list --workflow release.yml --event workflow_dispatch --limit 1 \
   --json databaseId --jq '.[0].databaseId')"
 test -n "$run_id"
 gh run view "$run_id" --json url --jq .url
@@ -142,9 +123,10 @@ Watch the run:
 gh run watch "$run_id"
 ```
 
-Expected: the `validate tag`, `make check`, `unsigned test build`, and `sign and stage draft` jobs
-pass. The `publish the verified draft` job waits at the `beta` environment. The draft exists and is
-invisible to devices.
+Expected: the `release preflight`, `validate tag`, `checks and unsigned test build`, and
+`sign and stage draft` jobs pass. The tag `app-beta-000001` is created inside the draft job after the
+signature is verified, then the five assets are uploaded to the draft. The `publish the verified
+draft` job waits at the `beta` environment. The draft exists and is invisible to devices.
 
 Open the run URL, select the waiting `publish the verified draft` job, choose Review deployments,
 select `beta`, and approve. The runbook cannot approve for you; the environment is the gate. A
@@ -154,14 +136,39 @@ After approval:
 
 ```sh
 gh run watch "$run_id" --exit-status
+git ls-remote --tags origin app-beta-000001
 gh release view app-beta-000001 --json isDraft,assets \
   --jq '{isDraft, assets: [.assets[].name]}'
 ```
 
-Expected: the run is green, `isDraft` is false, and the asset names are exactly `manifest.json`,
-`manifest.json.sig`, `bittern-app.tar.gz`, `bittern-beta-kit.tar.gz`, and `SHA256SUMS`.
+Expected: the run is green, the tag exists at the `main` commit the preflight printed, `isDraft` is
+false, and the asset names are exactly `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`,
+`bittern-beta-kit.tar.gz`, and `SHA256SUMS`.
 
 The release URL is `https://github.com/jagoda/bittern/releases/tag/app-beta-000001`.
+
+### Fallback: push the tag
+
+Use the tag push only when the dispatch path cannot run, for example a release workflow outage or a
+bootstrap. It does not compute the generation, so the tag must be the next one the preflight prints.
+
+```sh
+make release-preflight RELEASE_PREFLIGHT_ARGS=--tag-path
+release_commit="$(git rev-parse HEAD)"
+git tag app-beta-000001 "$release_commit"
+git push origin app-beta-000001
+sleep 5
+run_id="$(gh run list --workflow publish.yml --event push --limit 1 \
+  --json databaseId --jq '.[0].databaseId')"
+test -n "$run_id"
+gh run watch "$run_id"
+```
+
+The tag push runs `publish.yml` at the tagged commit. The `validate tag`, `make check`, `unsigned
+test build`, and `sign and stage draft` jobs run, and the draft is created against the existing tag.
+The `publish the verified draft` job waits at `beta`. Approve it and verify the release as above.
+The fallback can burn a generation if the build or signature fails after the tag is pushed; that is
+why it is not the normal path.
 
 ## Prepare the bench box from the kit
 
@@ -253,24 +260,22 @@ git commit -m "docs: describe the bench generation 2 change"
 git push origin main
 ```
 
-Wait for the check workflow on that commit:
+Run the preflight on the new `main` head. It refuses while the check run for that exact commit is
+still running, and it computes the next generation from the published releases:
 
 ```sh
-gh run list --workflow check.yml --branch main --limit 1
-```
-
-Expected: `completed success` for the commit you will tag. Tag that exact commit, not a later head:
-
-```sh
-release_commit="$(git rev-parse HEAD)"
-git tag app-beta-000002 "$release_commit"
-git push origin app-beta-000002
+make release-preflight    # prints app-beta-000002 and the next action
+gh workflow run release.yml --ref main -f confirm=app-beta-000002
 sleep 5
-run_id="$(gh run list --workflow publish.yml --event push --limit 1 \
+run_id="$(gh run list --workflow release.yml --event workflow_dispatch --limit 1 \
   --json databaseId --jq '.[0].databaseId')"
 test -n "$run_id"
 gh run watch "$run_id"
 ```
+
+Expected: the preflight prints `app-beta-000002`, and the run creates the tag after the signature and
+stages the draft. The release workflow creates the tag; do not create it by hand. A tag-push fallback
+uses `make release-preflight RELEASE_PREFLIGHT_ARGS=--tag-path` and the generation 1 fallback commands.
 
 Approve the `beta` deployment as for generation 1, then verify the release:
 
@@ -369,6 +374,7 @@ re-tag a generation, or edit the device state to make the card look clean.
 Publish-side evidence:
 
 ```sh
+gh run list --workflow release.yml --limit 5
 gh run list --workflow publish.yml --limit 5
 gh run view <run-id> --log > /tmp/publish-<run-id>.log
 gh run view <run-id> --json url,conclusion,event,headSha

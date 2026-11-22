@@ -43,6 +43,14 @@ The environment policy and the ADR 0031 tag scheme must change together. A chang
 without the other either blocks a valid tag at deploy time or permits a tag the ADR does not
 define.
 
+[ADR 0033](../../docs/adr/0033-dispatch-driven-release-trigger.md) makes a manual dispatch of
+`release.yml` at `main` the normal release path. That path needs a `main` branch policy on both
+environments in addition to the `app-beta-*` tag, because the preflight and draft jobs run at
+`refs/heads/main`. The policy is not applied yet: `make release-preflight` refuses with
+`environment-dispatch-ref` until it is, and the tag-push fallback stays tag-only. Do not add the
+branch policy without the maintainer's decision, which stays open in
+[OQ-36](../../docs/open-questions.md).
+
 A `workflow_dispatch` dry run runs at a branch ref, so the tag-only policy refuses the draft job
 before it can read the key. The dry run on 2026-11-22 added a temporary `main` branch policy to
 `beta-draft`, ran, deleted the policy, and verified that both environments list only
