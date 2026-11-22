@@ -1,8 +1,10 @@
 # CI phase two, per ADR 0031 and ADR 0032. A beta application bundle tag runs
 # the phase one checks, builds the unsigned assets, signs the manifest with the
 # CI-only test key, and uploads exactly the five release assets to a draft. A
-# second job, gated by the protected beta environment, verifies the draft's
-# asset names and recorded digests and then publishes the existing draft.
+# tag push runs the workflow file at the tagged commit, not the copy on main,
+# and the beta-draft environment policy scopes the key to that ref. A second
+# job, gated by the protected beta environment, verifies the draft's asset names
+# and recorded digests and then publishes the existing draft.
 #
 # No release private key is present. The CI test key is held by the draft job
 # through the beta-draft environment, and its public half is
