@@ -1,5 +1,7 @@
 # Bittern
 
+[![check](https://github.com/jagoda/bittern/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/jagoda/bittern/actions/workflows/check.yml)
+
 **A quiet appliance for Frigate.**
 
 Bittern is an open-source appliance layer around Frigate NVR: a reproducible OS image, a management
@@ -24,11 +26,13 @@ reference validator, and the first product code: the Go configuration loader and
 renderer for networkd, nftables, dnsmasq, chrony, Frigate config, compose, and the Frigate unit,
 read-only hardware detection, the resumable apply and first-boot path, the status daemon, and the
 first-run wizard and status page skeleton with vendored HTMX. There is no image build or release
-artifact yet. CI phase one is planned in [ADR 0032](docs/adr/0032-continuous-integration-and-build-pipeline.md)
-and no workflow exists yet; the release channel is decided in
-[ADR 0031](docs/adr/0031-update-channel-on-github-releases.md) and is not live. The sequence of work
-to reach a first appliance release is in [the implementation plan](docs/plan/implementation-plan.md).
-Facts about Frigate are dated
+artifact yet. CI phase one is running under
+[ADR 0032](docs/adr/0032-continuous-integration-and-build-pipeline.md):
+[`.github/workflows/check.yml`](.github/workflows/check.yml) runs `make check` on every push to
+`main` and on every pull request, then builds an unsigned POC payload test artifact. The release
+channel is decided in [ADR 0031](docs/adr/0031-update-channel-on-github-releases.md) and is not live.
+The sequence of work to reach a first appliance release is in
+[the implementation plan](docs/plan/implementation-plan.md). Facts about Frigate are dated
 2026-11-14 and sourced in [the Frigate assessment](docs/research/frigate-assessment.md).
 
 ## Shape of the appliance
@@ -117,7 +121,9 @@ Frigate, go2rtc, detection models, and ffmpeg, keep their own licenses; see
 
 ## Local checks
 
-A clean clone runs the offline checks with `make check`. This covers Markdown links,
+A clean clone runs the offline checks with `make check`. The same target runs in CI on every push to
+`main` and on every pull request, so a local pass and a CI pass mean the same thing. This covers
+Markdown links,
 `appliance.yaml` schema validation, Markdown style, the pinned Frigate fixture bundle, and the Go
 test suite. `make test` runs the Go tests offline and `make render` runs the golden render suite;
 both need the pinned Go toolchain and vendored modules described in

@@ -1288,7 +1288,17 @@ defects the UI no longer has.
 
 ### BIT-042 Release channel and CI pipeline
 **Status.** New from the 2026-11-22 channel and CI decisions. CI phase one is step 2 in the
-[release work order](#release-work-order-2026-11-22); phase two is step 4. No workflow exists yet.
+[release work order](#release-work-order-2026-11-22) and landed on 2026-11-22; phase two is step 4
+and remains open. The workflow is [`.github/workflows/check.yml`](../../.github/workflows/check.yml):
+`make check` on push to `main` and on every pull request, `contents: read`, no secrets, no publish,
+and GitHub-owned actions pinned by full commit SHA. It builds the current POC payload as
+`bittern-poc-unsigned-test-build` with five-day retention, because the bundle packer and
+`make beta-payload` do not exist yet; the app bundle artifact arrives with the packer. Green runs
+are [the branch run](https://github.com/jagoda/bittern/actions/runs/45035805336) and
+[the main run](https://github.com/jagoda/bittern/actions/runs/45035992353). The first run exposed a
+chrony check defect that only appears on a host with an AppArmor-confined chronyd; it is fixed
+without skipping the check. Details, pins, and limits are in
+[the CI phase one note](../notes/2026-11-22-ci-phase-one.md).
 **Goal.** Put the release channel on GitHub Releases and introduce CI without moving release signing
 into CI, so checks run on every change, the app bundle can be built, signed with a test key, and
 published as a draft release from a tag, and the beta preparation kit can be built and published
