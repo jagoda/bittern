@@ -195,6 +195,10 @@ Exit codes for `sign` and `verify`:
 | 5 | non-canonical or invalid manifest |
 | 6 | manifest rejected by the kind or generation rule |
 
+The CI test anchor for the `beta` environment is in
+[packaging/trust](../packaging/trust/README.md). It is a bench test anchor and never the release
+anchor; ADR 0032 records the CI decision.
+
 ### Release signing recipe
 
 `init` runs once on the signing machine. `manifest` runs on the build host. Only the canonical

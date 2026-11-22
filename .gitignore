@@ -44,6 +44,10 @@ secrets.yaml
 *.key
 *.pub
 
+# Repository trust anchors are public by design and tracked. Only the generated
+# key material above stays ignored.
+!/packaging/trust/*.pub
+
 # Local agent state. The tracked skills under .pi/skills are project
 # documentation; everything else in .pi is local tool and session state.
 /.pi/*
