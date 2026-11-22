@@ -469,7 +469,9 @@ sudo cat /etc/docker/daemon.json
 systemctl is-enabled docker.service nftables.service dnsmasq.service chrony.service \
   bittern-first-boot.service bittern-image-prewarm.service bitternd.service \
   systemd-networkd.service systemd-resolved.service
-stat -c '%a %U:%G %n' /etc/bittern /var/lib/bittern
+stat -c '%a %U:%G %n' /etc/bittern /var/lib/bittern /usr/lib/bittern /usr/libexec/bittern
+sudo cat /usr/lib/bittern/platform.json
+test -x /usr/libexec/bittern/bitternd && echo launcher-present
 systemctl is-active docker systemd-resolved
 readlink /etc/resolv.conf
 test -s /etc/resolv.conf && echo resolv-conf-present
@@ -478,9 +480,12 @@ test ! -e /sys/class/net/docker0 && echo no-docker0
 
 Expected: `/etc/docker/daemon.json` is exactly
 `{"iptables": false, "ip-forward": false, "bridge": "none"}`, every unit in the list prints
-`enabled`, `/etc/bittern` and `/var/lib/bittern` are `750 root:root`, Docker and systemd-resolved
-are `active`, `readlink` prints `../run/systemd/resolve/stub-resolv.conf`, and `resolv-conf-present`
-and `no-docker0` print. The installer enables all installed units in one verified step before first
+`enabled`, `/etc/bittern` and `/var/lib/bittern` are `750 root:root`, `/usr/lib/bittern` and
+`/usr/libexec/bittern` are root-owned, Docker and systemd-resolved are `active`, `readlink` prints
+`../run/systemd/resolve/stub-resolv.conf`, and `resolv-conf-present`, `launcher-present`, and
+`no-docker0` print. `/usr/lib/bittern/platform.json` is mode 0644, root-owned, and contains
+`{"schema_version":1,"generation":1}`. Generation 1 is provisional until the image ADR fixes the
+image layout; a missing or non-root-owned file still fails the update preflight closed. The installer enables all installed units in one verified step before first
 boot and fails clearly with the reboot consequence if one cannot be enabled. The rendered
 `bittern-frigate.service` does not exist yet; apply enables it on the first camera apply. The
 installer keeps the nftables no-`[Install]` drop-in fallback and says so in its output.

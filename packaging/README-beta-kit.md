@@ -7,9 +7,10 @@ Version `@BUNDLE_VERSION@`, generation `@GENERATION@`, source commit
 `@PAYLOAD_COMMIT@`.
 
 This archive prepares a disposable Debian 13 amd64 test machine for the beta channel. It installs
-the Bittern CLI, the status and UI daemon, the units, and the CI test trust anchor. It is a bootstrap
-for a bench device, not a product image and not a signed application bundle. A signed bundle is
-installed later through the update path.
+the Bittern CLI, the status and UI daemon, the fixed agent launcher, the units, the provisional
+platform metadata, and the CI test trust anchor. It is a bootstrap for a bench device, not a product
+image and not a signed application bundle. A signed bundle is installed later through the update
+path.
 
 ## Contents
 
@@ -17,6 +18,8 @@ installed later through the update path.
 | --- | --- |
 | `bittern` | Operator CLI: `detect`, `render`, `first-boot`, `setup-token --qr`, `image`, `update` |
 | `bitternd` | Status API and TLS wizard daemon |
+| `bittern-launch` | Fixed agent launcher installed at `/usr/libexec/bittern/bitternd`; execs the active bundle or the `/usr/bin/bitternd` baseline |
+| `platform.json` | Provisional image platform metadata installed at `/usr/lib/bittern/platform.json` with generation 1 |
 | `bittern-first-boot.service` | Oneshot provisioning unit |
 | `bittern-image-prewarm.service` | Background prewarm of the pinned recording-software image |
 | `bittern-update.service` | Fixed app bundle update worker; reads the 0600 request record and exits |
@@ -80,6 +83,17 @@ are in place: `docker.service`, `nftables.service`, `systemd-networkd.service`,
 stops with a clear error naming the reboot consequence. It does not rely on the Debian package
 postinst for dnsmasq or chrony. The rendered `bittern-frigate.service` does not exist until the
 first camera apply, so apply owns its enablement and verifies it before starting the stack.
+
+The installer also installs the fixed launcher at `/usr/libexec/bittern/bitternd`, mode 0755 and
+root-owned. `bitternd.service` starts that launcher, which reads
+`/var/lib/bittern/app/current`, execs `usr/bin/bitternd` from the active bundle, and falls back to
+the installed `/usr/bin/bitternd` when no bundle is active or the pointer cannot be read. A present
+but malformed pointer, a bundle binary that is not a regular root-owned executable, or a path that
+escapes the bundle tree is refused instead of executed.
+
+`platform.json` is installed as `/usr/lib/bittern/platform.json`, mode 0644 and root-owned, with
+`schema_version` 1 and `generation` 1. Generation 1 is provisional until the image ADR fixes the
+image layout; the update provider still fails closed when the file is missing or not root-owned.
 
 The prewarm unit runs after Docker and the network are up and after first boot has written the
 network configuration. It downloads the pinned image from the embedded defaults in the background,

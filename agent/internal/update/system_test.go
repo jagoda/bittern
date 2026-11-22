@@ -16,7 +16,7 @@ type fakeUnitRunner struct {
 	probe      apply.Probe
 	probeState apply.ProbeResult
 	stopErr    error
-	startErr   error
+	restartErr error
 }
 
 func (f *fakeUnitRunner) StopUnit(unit string) error {
@@ -24,9 +24,9 @@ func (f *fakeUnitRunner) StopUnit(unit string) error {
 	return f.stopErr
 }
 
-func (f *fakeUnitRunner) StartUnit(unit string) error {
-	f.calls = append(f.calls, "start:"+unit)
-	return f.startErr
+func (f *fakeUnitRunner) RestartUnit(unit string) error {
+	f.calls = append(f.calls, "restart:"+unit)
+	return f.restartErr
 }
 
 func (f *fakeUnitRunner) ProbeHealth(probe apply.Probe) apply.ProbeResult {
@@ -56,7 +56,7 @@ func TestExecSystemDelegatesToTheApplyUnitAndProbeKinds(t *testing.T) {
 	if err := system.StopUnit("bittern-frigate.service"); err != nil {
 		t.Fatal(err)
 	}
-	if err := system.StartUnit("bitternd.service"); err != nil {
+	if err := system.RestartUnit("bitternd.service"); err != nil {
 		t.Fatal(err)
 	}
 	result := system.ProbeHealth(apply.FrigateHealthProbe())
@@ -66,7 +66,7 @@ func TestExecSystemDelegatesToTheApplyUnitAndProbeKinds(t *testing.T) {
 	if runner.probe.Kind != apply.ProbeHTTP || runner.probe.Target != apply.FrigateHealthURL {
 		t.Fatalf("probe = %+v, want the existing Frigate health probe", runner.probe)
 	}
-	want := []string{"stop:bittern-frigate.service", "start:bitternd.service", "probe:frigate-api"}
+	want := []string{"stop:bittern-frigate.service", "restart:bitternd.service", "probe:frigate-api"}
 	if strings.Join(runner.calls, ",") != strings.Join(want, ",") {
 		t.Fatalf("calls = %v, want %v", runner.calls, want)
 	}

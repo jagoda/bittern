@@ -159,6 +159,8 @@ verify_payload() {
     for _file in \
         bittern \
         bitternd \
+        bittern-launch \
+        platform.json \
         bittern-first-boot.service \
         bittern-image-prewarm.service \
         bittern-update.service \
@@ -930,6 +932,20 @@ install_binary() {
 install_files() {
     install_binary "$SCRIPT_DIR/bittern" /usr/bin/bittern
     install_binary "$SCRIPT_DIR/bitternd" /usr/bin/bitternd
+
+    # The fixed launcher is the only ExecStart of bitternd.service. It lives
+    # outside the state root and execs the active bundle or the baseline above.
+    run install -d -o root -g root -m 0755 /usr/libexec/bittern ||
+        die "could not create /usr/libexec/bittern"
+    install_binary "$SCRIPT_DIR/bittern-launch" /usr/libexec/bittern/bitternd
+
+    # The platform provider reads this root-owned file and fails closed without
+    # it. Generation 1 is provisional until the image ADR fixes the layout.
+    run install -d -o root -g root -m 0755 /usr/lib/bittern ||
+        die "could not create /usr/lib/bittern"
+    run install -o root -g root -m 0644 \
+        "$SCRIPT_DIR/platform.json" /usr/lib/bittern/platform.json ||
+        die "could not install /usr/lib/bittern/platform.json"
 
     run install -o root -g root -m 0644 \
         "$SCRIPT_DIR/bittern-first-boot.service" \

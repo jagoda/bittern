@@ -203,7 +203,7 @@ resume finishes the remaining record and prune steps.
 | 12 | `activate` | `next_step=activate`, `live_touched=true` | Write the candidate generation to `/var/lib/bittern/app/current` through a temporary file, fsync, rename, and fsync `/var/lib/bittern/app`. | Yes. Writing the same generation again is idempotent. If the pointer already equals the candidate, verify the bundle and continue. | Repeats the pointer write. The candidate bundle is complete and verified before this entry. |
 | 13 | `migrate` | `next_step=migrate` | Run the appliance schema migration as a pure transform and write the pending result to `/var/lib/bittern/update/<operation-id>/appliance.yaml`. If the schema is already current, write nothing and record `no-op`. Never write `/etc/bittern/appliance.yaml`. | Yes. The transform is deterministic and the pending file is replaced. | Repeats the transform. A partial pending file is ignored and replaced. |
 | 14 | `ensure-image` | `next_step=ensure-image` | Ensure the pinned Frigate image digest is present through `ImageEnsurer`, using the existing 60 minute image budget. If Frigate is not configured, the step is absent from the plan. | Yes. An image that is already present is a no-op. | Repeats the presence check and pull. |
-| 15 | `start-agent` | `next_step=start-agent` | Start `bitternd.service` from the fixed launcher, which reads `app/current`, and wait up to 60 seconds for the unit to become active. | Yes. Starting an active unit is a no-op. | Repeats the start and the bounded wait. |
+| 15 | `start-agent` | `next_step=start-agent` | Restart `bitternd.service` from the fixed launcher, which reads `app/current`, and wait up to 60 seconds for the unit to become active. A restart is required because the unit is already active and a start would leave the old process running. | Yes. Restarting the active unit is idempotent for the same pointer. | Repeats the restart and the bounded wait. |
 | 16 | `start-frigate` | `next_step=start-frigate` | Start `bittern-frigate.service`. If Frigate is not configured, the step is absent. | Yes. Starting an active unit is a no-op. | Repeats the start. |
 | 17 | `health` | `next_step=health` | Run the health gate in section 8 with a 5 minute bound. A failed probe is a transaction failure, not a rejection. | Yes. The probes are read-only. | Re-runs the gate. A transient failure after a pass that was not yet recorded causes a rollback, which is conservative. |
 | 18 | `commit` | `next_step=commit` | Write `state.json` with `committed_generation=candidate`, the manifest digest, the base fingerprint, and the platform generation. This write is the commit point. | If `state.json` already says the candidate is committed, the step is a no-op. | If `state.json` says committed, resume proceeds to `record`; it does not roll back. If not, it writes the same state. |
@@ -231,7 +231,7 @@ rollback entry is written before the first rollback action. A failure of the rol
 | R4 | `rollback-pointer` | `next_step=rollback-pointer` | Write `previous_generation` to `app/current`, or `0` when there was no previous bundle. | Yes. Writing the same value again is idempotent. | Repeats the pointer write. |
 | R5 | `rollback-restore-config` | `next_step=rollback-restore-config` | Restore the backed-up Frigate config under `/var/lib/bittern/frigate/config.yml` and remove the pending migrated config. The live `/etc/bittern/appliance.yaml` was never changed by this transaction, so it needs no restore. | Yes. The same bytes are written atomically. | Repeats the restore. |
 | R6 | `rollback-restore-data` | `next_step=rollback-restore-data` | Restore the Frigate database snapshot through `DataSnapshot.Restore`, verifying its digest first. If no snapshot exists, record `no-data`. | Yes. Restore truncates and rewrites the same snapshot. | Repeats the restore. |
-| R7 | `rollback-start-agent` | `next_step=rollback-start-agent` | Start the previous `bitternd` from the restored pointer. | Yes. Starting an active unit is a no-op. | Repeats the start. |
+| R7 | `rollback-start-agent` | `next_step=rollback-start-agent` | Restart the previous `bitternd` from the restored pointer. A restart is required because the failed candidate process is still running. | Yes. Restarting the active unit is idempotent for the same pointer. | Repeats the restart. |
 | R8 | `rollback-start-frigate` | `next_step=rollback-start-frigate` | Start the previous Frigate unit. | Yes. Starting an active unit is a no-op. | Repeats the start. |
 | R9 | `rollback-health` | `next_step=rollback-health` | Run the same health gate against the previous bundle. If there was no previous bundle, verify the pointer is `0` and skip the unit probes. | Yes. The probes are read-only. | Re-runs the gate. |
 | R10 | `rollback-record` | `next_step=rollback-record` | Write the `rolled-back` history record with the failed step, the failure, and the restored generation. | Yes. The operation id is fixed. | Re-writes or validates the same record. |
@@ -716,6 +716,7 @@ the verification order, the rollback order, or the `/var/lib/bittern` write boun
 | `ImageEnsurer` is a test fake | `DockerImageEnsurer` uses the existing `frigateimage.Ensure` path with the pinned reference and digest. |
 | `DataSnapshot` is a test fake | `SQLiteSnapshot` invokes the `sqlite3` command line `.backup` and `.restore` commands. No Go SQLite driver is added. |
 | The status `updates` section is a placeholder | `updates.current_generation` and `updates.base` read `/var/lib/bittern/update/state.json`. |
+| The running agent stays on the installed binary after activation | `bitternd.service` starts the fixed launcher `/usr/libexec/bittern/bitternd`. It execs the active bundle or falls back to `/usr/bin/bitternd`, and the start step restarts the unit on install and rollback. |
 | Apply and update could overlap | `internal/oplock` is the shared cross-process lock. Apply takes it before its first write and update takes it for the whole transaction. Read-only status does not take it. |
 
 ### The request record
@@ -769,7 +770,7 @@ kit, enabled for the next boot, and started explicitly by the agent.
 | `ExecStart` | `/usr/bin/bittern update helper`. The subcommand accepts no arguments. |
 | Environment | No `Environment=`, no `EnvironmentFile=`, no `%i`, `%n`, `%j`, no variable expansion, no user-supplied property. The fixed paths are compiled into the helper. |
 | `ConditionPathExists` | `/var/lib/bittern/update/request.json`. A boot with no request skips the unit. A boot with a request resumes the interrupted transaction. |
-| Ordering | `After=local-fs.target bittern-first-boot.service bitternd.service`. A resumed transaction owns the agent restart and does not race first-boot provisioning. It must not be `Before=bitternd.service`: the transaction starts the agent itself, and an ordering dependency in the other direction would deadlock that start. |
+| Ordering | `After=local-fs.target bittern-first-boot.service bitternd.service`. A resumed transaction owns the agent restart and does not race first-boot provisioning. It must not be `Before=bitternd.service`: the transaction restarts the agent itself, and an ordering dependency in the other direction would deadlock that start. |
 | User | `root` and group `root`. The transaction writes the state root and restarts units. |
 | `UMask` | `0077`. Every metadata file still sets its documented mode explicitly. |
 | Timeout | `TimeoutStartSec=2h`, above the 60 minute image budget, the 5 minute health gate, and the stop bounds. A timeout is a process cut; the journal resumes it. |
@@ -834,6 +835,12 @@ The provider returns `Platform{Generation: <value>, Source: "image-metadata"}`. 
 fixed by the provider, not taken from the file. The engine freezes it in the journal and state, and
 the compatibility check uses only that value. The provider never reads the OS generation from
 `appliance.yaml`, an environment variable, or a unit property.
+
+The installer writes the provisional file with `schema_version` 1 and `generation` 1 during beta
+preparation, mode 0644 and owner root. That makes a kit-prepared bench box pass preflight. Generation
+1 is provisional until the image ADR fixes the layout; the image build still owns the final writer.
+The fail-closed rules are unchanged: a missing, non-root-owned, writable, symlinked, or malformed
+file still refuses the update.
 
 The path is under `/usr/lib/bittern`, next to the image trust store in
 [ADR 0029](../adr/0029-release-signing-and-key-custody.md), so it is image-owned and read-only. It
@@ -959,7 +966,8 @@ journal, generations, rollback, and health gate are unchanged.
 - The UI update card, progress page, result page, and history view.
 - The QEMU update scenario, database restore evidence, camera evidence, and real storage power loss.
 - The BIT-042 phase two bundle packer and the publication workflow.
-- The OS image, the A/B mechanism, the platform metadata writer, and the release key ceremony.
+- The OS image, the A/B mechanism, the final image platform metadata writer, and the release key
+  ceremony. The beta installer writes the provisional generation 1 file only.
 - Any write to `/etc` by the update transaction. The agent still owns the live config write and the
   pending migration it may persist after commit.
 

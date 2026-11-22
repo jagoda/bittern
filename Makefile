@@ -165,6 +165,9 @@ beta-payload: assets bittern-release
 		$(GO) build -trimpath -buildvcs=false \
 		-ldflags='-s -w -X main.version=$(BUNDLE_VERSION)-$(PAYLOAD_COMMIT_SHORT)' \
 		-o "$$payload_out/bundle/usr/bin/bitternd" ./cmd/bitternd); \
+	(cd $(AGENT_DIR) && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOPROXY=off GOFLAGS=-mod=vendor \
+		$(GO) build -trimpath -buildvcs=false -ldflags='-s -w' \
+		-o "$$kit/bittern-launch" ./cmd/bittern-launch); \
 	agent/bin/bittern-release pack --tree "$$bundle" --out "$$payload_out" \
 		--version "$(BUNDLE_VERSION)" --generation "$(GENERATION)" --channel beta \
 		--source-commit "$(PAYLOAD_COMMIT)" --key-id "$(KEY_ID)" \
@@ -173,6 +176,7 @@ beta-payload: assets bittern-release
 		--created "$(PAYLOAD_CREATED)" --epoch "$(PAYLOAD_EPOCH)"; \
 	install -m 0755 "$$bundle/usr/bin/bittern" "$$kit/bittern"; \
 	install -m 0755 "$$bundle/usr/bin/bitternd" "$$kit/bitternd"; \
+	install -m 0644 packaging/platform.json "$$kit/platform.json"; \
 	install -m 0644 agent/packaging/bittern-first-boot.service "$$kit/bittern-first-boot.service"; \
 	install -m 0644 agent/packaging/bittern-image-prewarm.service "$$kit/bittern-image-prewarm.service"; \
 	install -m 0644 agent/packaging/bittern-update.service "$$kit/bittern-update.service"; \

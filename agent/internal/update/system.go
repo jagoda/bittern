@@ -10,7 +10,7 @@ import (
 // The production value is *apply.ExecSystem; tests supply a fake.
 type UnitRunner interface {
 	StopUnit(unit string) error
-	StartUnit(unit string) error
+	RestartUnit(unit string) error
 	ProbeHealth(probe apply.Probe) apply.ProbeResult
 	UnitActive(unit string) (bool, error)
 }
@@ -33,8 +33,10 @@ func (s *ExecSystem) runner() UnitRunner {
 // StopUnit stops a unit through apply's systemd path.
 func (s *ExecSystem) StopUnit(unit string) error { return s.runner().StopUnit(unit) }
 
-// StartUnit starts a unit through apply's systemd path.
-func (s *ExecSystem) StartUnit(unit string) error { return s.runner().StartUnit(unit) }
+// RestartUnit restarts a unit through apply's systemd path. The update engine
+// restarts the agent after activation so the fixed launcher execs the new
+// bundle, and restarts the previous bundle after a rollback.
+func (s *ExecSystem) RestartUnit(unit string) error { return s.runner().RestartUnit(unit) }
 
 // ProbeHealth delegates to apply's probe implementation. The update engine
 // passes apply.ProbeUnit for units and apply.FrigateHealthProbe() for Frigate.

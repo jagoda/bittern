@@ -3,6 +3,7 @@ package update
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -99,4 +100,57 @@ func TestPlatformProviderRejectsUnknownSchemaAndNegativeGeneration(t *testing.T)
 			requireRule(t, err, testCase.rule)
 		})
 	}
+}
+
+func TestPlatformProviderReadsThePreparationKitMetadata(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "packaging", "platform.json")
+	provider := &FilePlatformProvider{
+		Path: path,
+		UID:  func() int { return os.Geteuid() },
+	}
+	platform, err := provider.Platform()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if platform.Generation != 1 || platform.Source != "image-metadata" {
+		t.Fatalf("platform = %+v, want generation 1 from image-metadata", platform)
+	}
+}
+
+func TestKitPreparedPlatformFixturePassesPreflightAndMissingMetadataFails(t *testing.T) {
+	env := newTestEnv(t)
+	fixture := filepath.Join(env.root, "usr", "lib", "bittern", "platform.json")
+	if err := os.MkdirAll(filepath.Dir(fixture), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "packaging", "platform.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fixture, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(fixture, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env.options.Platform = &FilePlatformProvider{
+		Path: fixture,
+		UID:  func() int { return os.Geteuid() },
+	}
+	env.mustInstall(t, env.writeValidBundle(t, 1))
+
+	if err := os.Remove(fixture); err != nil {
+		t.Fatal(err)
+	}
+	result, err := env.install(t, env.writeValidBundle(t, 2))
+	if err == nil {
+		t.Fatalf("a kit fixture without platform metadata was accepted: %+v", result)
+	}
+	if result.Status != ResultRejected {
+		t.Fatalf("status = %s, want rejected", result.Status)
+	}
+	if !strings.Contains(result.Failure, "platform.missing") {
+		t.Fatalf("failure = %q, want platform.missing", result.Failure)
+	}
+	assertPointerVerified(t, env, 1)
 }

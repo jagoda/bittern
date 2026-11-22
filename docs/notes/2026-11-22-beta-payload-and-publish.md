@@ -28,8 +28,8 @@
 | Kit target | `make beta-payload` supersedes `make poc-payload`. It builds the two static binaries, packs the application payload and manifest, builds `bittern-beta-kit.tar.gz`, and writes the published `SHA256SUMS` for the kit. Every caller, runbook, and help line now uses `make beta-payload`. |
 | Kit contents | The kit carries the packaging install, cleanup, and storage scripts, the four units including `bittern-update.service`, all templates, `trust/release-keys/<key_id>.pub` for `/etc/bittern/trust/release-keys`, a README, a VERSION stamp naming the generation and source commit, and an internal `SHA256SUMS`. It is unsigned, digest only, and is not an update payload. |
 | Installer | `packaging/install.sh` installs the CI test anchor when `trust/release-keys` is present. It never installs a release anchor. The README and runbooks verify the kit with `sha256sum -c SHA256SUMS` before extracting or running it. |
-| Publish workflow | `.github/workflows/publish.yml` runs on `app-beta-*`, validates the exact tag rule first, calls the phase one check workflow as a reusable check, downloads the unsigned assets, checks the tag generation and source commit against the manifest, signs with the `beta` environment secret, verifies the signature with the CI test anchor, creates a draft with exactly the five release assets, and publishes the draft. |
-| Permissions and pins | The workflow has `contents: read` at workflow level and `contents: write` only on the publish job. Every action is GitHub-owned and pinned by full commit SHA. |
+| Publish workflow | `.github/workflows/publish.yml` runs on `app-beta-*`, validates the exact tag rule first, calls the phase one check workflow as a reusable check, and then uses two release jobs. The draft job has `contents: write` and no environment: it downloads the unsigned assets, checks the tag generation and source commit against the manifest, signs with the CI test key, verifies the signature, creates a draft with exactly the five release assets, and records their digests. The publish job requires the `beta` environment, takes no build action, re-verifies the draft's five asset names and recorded digests, and publishes the existing draft. |
+| Permissions and pins | The workflow has `contents: read` at workflow level. The draft and publish jobs each have `contents: write`; only the publish job has the `beta` environment. Every action is GitHub-owned and pinned by full commit SHA. |
 | Checks | `check.yml` is now reusable, and its build job produces the unsigned beta payload, manifest, kit, and checksums as `bittern-beta-unsigned-test-build`. |
 
 The five release assets are `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`,
@@ -42,16 +42,19 @@ the published `SHA256SUMS` covers the kit tarball.
 [`defaults/release.yaml`](../../defaults/release.yaml) records the same rule with `schema_min` 1,
 `schema_max` 2, and `updater_min` 1.
 
-The platform provider is provisional. It reads `/usr/lib/bittern/platform.json`, and no image build
-writes that file yet. The rule defines generation 1 as the Debian 13 amd64 base that the beta kit and
-the bench runs use. A beta bundle therefore claims exactly one OS generation, not a range from 0 to
-the maximum. That is deliberate:
+The platform provider is provisional. It reads `/usr/lib/bittern/platform.json`, and the beta kit
+now installs that file with `schema_version` 1 and `generation` 1, mode 0644 and root-owned. No image
+build writes it yet, so generation 1 is a kit and bench value until the image ADR fixes the image
+layout. The rule defines generation 1 as the Debian 13 amd64 base that the beta kit and the bench
+runs use. A beta bundle therefore claims exactly one OS generation, not a range from 0 to the
+maximum. That is deliberate:
 
 - A range that accepts every generation would silently claim compatibility with an OS that was
   never tested. The verifier would accept the bundle on an unknown platform and the claim would be
   false.
 - A missing metadata file fails closed at preflight with `platform.missing`, so a device that cannot
-  prove its generation does not update.
+  prove its generation does not update. A file that is not root-owned, is a symlink, or is group- or
+  other-writable fails closed for the same reason.
 - When the image writes generation 1 metadata under ADR 0030 and a later generation is tested, the
   range widens in a reviewed change with dated evidence. Widening it before that is not a default.
 - The manifest integer is authoritative. The tag is only the publish selector and the workflow fails
@@ -60,21 +63,27 @@ the maximum. That is deliberate:
 This is a design delta, not a permanent compatibility matrix. [OQ-35](../open-questions.md) still
 owns the supported delivery model and base.
 
-One consequence is explicit: the kit does not write `/usr/lib/bittern/platform.json`. The file is
-image-owned, and no decision assigns it to the preparation kit. A device prepared by the kit
-therefore fails closed at preflight with `platform.missing` until the image or the QEMU fixture
-writes generation 1. The compatibility claim is honest, but the kit alone does not yet make the
-update path live end to end.
+The installer writes the metadata file during install, so a kit-prepared bench box passes preflight
+instead of failing every bundle with `platform.missing`. Generation 1 remains provisional: the image
+ADR owns the final layout, path, and generation scheme, and this provisional value changes in one
+constant, one installed file, and one test when that decision lands.
 
-## Workflow behavior and one honest difference
+## Workflow behavior
 
-The task requires `contents: write` only on the publish job, and the `beta` environment gates that
-job. Draft creation, asset upload, and the draft-to-published flip therefore all happen after the
-approval. An unapproved, rejected, or cancelled run leaves only the tag and no draft. ADR 0032 point
-7 describes an unapproved run that leaves a draft. The permission model and that consequence cannot
-both hold with a single write job and a job-level environment. This change follows the permission
-model and records the narrower consequence. It publishes nothing without approval. Restoring a draft
-before approval would need a separate write job or a new ADR decision.
+The draft job has `contents: write` and no environment. It builds, signs, creates the draft, and
+uploads the five assets before any approval. An unapproved, rejected, or cancelled run therefore
+leaves a draft that a maintainer can inspect, which is the ADR 0032 point 7 behaviour. The publish
+job needs the `beta` environment, takes no build action, and publishes only after it has checked
+the draft's five asset names and the digests recorded by the draft job. It downloads the draft
+assets and runs `sha256sum -c` against that record, so a replaced or incomplete asset cannot be
+published under the approved run.
+
+The CI test key is held only by the draft job. Because a job without an environment cannot read an
+environment secret, `BITTERN_CI_SIGNING_KEY` must be a repository secret for this workflow. The
+`beta` environment still gates the visible publication, and the key is decoded to a 0600 file in
+the runner's temporary directory, removed by a trap, and removed again by an `always()` step. The
+ADR 0032 follow-up records this scope and the two-job split. The key is still the CI test key: it is
+never the release key, and a field device never trusts it.
 
 The environment's tag policy is the documented `app-beta-*` glob, which is broader than the exact
 six-hex rule. The workflow's first job applies the exact rule with the Go parser before any check,
@@ -88,10 +97,10 @@ a CI run uses its own `created` value and therefore its own manifest digest.
 
 | Asset | Size | SHA-256 |
 | --- | --- | --- |
-| `bittern-app.tar.gz` | 9883537 | `310bb6dce89c3b9231578fff1ff9a5d431ba280d131e421616a2ad41865e46a4` |
-| `manifest.json` | 834 | `d9177de719fad1946e25df31acc6fdfbb6d1f51181f4402770a1793b1989710b` |
-| `bittern-beta-kit.tar.gz` | 9769126 | `a076ee7044b4c2499d78bce2f558e611d484b3589a964b06b576d4c4974dd432` |
-| `SHA256SUMS` | 90 | `133dd0e9421035416d6c1147231cb61833fa18a7f45f4964abfa8777bbadf7ea` |
+| `bittern-app.tar.gz` | 9882692 | `c023ae4ad9082cfc4d7e7955216e13df15edf3d3f670c49d06c4433d2ab7c8b1` |
+| `manifest.json` | 834 | `3e3cbefa2a0d2e748fc11b2017e801d3537655df2f64989d7fee3807e2a74b61` |
+| `bittern-beta-kit.tar.gz` | 10522077 | `a849dde678e21d1d4e48b80208da016a24d9330466f945037885f12b579b8e51` |
+| `SHA256SUMS` | 90 | `fc7f7da2b1985dfec480e85c873f36f5e10a9877c85cc3ebff1f07549e42212a` |
 
 The manifest lists `usr/bin/bittern` and `usr/bin/bitternd`, mode 0755, with their per-file digests.
 The kit verifies with `sha256sum -c SHA256SUMS`, and its internal checksums verify every member. The
@@ -114,6 +123,9 @@ draft-to-published flip did not run.
 | Tag parser | `TestParseBetaTagReadsTheGenerationAsHexadecimal`, `TestParseBetaTagRejectsMalformedTags` |
 | Tag command | `TestTagCommandPrintsTheGeneration`, `TestTagCommandRejectsAMalformedTag` |
 | Packer | `TestPackBuildsDeterministicPayloadAndManifest`, `TestPackRejectsAnUnsafeTree`, `TestPackDryRunWritesNothing`, `TestPackRemovesAStaleSignature` |
+| Launcher | `TestLauncherPicksTheActiveBundle`, `TestLauncherFallsBackToTheBaselineWithoutAPointer`, `TestLauncherFallsBackToTheBaselineForGenerationZero`, `TestLauncherFallsBackToTheBaselineWhenThePointerIsUnreadable`, `TestLauncherRejectsARelativePath`, `TestLauncherRejectsAnEscapingPointerPath`, `TestLauncherRejectsAnEscapingBundlePath`, `TestLauncherRejectsAMalformedPointer`, `TestLauncherRejectsASymlinkedBundleBinary`, `TestLauncherRejectsABundleBinaryWithTheWrongOwner`, `TestLauncherRejectsAMissingBundleBinary`, `TestAgentUnitStartsTheFixedLauncher`, `TestPreparationKitInstallsTheLauncherAndPlatformMetadata` |
+| Update restart | `TestUpdateRestartRunsTheNewBundleVersion`, `TestUpdateRollbackRestartsThePreviousBundleVersion` |
+| Platform metadata | `TestPlatformProviderReadsThePreparationKitMetadata`, `TestKitPreparedPlatformFixturePassesPreflightAndMissingMetadataFails` |
 
 The packer test proves determinism, that the file list matches the archive exactly with no directory
 or special entries, that `payload.sha256` and `payload.size` match the archive bytes, that the packer
@@ -135,11 +147,11 @@ generation zero, the stable namespace, and a trailing separator.
 - The QEMU update scenario from BIT-009 slice three is still the release gate. A valid update, an
   invalid signature, a digest mismatch, a downgrade, and a rollback have not been exercised against
   this payload.
-- The update transaction installs a bundle under `/var/lib/bittern/app/bundles/<generation>/files`,
-  but the fixed launcher that starts the agent from `app/current` is not part of this change. The
-  kit installs the binaries in `/usr/bin`; an update would verify, promote, and commit without the
-  running agent switching to the bundle tree. That gap is part of the unproven update path, not a
-  claim that the packer makes the update live.
+- The update transaction installs a bundle under `/var/lib/bittern/app/bundles/<generation>/files`
+  and `bitternd.service` now starts the fixed launcher at `/usr/libexec/bittern/bitternd`. The
+  launcher selection and refusal cases and the engine's restart step are covered by unit tests. The
+  live systemd restart into a new bundle, and a real rollback restart, still need the QEMU update
+  scenario in BIT-009 slice three. No real systemd run is part of this change.
 - The beta kit was not installed on hardware. The installer trust-anchor step and the unit
   enablement are covered by existing checks and script inspection, not by a fresh Debian run.
 - The production release signature remains offline and airgapped under ADR 0029. ADR 0029 is still

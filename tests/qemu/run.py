@@ -1765,7 +1765,7 @@ class WizardClient:
         return location, body
 
 
-def build_firstboot_binaries() -> tuple[Path, Path]:
+def build_firstboot_binaries() -> tuple[Path, Path, Path]:
     if shutil.which("go") is None:
         raise HarnessError("go is not installed; the firstboot command builds the host binaries")
     sync = run_command(["sh", str(ROOT / "agent" / "scripts" / "sync-assets.sh")], timeout=120)
@@ -1774,7 +1774,7 @@ def build_firstboot_binaries() -> tuple[Path, Path]:
     environment = os.environ.copy()
     environment.update({"CGO_ENABLED": "0", "GOPROXY": "off", "GOFLAGS": "-mod=vendor"})
     outputs = []
-    for command in ("bittern", "bitternd"):
+    for command in ("bittern", "bitternd", "bittern-launch"):
         destination = BIN / command
         result = run_command(
             [
@@ -1793,10 +1793,10 @@ def build_firstboot_binaries() -> tuple[Path, Path]:
         if result.returncode != 0:
             raise HarnessError(f"go build {command} failed: {result.stdout}{result.stderr}".strip())
         outputs.append(destination)
-    return outputs[0], outputs[1]
+    return outputs[0], outputs[1], outputs[2]
 
 
-def build_installer_payload(bittern: Path, bitternd: Path) -> Path:
+def build_installer_payload(bittern: Path, bitternd: Path, launcher: Path) -> Path:
     parent = BUILD / "installer-payload"
     stage = parent / "bittern-poc-test"
     archive = parent / "bittern-poc-test.tar.gz"
@@ -1806,6 +1806,8 @@ def build_installer_payload(bittern: Path, bitternd: Path) -> Path:
     sources = {
         "bittern": bittern,
         "bitternd": bitternd,
+        "bittern-launch": launcher,
+        "platform.json": ROOT / "packaging" / "platform.json",
         "bittern-first-boot.service": ROOT / "agent" / "packaging" / "bittern-first-boot.service",
         "bittern-image-prewarm.service": ROOT
         / "agent"
@@ -1824,7 +1826,7 @@ def build_installer_payload(bittern: Path, bitternd: Path) -> Path:
         shutil.copy2(source, destination)
         destination.chmod(
             0o755
-            if name in ("bittern", "bitternd", "install.sh", "cleanup.sh", "storage-setup.sh")
+            if name in ("bittern", "bitternd", "bittern-launch", "install.sh", "cleanup.sh", "storage-setup.sh")
             else 0o644
         )
         checksums.append(f"{hashlib.sha256(destination.read_bytes()).hexdigest()}  {name}\n")
@@ -2007,8 +2009,8 @@ class FirstbootScenario:
         return f"cold-booted the guests and saved the baseline snapshot in {seconds:.1f}s"
 
     def stage_installer(self) -> None:
-        bittern, bitternd = build_firstboot_binaries()
-        payload = build_installer_payload(bittern, bitternd)
+        bittern, bitternd, launcher = build_firstboot_binaries()
+        payload = build_installer_payload(bittern, bitternd, launcher)
         remote = f"/tmp/{payload.name}"
         self.appliance.scp_to(payload, remote, timeout=180)
         self.appliance.ssh(

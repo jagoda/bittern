@@ -1,6 +1,7 @@
 # agent
 
-`agent/` contains `bitternd`, the privileged management daemon, and `bittern`, the operator CLI. The
+`agent/` contains `bitternd`, the privileged management daemon, `bittern`, the operator CLI, and
+`bittern-launch`, the fixed launcher that starts the agent from the active app bundle. The
 agent is the only component that writes system configuration. It validates `appliance.yaml` against
 the schema, renders templates, applies changes atomically with health checks and rollback, discovers
 and onboards cameras, produces support bundles, runs the application update transaction, and performs
@@ -62,6 +63,7 @@ daemon.
 | `internal/assets/` | Tracked embed declarations plus a generated, gitignored asset copy |
 | `cmd/bittern/` | Operator CLI: `detect`, `render`, `first-boot` and `setup-token` |
 | `cmd/bitternd/` | Status API and optional UI server, with its HTTP handlers |
+| `cmd/bittern-launch/` | Fixed agent launcher; execs the active bundle or the `/usr/bin/bitternd` baseline |
 | `cmd/bittern-release/` | Offline release signing and verification tool (not in the appliance) |
 | [packaging/](packaging/README.md) | Sample `bitternd.service` and first-boot units; nothing installs them yet |
 | `scripts/sync-assets.sh` | Copies root `templates/`, `defaults/`, the schema, and `ui/` assets into the module |
@@ -110,9 +112,10 @@ build.
 - Every module is vendored in `agent/vendor/` with `go mod vendor`. Builds and tests use
   `GOPROXY=off` and `GOFLAGS=-mod=vendor`; no network access is needed once the clone and toolchain
   are present.
-- `cmd/bittern`, `cmd/bitternd` and `cmd/bittern-release` are the main packages. `go build ./...`
-  compiles all three. `make bitternd` builds the daemon into `agent/bin/`, and `make bittern-release`
-  builds the signing tool there; the release flags above apply to each binary.
+- `cmd/bittern`, `cmd/bitternd`, `cmd/bittern-launch` and `cmd/bittern-release` are the main
+  packages. `go build ./...` compiles all four. `make bitternd` builds the daemon into `agent/bin/`,
+  and `make bittern-release` builds the signing tool there; `make beta-payload` builds the launcher
+  into the beta kit. The release flags above apply to each binary.
 
 ## Building and testing
 

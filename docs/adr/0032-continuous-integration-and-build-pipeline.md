@@ -147,7 +147,13 @@ trust class, and preparation steps.
 - Add the OS image build only after the image work and its asset hosting are decided. It is not part
   of the app bundle workflow.
 - Add a CI status or badge to the README only when phase one is actually running.
-- Record the phase two workflow permissions and the secret scope in the release runbook.
+- Record the phase two two-job permissions and the secret scope in the release runbook. The draft
+  job has `contents: write` and no environment, so an unapproved run leaves a draft; it holds the
+  CI test key, which must be a repository secret because a job without an environment cannot read an
+  environment secret. The publish job has the `beta` environment and `contents: write`, takes no
+  build action, and re-verifies the draft's five asset names and recorded digests before the visible
+  flip. This refines point 3's "only to the publish job" wording without widening write access to
+  the phase one checks.
 - Add tag parser tests from [ADR 0031](./0031-update-channel-on-github-releases.md): assert that
   `app-beta-0000ff` parses to 255 and `app-beta-000010` parses to 16, and reject uppercase hex,
   five-character, seven-character, decimal-looking overflow, and empty suffixes. A decimal parse

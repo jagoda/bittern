@@ -1,5 +1,7 @@
 # Status and TLS UI daemon unit. The beta preparation kit installs it; the product image has not
-# fixed the final paths yet.
+# fixed the final paths yet. ExecStart is the fixed launcher, which reads /var/lib/bittern/app/current
+# and execs the agent from the active bundle, falling back to the installed /usr/bin/bitternd baseline.
+# The launcher lives at /usr/libexec/bittern/bitternd, outside the state root.
 # The apply implementation must add only the writable paths and capabilities it
 # actually needs instead of weakening this baseline.
 [Unit]
@@ -11,7 +13,7 @@ ConditionPathExists=/etc/bittern
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/bitternd --ui \
+ExecStart=/usr/libexec/bittern/bitternd --ui \
     --listen 127.0.0.1:8080 \
     --ui-listen 0.0.0.0:443 \
     --config /etc/bittern/appliance.yaml \

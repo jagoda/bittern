@@ -202,10 +202,13 @@ type ImageEnsurer interface {
 	EnsureImage(reference, digest string, timeout time.Duration) error
 }
 
-// UnitSystem is every live side effect of the update transaction.
+// UnitSystem is every live side effect of the update transaction. The start
+// step restarts the agent unit instead of starting it, so an active unit picks
+// up the newly activated bundle through the fixed launcher. systemd restart
+// also starts an inactive unit.
 type UnitSystem interface {
 	StopUnit(unit string) error
-	StartUnit(unit string) error
+	RestartUnit(unit string) error
 	ProbeHealth(probe apply.Probe) apply.ProbeResult
 }
 

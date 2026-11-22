@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -60,18 +61,23 @@ type fakeSystem struct {
 	probeDelay   time.Duration
 	waitErr      map[string]error
 	waitDuration time.Duration
+	// restartVersion models the fixed launcher: a restart reads the activation
+	// pointer and the active bundle's manifest version.
+	restartVersion func(unit string) string
+	runningVersion map[string]string
 }
 
 func newFakeSystem() *fakeSystem {
 	return &fakeSystem{
-		active:     map[string]bool{},
-		failStart:  map[string]error{},
-		failStop:   map[string]error{},
-		probes:     map[string]apply.ProbeResult{},
-		probeQueue: map[string][]apply.ProbeResult{},
-		failProbe:  map[string]int{},
-		delayProbe: map[string]int{},
-		waitErr:    map[string]error{},
+		active:         map[string]bool{},
+		failStart:      map[string]error{},
+		failStop:       map[string]error{},
+		probes:         map[string]apply.ProbeResult{},
+		probeQueue:     map[string][]apply.ProbeResult{},
+		failProbe:      map[string]int{},
+		delayProbe:     map[string]int{},
+		waitErr:        map[string]error{},
+		runningVersion: map[string]string{},
 	}
 }
 
@@ -84,12 +90,15 @@ func (f *fakeSystem) StopUnit(unit string) error {
 	return nil
 }
 
-func (f *fakeSystem) StartUnit(unit string) error {
-	f.calls = append(f.calls, "start:"+unit)
+func (f *fakeSystem) RestartUnit(unit string) error {
+	f.calls = append(f.calls, "restart:"+unit)
 	if err := f.failStart[unit]; err != nil {
 		return err
 	}
 	f.active[unit] = true
+	if f.restartVersion != nil {
+		f.runningVersion[unit] = f.restartVersion(unit)
+	}
 	return nil
 }
 
@@ -487,6 +496,22 @@ func buildTarGz(t *testing.T, entries []tarEntry) []byte {
 		t.Fatal(err)
 	}
 	return buffer.Bytes()
+}
+
+func (e *testEnv) runningAgentVersion(t *testing.T) string {
+	t.Helper()
+	current, err := readCurrent(filepath.Join(e.stateRoot, "app", "current"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current == 0 {
+		return "baseline"
+	}
+	_, manifest, err := readManifestFromBundle(filepath.Join(e.stateRoot, "app", "bundles", strconv.FormatInt(current, 10)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manifest.Version
 }
 
 func (e *testEnv) install(t *testing.T, sourceDir string) (Result, error) {

@@ -25,7 +25,7 @@ func TestUpdateNoFrigateRollbackOmitsFrigateSteps(t *testing.T) {
 	}
 	for _, call := range env.system.calls {
 		switch call {
-		case "stop:bittern-frigate.service", "start:bittern-frigate.service", "health:frigate-api":
+		case "stop:bittern-frigate.service", "restart:bittern-frigate.service", "health:frigate-api":
 			t.Fatalf("no-Frigate transaction touched Frigate: %v", env.system.calls)
 		}
 	}

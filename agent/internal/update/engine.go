@@ -151,8 +151,8 @@ type unsupportedSystem struct{}
 func (unsupportedSystem) StopUnit(unit string) error {
 	return errorf("system.unavailable", "no unit system is configured to stop %s", unit)
 }
-func (unsupportedSystem) StartUnit(unit string) error {
-	return errorf("system.unavailable", "no unit system is configured to start %s", unit)
+func (unsupportedSystem) RestartUnit(unit string) error {
+	return errorf("system.unavailable", "no unit system is configured to restart %s", unit)
 }
 func (unsupportedSystem) ProbeHealth(probe apply.Probe) apply.ProbeResult {
 	return apply.ProbeResult{Name: probe.Name, Kind: probe.Kind, Status: apply.ProbeFailed, Reason: "no unit system is configured"}
@@ -726,7 +726,7 @@ func (r *runner) executeStep(step Step) error {
 }
 
 func (r *runner) start(step Step) error {
-	if err := r.options.System.StartUnit(step.Unit); err != nil {
+	if err := r.options.System.RestartUnit(step.Unit); err != nil {
 		return err
 	}
 	if waiter, ok := r.options.System.(UnitWaiter); ok && step.TimeoutSeconds > 0 {

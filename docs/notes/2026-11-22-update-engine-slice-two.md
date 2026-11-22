@@ -31,10 +31,15 @@ boundary are unchanged.
 | `agent/internal/update/platform.go` | `FilePlatformProvider` for `/usr/lib/bittern/platform.json`, fail-closed. |
 | `agent/internal/update/sqlite.go` | `SQLiteSnapshot` over the `sqlite3` `.backup` and `.restore` commands. |
 | `agent/internal/update/image.go` | `DockerImageEnsurer` over `frigateimage.Ensure` with `/usr/bin/docker`. |
-| `agent/internal/update/system.go` | `ExecSystem` over `apply.ExecSystem`, including `WaitUnitActive`. |
+| `agent/internal/update/system.go` | `ExecSystem` over `apply.ExecSystem`, including `RestartUnit` and `WaitUnitActive`. |
+| `agent/internal/update/engine.go` | The start step restarts the unit, so activation and rollback both run the bundle the pointer names. |
+| `agent/internal/launcher/launcher.go` | Fixed launcher resolution: active bundle, baseline fallback, path, owner, and regular-file refusals. |
+| `agent/cmd/bittern-launch` | Launcher binary installed at `/usr/libexec/bittern/bitternd`; passes the agent arguments through. |
+| `agent/packaging/bitternd.service` | Starts the fixed launcher instead of `/usr/bin/bitternd`. |
+| `packaging/platform.json` | Provisional platform metadata, generation 1, installed at `/usr/lib/bittern/platform.json`. |
 | `agent/cmd/bittern/update.go` | `update install`, `update status`, `update cancel`, and the argument-free `update helper`. |
 | `agent/packaging/bittern-update.service` | Fixed oneshot unit. No arguments, environment file, template specifier, or user property. |
-| `packaging/install.sh` | Installs and enables the update unit and installs `sqlite3`. |
+| `packaging/install.sh` | Installs and enables the update unit, installs `sqlite3`, the launcher, and the platform metadata. |
 | `image/packages.txt` | Provisional image package set now includes `sqlite3`. |
 | `Makefile` | The POC payload carries the update unit. This is not the BIT-042 phase two packer. |
 | `agent/internal/status/` | `updates.current_generation` and `updates.base` read the committed state. |
@@ -59,10 +64,10 @@ Supporting changes:
 | Shared lock | `TestLockContentionReturnsBusy`, `TestLockFileWithoutHolderIsNotStale`, `TestLockRejectsSymlink`, `TestLockRejectsWrongMode`, `TestLockRejectsSymlinkedParent`, `TestPathIsStable` |
 | Request and handoff | `TestUpdateRequestRoundTripAndStrictFormat`, `TestUpdateRequestRejectsNon0600Record`, `TestUpdateRequestRejectsSymlink`, `TestUpdateRequestRejectsUnknownFieldAndTrailingData`, `TestUpdateRequestRejectsRelativeSource`, `TestUpdateRequestRejectsUnknownSourceKind`, `TestUpdateRequestRefusesToReplaceAnExistingRecord`, `TestUpdateHandoffRefusesSecondRequestWhileJournalExists`, `TestUpdateHandoffReusesPendingRequest`, `TestUpdateHandoffRefusesADifferentPendingSource`, `TestUpdateHandoffReplacesAStaleRequestForTheJournalledSource`, `TestUpdateCancelRefusesWhileAJournalExists`, `TestUpdateCancelRemovesAPendingRequest`, `TestUpdateRequestPathsStayUnderTheStateRoot` |
 | Helper | `TestUpdateHelperRunsOneTransactionFromTheRequest`, `TestUpdateHelperResumesFromTheJournalSource`, `TestUpdateHelperKeepsTheRequestWhenTheLockIsBusy`, `TestUpdateHelperRemovesTheRequestAfterARejection`, `TestUpdateHelperRejectsAMissingPlatformMetadata`, `TestUpdateHelperRejectsASymlinkSource` |
-| Platform | `TestPlatformProviderReadsRootOwnedMetadata`, `TestPlatformProviderFailsClosedWithoutMetadata`, `TestPlatformProviderRejectsWrongOwner`, `TestPlatformProviderRejectsGroupWritableMetadata`, `TestPlatformProviderRejectsSymlink`, `TestPlatformProviderRejectsMalformedMetadata`, `TestPlatformProviderRejectsUnknownSchemaAndNegativeGeneration` |
+| Platform | `TestPlatformProviderReadsRootOwnedMetadata`, `TestPlatformProviderFailsClosedWithoutMetadata`, `TestPlatformProviderRejectsWrongOwner`, `TestPlatformProviderRejectsGroupWritableMetadata`, `TestPlatformProviderRejectsSymlink`, `TestPlatformProviderRejectsMalformedMetadata`, `TestPlatformProviderRejectsUnknownSchemaAndNegativeGeneration`, `TestPlatformProviderReadsThePreparationKitMetadata`, `TestKitPreparedPlatformFixturePassesPreflightAndMissingMetadataFails` |
 | Database | `TestSQLiteSnapshotCreateUsesTheBackupCommand`, `TestSQLiteSnapshotCreateFailsClosedWhenTheToolIsMissing`, `TestSQLiteSnapshotRejectsRelativeToolPath`, `TestSQLiteSnapshotRestoreReplacesDatabaseAndRemovesSidecars`, `TestSQLiteSnapshotRejectsMissingLiveDatabase`, `TestSQLiteSnapshotRejectsUnquotableDestination`, `TestPreparationKitInstallsSQLite3` |
 | Image and system | `TestDockerImageEnsurerPassesThePinnedRequest`, `TestDockerImageEnsurerReportsANonReadyImage`, `TestDockerImageEnsurerReportsTheEnsureError`, `TestDockerImageEnsurerRejectsRelativeDockerPath`, `TestExecSystemDelegatesToTheApplyUnitAndProbeKinds`, `TestExecSystemWaitsForAStartedUnitToBecomeActive`, `TestExecSystemReportsAUnitThatNeverBecomesActive`, `TestExecSystemReportsTheLastUnitQueryError` |
-| Unit contract | `TestUpdateHelperUnitIsFixedAndArgumentFree` |
+| Unit contract | `TestUpdateHelperUnitIsFixedAndArgumentFree`, `TestAgentUnitStartsTheFixedLauncher`, `TestPreparationKitInstallsTheLauncherAndPlatformMetadata`, `TestUpdateRestartRunsTheNewBundleVersion`, `TestUpdateRollbackRestartsThePreviousBundleVersion` |
 | Cross-transaction lock | `TestApplyAndUpdateContendOnTheSameOperationLock`, `TestApplyRefusesWhenTheSharedOperationLockIsHeld` |
 | Status | `TestUpdateStatusProbeReportsRealValues`, `TestUpdateStatusProbeReportsUnknownWithoutState`, `TestStatusDocumentReportsUpdateGenerationAndBase` |
 | CLI | `TestUpdateInstallWritesRequestAndStartsUnit`, `TestUpdateInstallRefusesSecondRequestWhileJournalExists`, `TestUpdateInstallRemovesRequestWhenTheUnitFailsToStart`, `TestUpdateInstallRefusesWhenAnotherOperationHoldsTheLock`, `TestUpdateHelperRejectsArguments`, `TestUpdateCancelRemovesPendingRequest` |
@@ -101,7 +106,7 @@ departs from it in these small ways:
 5. **The status field is `current_generation`.** The slice zero placeholder was `generation`. The
    new name distinguishes it from `render.generation`; no released reader exists.
 6. **The unit orders after `bitternd.service`.** The first design delta draft used
-   `Before=bitternd.service`. The transaction starts the agent itself in `start-agent`, and an
+   `Before=bitternd.service`. The transaction restarts the agent itself in `start-agent`, and an
    ordering dependency in the other direction would make that start wait on the update job. The
    final unit uses `After=local-fs.target bittern-first-boot.service bitternd.service`, and section
    15 records why.
@@ -115,8 +120,14 @@ departs from it in these small ways:
   a real unit restart are slice three evidence.
 - The SQLite adapter is not run against a live Frigate container, and the database restore is not
   proven against Frigate's migration. Slice three owns that.
-- The platform metadata file is read-only in the provider. No image build writes it yet; the image
-  work owns the writer. A device without the file fails closed at `preflight`.
+- The platform metadata file is read-only in the provider. The beta preparation kit now installs it
+  with generation 1, mode 0644, and owner root, so a kit-prepared bench box passes preflight. The
+  image build still owns the final writer and layout; generation 1 is provisional until the image ADR
+  fixes it. A device without the file, or with a file that is not root-owned, still fails closed at
+  `preflight`.
+- The agent unit starts the fixed launcher at `/usr/libexec/bittern/bitternd`, and the start step
+  restarts the unit after activation and after a rollback. The launcher selection and refusal cases
+  are unit-tested here. A live systemd restart into a new bundle is still slice three evidence.
 - The pending `appliance.yaml` migration is not persisted by the CLI. The engine writes it under the
   operation directory and leaves it after commit, as slice one specified; the agent-side persistence
   and its own rollback remain a follow-up.
@@ -126,8 +137,8 @@ departs from it in these small ways:
 
 Slice three: the QEMU update scenario against the fixture, including a real `sqlite3` snapshot and
 restore, a valid update, an invalid signature, a digest mismatch, a downgrade, and a rollback. The
-next implementation step is to have the image fixture write `/usr/lib/bittern/platform.json` and to
-run the fixed unit in the guest.
+fixture should keep writing the installed platform metadata and assert that the launcher runs the
+new bundle after `start-agent` and the previous bundle after a rollback restart.
 
 ## Verification
 

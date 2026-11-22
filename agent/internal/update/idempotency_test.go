@@ -409,8 +409,8 @@ func TestUpdateFirstInstallHealthFailureRestoresZero(t *testing.T) {
 		}
 	}
 	for _, call := range env.system.calls[rollbackStart:] {
-		if strings.HasPrefix(call, "start:") {
-			t.Fatalf("first-install rollback started a previous unit: %v", env.system.calls[rollbackStart:])
+		if strings.HasPrefix(call, "start:") || strings.HasPrefix(call, "restart:") {
+			t.Fatalf("first-install rollback started or restarted a previous unit: %v", env.system.calls[rollbackStart:])
 		}
 	}
 }

@@ -1,11 +1,13 @@
 # CI phase two, per ADR 0031 and ADR 0032. A beta application bundle tag runs
 # the phase one checks, builds the unsigned assets, signs the manifest with the
-# CI-only test key, uploads exactly the five release assets to a draft, and
-# publishes the draft after the protected beta environment approval.
+# CI-only test key, and uploads exactly the five release assets to a draft. A
+# second job, gated by the protected beta environment, verifies the draft's
+# asset names and recorded digests and then publishes the existing draft.
 #
-# No release private key is present. The CI test key is a beta environment
-# secret and its public half is packaging/trust/beta-ci.pub. QEMU and hardware
-# tests stay outside CI.
+# No release private key is present. The CI test key is held by the draft job
+# and its public half is packaging/trust/beta-ci.pub. The draft job has no
+# environment, so an unapproved run leaves the draft visible to maintainers.
+# QEMU and hardware tests stay outside CI.
 name: publish
 
 on:
@@ -20,7 +22,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
-# Least privilege. Only the publish job gets contents: write.
+# Least privilege. The phase one checks are read-only. Only the two release
+# jobs get contents: write, and only the publish job gets the environment.
 permissions:
   contents: read
 
@@ -64,18 +67,17 @@ jobs:
     with:
       generation: ${{ needs.tag.outputs.generation }}
 
-  publish:
-    name: sign and publish draft
+  draft:
+    name: sign and stage draft
     needs: [tag, checks]
     runs-on: ubuntu-24.04
-    # The beta environment carries the required reviewer, the app-beta-* tag
-    # policy, and the BITTERN_CI_SIGNING_KEY secret. The job cannot start before
-    # the approval, so the draft and the visible publish both happen after it.
-    environment:
-      name: beta
-      url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+    # No environment: the draft exists before the beta environment approval, so
+    # an unapproved, rejected, or cancelled run leaves a draft to inspect. The
+    # CI test key is therefore a repository secret, not an environment secret.
     permissions:
       contents: write
+    outputs:
+      digests: ${{ steps.record.outputs.digests }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -133,6 +135,8 @@ jobs:
       # The secret is base64-encoded raw seed bytes. It is decoded into the
       # runner's temporary directory with mode 0600, used once, and removed by
       # the trap. The always() step below covers a job-level failure as well.
+      # The draft job has no environment, so this secret must be stored at
+      # repository scope; the beta environment still gates publication.
       - name: Sign the manifest with the CI test key
         env:
           BITTERN_CI_SIGNING_KEY: ${{ secrets.BITTERN_CI_SIGNING_KEY }}
@@ -228,8 +232,75 @@ jobs:
             exit 1
           fi
 
-      # The environment approval already happened, and the asset set is
-      # complete. This is the single visible flip from draft to published.
+      # The publish job has no build action. Record the uploaded asset digests
+      # here so that job can prove the draft still carries exactly these bytes
+      # before the visible flip. Base64 keeps the job output on one line.
+      - name: Record the draft asset digests
+        id: record
+        run: |
+          set -eu
+          digests="$(cd build/assets && sha256sum \
+            manifest.json \
+            manifest.json.sig \
+            bittern-app.tar.gz \
+            bittern-beta-kit.tar.gz \
+            SHA256SUMS | base64 -w0)"
+          printf 'digests=%s\n' "$digests" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: publish the verified draft
+    needs: draft
+    runs-on: ubuntu-24.04
+    # The beta environment carries the required reviewer and the app-beta-*
+    # tag policy. The draft already exists, so an unapproved run leaves it in
+    # place and publishes nothing. This job takes no build action.
+    environment:
+      name: beta
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+    permissions:
+      contents: write
+    steps:
+      # Verify the asset names and the recorded digests from the draft itself,
+      # not from a rebuilt tree. The signature and manifest uploaded by the
+      # draft job are the bytes that become visible.
+      - name: Verify the draft asset set and recorded digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_DIGESTS: ${{ needs.draft.outputs.digests }}
+        run: |
+          set -eu
+          if [ -z "$EXPECTED_DIGESTS" ]; then
+            printf 'the draft job recorded no asset digests\n' >&2
+            exit 1
+          fi
+          is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')"
+          if [ "$is_draft" != "true" ]; then
+            printf 'release %s is not a draft\n' "$GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          actual="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | LC_ALL=C sort)"
+          expected="$(printf '%s\n' \
+            manifest.json \
+            manifest.json.sig \
+            bittern-app.tar.gz \
+            bittern-beta-kit.tar.gz \
+            SHA256SUMS | LC_ALL=C sort)"
+          if [ "$actual" != "$expected" ]; then
+            printf 'the draft asset set is wrong\nexpected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
+            exit 1
+          fi
+          printf '%s' "$EXPECTED_DIGESTS" | base64 --decode > "$RUNNER_TEMP/expected.sha256"
+          mkdir -p "$RUNNER_TEMP/draft-assets"
+          gh release download "$GITHUB_REF_NAME" --dir "$RUNNER_TEMP/draft-assets"
+          count="$(find "$RUNNER_TEMP/draft-assets" -maxdepth 1 -type f | wc -l)"
+          if [ "$count" -ne 5 ]; then
+            printf 'the draft download has %s files, not 5\n' "$count" >&2
+            exit 1
+          fi
+          (cd "$RUNNER_TEMP/draft-assets" && sha256sum -c "$RUNNER_TEMP/expected.sha256")
+
+      # The asset set and every digest match the draft job's record. This is the
+      # single visible flip from draft to published release.
       - name: Publish the draft release
         env:
           GH_TOKEN: ${{ github.token }}
