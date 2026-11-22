@@ -21,6 +21,25 @@ agent commands the UI will call, and the status fields those commands and the UI
 transaction order, verification order, automatic rollback order, and `/var/lib/bittern` write
 boundary are unchanged.
 
+## Maintainer correction: the kit baseline is generation 0
+
+The preparation kit installs the agent into the baseline path and leaves no active bundle. A
+kit-prepared device therefore has committed bundle generation 0, no active bundle, and the launcher
+running `/usr/bin/bitternd`. The first published release is a real update from 0 to 1. This corrects
+two earlier decisions in this note:
+
+- An absent `state.json` is the baseline state, not "unknown" and not "not implemented". Status
+  reports committed generation 0, no running bundle, the baseline build version, and no rollback
+  bundle. It does not report `updates.state: unknown`.
+- A rollback target of 0 is the baseline, not a missing target. Section 2's earlier rule that a
+  retained bundle `T` with `0 < T < G` is required is superseded: when no bundle below the committed
+  generation is retained, a rollback reverts to the baseline and is reported as a baseline revert.
+  The committed generation still stays forward in that case.
+
+The sequences the implementation tests are named in section 5. The maintainer's bench test uses two
+published releases, `app-beta-000001` and `app-beta-000002`, because a rollback to a previous bundle
+needs a previous bundle to exist. A single release exercises 0 to 1 and a baseline revert instead.
+
 ## 1. Channel check
 
 The check answers one question: is there a verified application bundle in this device's channel with
@@ -112,12 +131,14 @@ the failed transaction.
 | No active journal and the shared operation lock is available | `rollback.busy`; the active operation is untouched and no history record is written |
 | `state.json` exists and names a committed generation `G` greater than 0 | `rollback.no-committed` |
 | The activation pointer currently names `G` | `rollback.not-running`; a second rollback is refused, not replayed |
-| A retained bundle `T` exists with `0 < T < G` | `rollback.no-target` |
-| The retained bundle `T` and the committed bundle `G` both verify against their signed manifests and file digests | `rollback.previous` or `rollback.committed`; no live change |
+| A retained bundle `T` exists with `0 < T < G`, or no bundle below `G` is retained and the baseline binary is available | `rollback.no-target` only when the baseline binary is also unavailable |
+| The retained bundle `T`, or the baseline when `T` is 0, and the committed bundle `G` verify | `rollback.previous`, `rollback.baseline`, or `rollback.committed`; no live change |
 
 The target is the highest retained generation below `G`. The prune rule keeps the committed bundle
 and the immediately previous committed bundle, so normally exactly one target exists. Generations
-may be skipped: a device that moved from 3 to 10 rolls back to 3, not to 9.
+may be skipped: a device that moved from 3 to 10 rolls back to 3, not to 9. A device whose committed
+generation is 1 and which has no bundle below 1 targets generation 0, the baseline. A device at
+committed generation 0 has nothing to roll back to and refuses with `rollback.no-committed`.
 
 ### Semantics
 
@@ -125,10 +146,10 @@ may be skipped: a device that moved from 3 to 10 rolls back to 3, not to 9.
 | --- | --- |
 | Committed generation | Remains `G` in `state.json`. The anti-rollback anchor does not move backwards. |
 | Committed version | Remains the version of `G`. |
-| Running generation | Moves to `T` through the activation pointer. |
-| Running version | The version in `T`'s signed manifest. |
-| Units | `bitternd.service` restarts from the fixed launcher, then `bittern-frigate.service` starts when Frigate is configured. |
-| Health | The same bounded bundle-integrity, agent-unit, and Frigate-API gate runs against `T`. |
+| Running generation | Moves to `T` through the activation pointer. For a baseline revert, the pointer is written to 0, which the launcher reads as no active bundle. |
+| Running version | The version in `T`'s signed manifest, or the baseline build version when `T` is 0. |
+| Units | `bitternd.service` restarts from the fixed launcher, then `bittern-frigate.service` starts when Frigate is configured. A baseline revert restarts into `/usr/bin/bitternd`. |
+| Health | The same bounded bundle-integrity, agent-unit, and Frigate-API gate runs against `T`. A baseline revert checks the pointer is 0, verifies the baseline binary, and probes the restarted agent and Frigate units instead of skipping them. |
 | Configuration and data | Not restored. The current `appliance.yaml`, rendered configuration, and Frigate database stay in place. ADR 0008 requires backward-compatible migrations because an older bundle may run on newer data. |
 | Status | Reports running generation `T` and committed generation `G`, and the rollback target fact becomes false until a newer release is retained. |
 | History | Writes one `app-bundle-rollback` record with the reason, the running generation before the rollback (`G`), the restored generation (`T`), and the result. |
@@ -142,8 +163,9 @@ action. The helper unit and request record are reused; the helper still takes no
 
 | Case | Behavior |
 | --- | --- |
-| No retained previous bundle | Reject before any live change. The pointer, committed state, units, configuration, and data are unchanged. A `rejected` history record carries the reason. |
-| The previous bundle does not verify | Reject before any live change. Running stays on `G`. A `failed` history record names `rollback.previous`. |
+| No retained previous bundle and the baseline is available | Revert to the baseline: write pointer 0, restart the baseline agent, and record a `rolled-back` history record with `baseline: true` and `restored_generation: 0`. The committed generation stays `G`. |
+| The baseline binary is also unavailable | Reject before any live change. The pointer, committed state, units, configuration, and data are unchanged. A `rejected` history record carries the reason. |
+| A retained previous bundle exists but does not verify | Reject before any live change. Running stays on `G`. A `failed` history record names `rollback.previous`. It does not silently fall back to the baseline. |
 | The previous bundle verifies but fails to start or fails the health gate | The engine writes the pointer back to `G`, restarts the `G` units, and runs the health gate against `G`. It records a `failed` rollback with `restored_generation: G`. Running stays or returns to `G`. |
 | Restoring `G` also fails | The journal is kept, the result is `state-unknown`, and status names the failing step and the recovery action. The engine never claims `T` is running. |
 | A rollback is requested during an update | The shared lock or the active journal refuses it with `rollback.busy`. The update is untouched and no rollback history is written. |
@@ -203,11 +225,37 @@ are equal except after a manual rollback. All new fields are additive to status 
 | `last_operation.finished_at` | string or null | UTC RFC 3339 completion time |
 | `last_operation.from_generation` | integer or null | Generation before the operation |
 | `last_operation.to_generation` | integer or null | Candidate or restored generation |
-| `last_operation.restored_generation` | integer or null | Generation restored by a rollback |
+| `last_operation.restored_generation` | integer or null | Generation restored by a rollback, 0 for a baseline revert |
+| `last_operation.baseline` | boolean | True when the rollback target was the baseline |
 
 The status probe is read-only. It reads `state.json`, the activation pointer, the running bundle
 manifest, the retained bundle directories, `check.json`, and the newest history record. It never
 calls GitHub and never takes the transaction lock.
+
+A kit-prepared device has no `state.json` and no pointer. Its `updates` section is `ok`, not
+`unknown`, with `current_generation`, `running_generation`, `committed_version`, and
+`available_version` null, `current_version` set to the baseline build version, `committed_generation`
+0, `channel` from `appliance.yaml`, `rollback.available` false, `last_check.result` `never`, and
+`last_operation` null. A device that committed generation 1 and reverted to the baseline has
+`current_generation` and `running_generation` null, `current_version` set to the baseline build
+version, `committed_generation` 1, `committed_version` set to the generation 1 version,
+`rollback.available` false, and a `last_operation` with `baseline: true` and
+`restored_generation: 0`.
+
+## 5. Test sequences
+
+The named end-to-end sequences are:
+
+| Sequence | What it proves |
+| --- | --- |
+| 0 to 1 | A kit-prepared baseline with no state and no bundle installs the first published generation. The launch pointer moves to 1 and status reports running and committed generation 1. |
+| 1 to 2 | A device on generation 1 installs generation 2 with generation 1 retained. Status reports running and committed generation 2. |
+| 2 rolled back to 1 | Manual rollback moves the pointer to 1, restarts generation 1, leaves committed generation 2, reports both values, and records a bundle rollback with `restored_generation: 1`. |
+| 1 reverted to baseline | Manual rollback on a device with no bundle below generation 1 writes pointer 0, restarts the baseline binary, leaves committed generation 1, reports no running generation and committed generation 1, and records a baseline revert with `baseline: true` and `restored_generation: 0`. |
+
+The channel check tests include a device at committed generation 0 with no bundle: any published
+generation is an update and the check does not require a previous bundle. The bench test publishes
+`app-beta-000001` and then `app-beta-000002` so the 2 to 1 bundle rollback has a previous bundle.
 
 ## Open questions and limits
 
