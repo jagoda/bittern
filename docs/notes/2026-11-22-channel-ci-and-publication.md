@@ -33,24 +33,29 @@ the public history. Release tags are created from `main` after this point.
 
 - The app bundle channel is GitHub Releases in `jagoda/bittern`.
 - CI publishes on a tag, and release immutability is enabled.
-- A draft release is the atomic publish primitive: upload `manifest.json`, `manifest.json.sig`, and
-  `bittern-app.tar.gz` to the draft, then publish the draft as the visible flip.
+- A draft release is the atomic publish primitive: upload `manifest.json`, `manifest.json.sig`,
+  `bittern-app.tar.gz`, `bittern-beta-kit.tar.gz`, and `SHA256SUMS` to the draft, then publish the
+  draft as the visible flip.
 - There is no separate pointer file and no Bittern-operated update-check endpoint. The device reads
   the newest published release in its channel namespace.
 - The channel set stays `stable` and `beta`; beta is the only live channel until the first field
   release. There is no schema change, no migration, and no supersession of
   [ADR 0008](../adr/0008-updates-rollback-and-reset.md).
-- The tag scheme is `app-beta-g<generation>` or `app-stable-g<generation>`, with a zero-padded
-  19-digit generation. The tag generation must equal the signed manifest generation.
-- The assets are `manifest.json`, `manifest.json.sig`, and `bittern-app.tar.gz`.
+- The tag scheme is `app-beta-<6 hex>` or `app-stable-<6 hex>`, with a fixed-width lowercase
+  hexadecimal generation. Generation 31 is `app-beta-00001f`, generation 255 is
+  `app-stable-0000ff`, and generation 1 is `app-beta-000001`. The tag generation must equal the
+  signed manifest generation.
+- The update assets are `manifest.json`, `manifest.json.sig`, and `bittern-app.tar.gz`.
+- The beta preparation kit adds `bittern-beta-kit.tar.gz` and `SHA256SUMS`. The kit is unsigned,
+  digest only, runs as root, installs only the CI test anchor, and is not an update payload.
 - The payload is a files-only archive. `payload.sha256` is the digest of that archive exactly as
   distributed, and the manifest lists per-file digests of the extracted tree. This answers OQ-34.
 - GitHub limits each release asset to under 2 GiB, verified against the GitHub Docs on 2026-11-22.
   The OS image loop therefore cannot use this asset path unchanged.
 
 The deferred list and its triggers is in the ADR. The short version: a signed pointer, beta-to-stable
-promotion, withdrawal of a bad release, a security channel, another host, and OS image assets all
-wait for their named trigger.
+promotion, withdrawal of a bad release, a security channel, another host, OS image assets, and the
+beta preparation kit all wait for their named trigger. The kit exits when the OS image ships.
 
 ## CI decision
 
@@ -60,10 +65,12 @@ wait for their named trigger.
   Accepted ADR, and it is reversed here.
 - Phase one runs the existing `make check` target on push and pull request and builds a bundle as a
   workflow artifact. It has no secrets and does not publish.
-- Phase two publishes on a bundle tag. It creates a draft, uploads the assets, and publishes the
-  draft. CI test bundles are signed with a CI-only development key in Actions secrets. That key is
-  for test bundles only; its trust anchor exists only on bench devices and it is never the release
-  key.
+- Phase two publishes on a bundle tag. It creates a draft, uploads the update and kit assets, and
+  publishes the draft after maintainer approval in a protected environment. CI test bundles are
+  signed with a CI-only development key in Actions secrets. That key is for test bundles only; its
+  trust anchor exists only on bench devices and it is never the release key.
+- `make beta-payload` is adapted from `make poc-payload` and produces `bittern-beta-kit.tar.gz` and
+  `SHA256SUMS`. It supersedes the POC payload target rather than duplicating it.
 - Release signing stays offline and airgapped under [ADR 0029](../adr/0029-release-signing-and-key-custody.md).
   CI never holds the release seed.
 - Third-party actions are pinned by full commit SHA, and the repository requires SHA pinning.

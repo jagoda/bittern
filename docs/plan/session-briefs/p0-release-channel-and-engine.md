@@ -42,10 +42,11 @@ transaction core, the bundle packer with draft publication on a tag, and the QEM
    supplied by a provider. The transaction writes only under `/var/lib/bittern` and never assumes a
    writable root or slot knowledge. The status contract records the base fingerprint. The test-key
    path is enough for this step.
-3. **Bundle packer with publish on tag.** Build the files-only payload and the canonical manifest,
-   create the draft release, upload `manifest.json`, `manifest.json.sig`, and `bittern-app.tar.gz`,
-   and publish the draft as the visible flip. CI test bundles use the CI-only key. A production
-   release still uses the offline signature from ADR 0029.
+3. **Bundle packer with publish on tag.** Build the files-only payload, the canonical manifest, and
+   the beta preparation kit with `make beta-payload`. Create the draft release, upload
+   `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`, `bittern-beta-kit.tar.gz`, and
+   `SHA256SUMS`, and publish the draft as the visible flip after approval. CI test bundles use the
+   CI-only key. A production release still uses the offline signature from ADR 0029.
 4. **QEMU update scenario.** Exercise a valid update, an invalid signature, a digest mismatch, a
    downgrade, and a rollback on the local or bench QEMU path.
 5. **Documentation.** Keep the plan, ADRs, runbook, status contract, and defaults aligned with the
@@ -71,8 +72,13 @@ Each bullet is a test, not a claim.
 - The phase one bundle artifact is unsigned, labelled as a test artifact, and not published.
 - Every workflow action is pinned by a 40-character commit SHA, and phase one has no secret and no
   write permission.
-- A tag in the ADR 0031 scheme creates a draft release with exactly the three named assets, and
-  publishing the draft makes them visible together.
+- A tag in the ADR 0031 scheme creates a draft release with the three update assets plus
+  `bittern-beta-kit.tar.gz` and `SHA256SUMS`, and publishing the draft makes them visible together.
+- The kit verifies with `sha256sum -c SHA256SUMS`, contains no manifest, signature, or release
+  anchor, and is never installed as an update payload. The device ignores the kit assets by name.
+- Tag parsing tests assert that `app-beta-0000ff` parses to 255 and `app-beta-000010` parses to 16,
+  and reject uppercase hex, five-character, seven-character, decimal-looking overflow, and empty
+  suffixes. A decimal parse fails loudly.
 - A manifest signed only by the CI test key is rejected by a release trust store. A production
   release still verifies with the offline key.
 - The transaction writes only under `/var/lib/bittern`, records the base fingerprint, and passes the
@@ -87,6 +93,8 @@ Each bullet is a test, not a claim.
 - The tag is a discovery input, not a trust input. The signed manifest remains authoritative.
 - The payload is a files-only archive; `payload.sha256` is its digest exactly as distributed, and
   the manifest lists per-file digests.
+- The kit is unsigned and digest only. It installs the CI test anchor only, never a release anchor,
+  and it is not an update payload.
 - Do not publish a release to the stable namespace until the first field release is declared.
 - QEMU and hardware tests stay on the local or bench path.
 - No new dependency without an ADR. No workflow change that needs a secret without a recorded scope.

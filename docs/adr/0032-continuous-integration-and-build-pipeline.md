@@ -45,7 +45,10 @@ unsigned test build and is labelled as such.
 **2. Phase two publishes on a tag.** A tag matching the application bundle scheme in
 [ADR 0031](./0031-update-channel-on-github-releases.md) creates a draft release, uploads
 `manifest.json`, `manifest.json.sig`, and `bittern-app.tar.gz`, and, after the approval in point 7,
-publishes the draft as the visible flip. The job runs only after the phase one checks pass.
+publishes the draft as the visible flip. The job runs only after the phase one checks pass. The tag
+suffix is parsed as fixed-width six-character lowercase hexadecimal per
+[ADR 0031](./0031-update-channel-on-github-releases.md); a decimal parse is a defect, and the
+manifest generation remains authoritative.
 
 CI test bundles are signed with a CI-only Ed25519 development key held in GitHub Actions secrets.
 That key signs test bundles only. Its public key is pinned only on bench devices, never in a release
@@ -88,6 +91,13 @@ approval, and only the maintainer, as the environment's required reviewer, can a
 key secret is stored in that environment rather than at repository scope. A tag push starts the
 workflow but cannot publish on its own. An unapproved, rejected, or cancelled run leaves a draft and
 no published release; the tag may exist, but the release stays invisible until approval.
+
+**8. The beta preparation kit is a CI build product.** `make beta-payload` is adapted from
+`make poc-payload`; it produces `bittern-beta-kit.tar.gz` and `SHA256SUMS` and supersedes the POC
+payload target rather than duplicating it. Phase two publishes both files on the same release as the
+update assets. The kit is unsigned, digest only, runs as root, installs only the CI test anchor, and
+is not an update payload. [ADR 0031](./0031-update-channel-on-github-releases.md) owns its contents,
+trust class, and preparation steps.
 
 ## Consequences
 
@@ -138,6 +148,12 @@ no published release; the tag may exist, but the release stays invisible until a
   of the app bundle workflow.
 - Add a CI status or badge to the README only when phase one is actually running.
 - Record the phase two workflow permissions and the secret scope in the release runbook.
+- Add tag parser tests from [ADR 0031](./0031-update-channel-on-github-releases.md): assert that
+  `app-beta-0000ff` parses to 255 and `app-beta-000010` parses to 16, and reject uppercase hex,
+  five-character, seven-character, decimal-looking overflow, and empty suffixes. A decimal parse
+  must fail loudly.
+- Implement `make beta-payload` from the existing `make poc-payload` recipe, then retire the POC
+  payload target rather than keeping two builders.
 
 ## Alternatives considered
 

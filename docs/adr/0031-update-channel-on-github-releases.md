@@ -87,19 +87,24 @@ generation, as ADR 0029 requires.
 **3. The tag is the publish signal and maps one to one onto the bundle generation.** Application
 bundle tags use one of these forms:
 
-| Channel | Tag form | Example for generation 7 |
+| Channel | Tag form | Examples |
 | --- | --- | --- |
-| beta | `app-beta-g<generation>` | `app-beta-g0000000000000000007` |
-| stable | `app-stable-g<generation>` | `app-stable-g0000000000000000008` |
+| beta | `app-beta-<6 hex>` | generation 31 is `app-beta-00001f`; generation 1 is `app-beta-000001` |
+| stable | `app-stable-<6 hex>` | generation 255 is `app-stable-0000ff` |
 
-The generation is written as a zero-padded 19-digit decimal, the width of the largest non-negative
-signed 64-bit integer, so lexicographic tag order is numeric generation order. A generation appears
-in exactly one channel, and the tag generation must equal `generation` in the signed manifest. The
-tag selects a candidate release; it is not a trust input. The device filters on the channel prefix,
-reads the manifest, and applies the ADR 0029 channel and generation checks. An `os-` tag namespace
-is not defined here and cannot be published through this workflow.
+The suffix is a fixed-width six-character lowercase hexadecimal encoding of the generation. Fixed
+width keeps lexicographic tag order equal to numeric generation order. Six hexadecimal characters
+cover 16,777,215 generations, or 16.7 million, which is enough for any plausible lifetime of the
+project. The parsing rule is base 16, exactly six characters, lowercase only, with no prefix inside
+the number and no separators. A parser that reads the suffix as decimal is a defect, not a variation.
+Generation starts at 1, so `000000` never appears and reads as unset. A generation appears in exactly
+one channel, and the tag generation must equal `generation` in the signed manifest. The tag remains a
+selector and never a trust input; the manifest integer is authoritative. The device filters on the
+channel prefix `app-beta-` or `app-stable-`, reads the manifest, and applies the ADR 0029 channel and
+generation checks. An `os-` tag namespace is not defined here and cannot be published through this
+workflow.
 
-Each release carries these assets, with these exact names:
+Each release carries these three update assets, with these exact names and roles unchanged:
 
 | Asset | Role |
 | --- | --- |
@@ -107,11 +112,39 @@ Each release carries these assets, with these exact names:
 | `manifest.json.sig` | The 64-byte detached Ed25519 signature over the domain prefix and the manifest. |
 | `bittern-app.tar.gz` | The files-only payload archive named by `payload.filename`. |
 
+The release also carries the beta preparation kit as the fourth asset, with its checksum file as a
+fifth:
+
+| Asset | Role |
+| --- | --- |
+| `bittern-beta-kit.tar.gz` | Unsigned beta preparation kit. It is not an update payload. |
+| `SHA256SUMS` | SHA-256 checksums for the kit tarball. |
+
+The kit contains everything needed to turn a vanilla Debian box into a beta device: the packaging
+install and storage scripts, the units and templates the installer uses, the CI beta public key for
+`/etc/bittern/trust/release-keys`, and a version stamp naming the bundle generation and source commit
+it was built from. The manifest and its signature are not in the kit.
+
+The kit is unsigned. Integrity is the published checksum plus release immutability. No verifier
+exists on a bare Debian box, so the practical check is `sha256sum -c` against the published
+checksums; a signature that the target cannot verify was rejected because it would not be checked on
+that host. The kit is a different trust class from an update bundle: it is digest only and runs as
+root, while a bundle is signed and verified by the device before use. The release notes and the kit's
+own README must each say in one line that the kit is not an update payload and must never be
+installed as one.
+
+Preparation is download, verify the checksum, then run. Do not document a pipe from `curl` into an
+interpreter or a root shell, because nothing is checked before it runs. The kit installs the CI test
+anchor only. It must never carry a release anchor.
+
 The asset URL is `<release base>/download/<tag>/<asset>`, for example
-`https://github.com/jagoda/bittern/releases/download/app-beta-g0000000000000000007/manifest.json`.
+`https://github.com/jagoda/bittern/releases/download/app-beta-00001f/manifest.json`.
 The product default for the release base is in [defaults/release.yaml](../../defaults/release.yaml).
 GitHub's automatically generated source ZIP and tarball are not channel assets and the device ignores
-them. Release notes are not a trust input.
+them. Release notes are not a trust input. The device locates update assets by name: it reads
+`manifest.json`, `manifest.json.sig`, and `payload.filename` from the manifest. It ignores every other
+asset by name, including the kit and `SHA256SUMS`, so the kit cannot be mistaken for a payload
+candidate. Nothing in the device path enumerates assets by position.
 
 **4. The payload is a files-only archive, and `payload.sha256` covers that archive exactly as
 distributed.** This answers [OQ-34](../open-questions.md). `manifest.json` and `manifest.json.sig`
@@ -137,6 +170,7 @@ manifest layout.
 - GitHub's asset bandwidth is not a project cost at this scale.
 - The files-only payload gives `payload.sha256` a well-defined input and keeps the manifest out of
   its own digest.
+- Publishing the beta preparation kit makes onboarding a single download, which is the point.
 
 ### Negative / costs
 
@@ -154,6 +188,8 @@ manifest layout.
   leaves a draft that must be discarded or repaired before the tag is published.
 - The tag and the manifest can disagree only if the release tooling is wrong; the device must reject
   the mismatch rather than repair it.
+- The beta preparation kit invites support questions for arbitrary Debian installations, and it is
+  unsigned, digest only, and runs as root.
 
 ### Follow-ups
 
@@ -184,6 +220,7 @@ manifest layout.
 | A security channel | [ADR 0021](./0021-security-updates.md) is accepted, or the first security-only release is needed. |
 | Any additional host or mirror | A GitHub availability, policy, rate, or size constraint that blocks a release, or a second distribution point. |
 | OS image assets on GitHub Releases | The first image release, if the image can be kept under 2 GiB; otherwise a different host or a chunked layout. |
+| The beta preparation kit | Withdrawn or replaced when the OS image ships, because publishing the kit makes a public install path real and the delivery model is still open under [OQ-35](../open-questions.md). |
 
 ## Alternatives considered
 

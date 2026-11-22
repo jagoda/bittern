@@ -183,7 +183,7 @@ The maintainer fixed this order in session on 2026-11-22. It is recorded in
 | 1 | Decisions: ADR 0031, ADR 0032, the OQ-34 answer, and OQ-35. No release or workflow is produced. | This change |
 | 2 | CI phase one: `make check` on push and pull request, plus an unsigned bundle workflow artifact, with no secrets, no publishing, and SHA-pinned actions. | BIT-042 |
 | 3 | BIT-009 transaction core: the update transaction, the provider-supplied platform generation, the `/var/lib/bittern` write boundary, the base fingerprint, and the test-key path. The manifest, verifier and signing tool are already present. | BIT-009 |
-| 4 | Bundle packer with publish on tag: build the files-only payload, create the draft release, upload `manifest.json`, `manifest.json.sig`, and `bittern-app.tar.gz`, and publish the draft. The CI test key signs CI bundles only; a production release still uses the offline signature from ADR 0029. | BIT-042 phase two |
+| 4 | Bundle packer with publish on tag: build the files-only payload and the beta preparation kit with `make beta-payload`, create the draft release, upload `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`, `bittern-beta-kit.tar.gz`, and `SHA256SUMS`, and publish the draft after approval. The CI test key signs CI bundles only; a production release still uses the offline signature from ADR 0029. | BIT-042 phase two |
 | 5 | QEMU update scenario: a valid update, an invalid signature, a digest mismatch, a downgrade, and a rollback against the published fixture on the local or bench QEMU path. QEMU stays outside CI until the KVM question is measured. | BIT-009 acceptance |
 
 1. **BIT-019 setup token QR.** Landed on 2026-11-17; the USB token copy is gone from every setup
@@ -1290,8 +1290,9 @@ defects the UI no longer has.
 **Status.** New from the 2026-11-22 channel and CI decisions. CI phase one is step 2 in the
 [release work order](#release-work-order-2026-11-22); phase two is step 4. No workflow exists yet.
 **Goal.** Put the release channel on GitHub Releases and introduce CI without moving release signing
-into CI, so checks run on every change and the app bundle can be built, signed with a test key, and
-published as a draft release from a tag.
+into CI, so checks run on every change, the app bundle can be built, signed with a test key, and
+published as a draft release from a tag, and the beta preparation kit can be built and published
+with it.
 **Scope.**
 - Phase one: one GitHub Actions workflow on push and pull request. It runs the existing `make check`
   target and builds the app bundle as an unsigned workflow artifact. It uses no secrets, has no
@@ -1299,8 +1300,15 @@ published as a draft release from a tag.
 - Pin every third-party action by full commit SHA, including first-party GitHub actions, and record
   the pins in the workflow review. The repository requires SHA pinning.
 - Phase two: a bundle tag matching [ADR 0031](../adr/0031-update-channel-on-github-releases.md)
-  creates a draft release, uploads `manifest.json`, `manifest.json.sig`, and `bittern-app.tar.gz`,
-  and publishes the draft as one visible flip. The job runs only after the phase one checks pass.
+  creates a draft release, uploads `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`,
+  `bittern-beta-kit.tar.gz`, and `SHA256SUMS`, and publishes the draft as one visible flip after
+  the protected-environment approval. The job runs only after the phase one checks pass.
+- Add `make beta-payload`, adapted from `make poc-payload`, to build `bittern-beta-kit.tar.gz` and
+  `SHA256SUMS`. The kit carries the packaging install and storage scripts, the units and templates
+  the installer uses, the CI beta public key for `/etc/bittern/trust/release-keys`, and a version
+  stamp naming the bundle generation and source commit. It is unsigned, digest only, runs as root,
+  and is not an update payload. It installs the CI test anchor only and never a release anchor.
+- The POC payload target is superseded by `make beta-payload`, not duplicated. Keep one builder.
 - Sign CI bundles with a CI-only Ed25519 development key held in Actions secrets. The key signs test
   bundles only, its public key is pinned only on bench devices, and it is never the release key.
   Production releases use the offline signature from [ADR 0029](../adr/0029-release-signing-and-key-custody.md);
@@ -1314,8 +1322,14 @@ published as a draft release from a tag.
 - The phase one bundle artifact is unsigned and labelled as a test artifact; it is not published.
 - Every action in the workflow is pinned by a 40-character commit SHA, and the workflow has no
   secret and no write permission in phase one.
-- Phase two creates a draft release from a bundle tag, uploads exactly the three named assets, and
-  publishes the draft only after the checks pass.
+- Phase two creates a draft release from a bundle tag, uploads the three update assets plus
+  `bittern-beta-kit.tar.gz` and `SHA256SUMS`, and publishes the draft only after the checks and the
+  protected-environment approval pass.
+- The kit verifies with `sha256sum -c SHA256SUMS`, contains no manifest, signature, or release
+  anchor, and is never installed as an update payload. The device ignores the kit assets by name.
+- Tag parsing tests assert that `app-beta-0000ff` parses to 255 and `app-beta-000010` parses to 16,
+  and reject uppercase hex, five-character, seven-character, decimal-looking overflow, and empty
+  suffixes. A decimal parse fails loudly.
 - A production release cannot be signed by the CI key: a manifest signed only by the CI test key is
   rejected by a release trust store.
 - The QEMU and hardware paths stay outside CI and are named as such in the workflow and the release
@@ -2296,8 +2310,9 @@ provider-supplied platform generation, the /var/lib/bittern write boundary, the 
 the test-key path, with the failure cases from the BIT-009 recon note.
 
 Implement the bundle packer and publish-on-tag stage for BIT-042. Decide no OQ. Build the files-only
-payload, create the draft release, upload manifest.json, manifest.json.sig and bittern-app.tar.gz,
-and publish the draft with the CI-only test key. Do not put the release key in CI.
+payload and the beta preparation kit with make beta-payload, create the draft release, upload
+manifest.json, manifest.json.sig, bittern-app.tar.gz, bittern-beta-kit.tar.gz and SHA256SUMS, and
+publish the draft with the CI-only test key after approval. Do not put the release key in CI.
 
 Run the QEMU update scenario for BIT-009. Decide no OQ. Cover a valid update, an invalid signature, a
 digest mismatch, a downgrade and a rollback, and record the evidence. QEMU stays outside CI.
