@@ -44,6 +44,15 @@ const (
 // version is set at build time with -ldflags="-X main.version=...".
 var version = "dev"
 
+// factoryBaseline is set only by the preparation kit build. A kit baseline is
+// generation 0 and is not a published bundle, so it must be reported
+// distinctly even when it was built from the same commit as generation 1.
+var factoryBaseline = "false"
+
+func isFactoryBaseline() bool {
+	return factoryBaseline == "true"
+}
+
 // mockApplyApplier lets the browser check finish the wizard's apply page in the
 // preview build. It writes nothing; the real applier is never selected with
 // --ui-mock. The short pause and the synthetic image step let the browser check
@@ -285,9 +294,11 @@ func newStatusMux(builder *status.Builder, version string) *http.ServeMux {
 		writeJSON(w, http.StatusOK, struct {
 			Version      string `json:"version"`
 			StatusSchema int    `json:"status_schema"`
+			Baseline     bool   `json:"baseline"`
 		}{
 			Version:      version,
 			StatusSchema: status.SchemaVersion,
+			Baseline:     isFactoryBaseline(),
 		})
 	})
 	return mux

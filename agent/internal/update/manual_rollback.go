@@ -344,12 +344,18 @@ func (r *runner) buildManualRollbackHistory(result string, restored int64) Histo
 		Platform:      r.journal.Platform,
 		Schema:        SchemaRecord{Before: r.journal.SchemaBefore, After: r.journal.SchemaAfter},
 		Rollback: RollbackRecord{
-			Result:             result,
-			FailedStep:         r.journal.RollbackFailedStep,
-			Failure:            r.redactor.String(r.journal.RollbackFailure),
-			RestoredGeneration: restored,
-			Baseline:           r.journal.Baseline,
+			Result:     result,
+			FailedStep: r.journal.RollbackFailedStep,
+			Failure:    r.redactor.String(r.journal.RollbackFailure),
+			Baseline:   r.journal.Baseline,
 		},
+	}
+	// The restored generation is present only when the operation restored one.
+	// A pre-live rejection restored nothing; a state-unknown result could not
+	// confirm a restore; a rollback that reverted to the committed bundle did.
+	if result == ResultRolledBack || (result == ResultFailed && r.journal.LiveTouched) {
+		restoredGeneration := restored
+		record.Rollback.RestoredGeneration = &restoredGeneration
 	}
 	return record
 }

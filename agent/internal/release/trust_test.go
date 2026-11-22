@@ -30,9 +30,10 @@ func TestLoadTrustStoreReadsImageAndRotation(t *testing.T) {
 }
 
 func TestLoadTrustStoreMissingStores(t *testing.T) {
-	t.Run("missing image store is a failure", func(t *testing.T) {
-		dir := filepath.Join(t.TempDir(), "missing")
-		_, err := LoadTrustStore(dir, "")
+	t.Run("both stores missing is a failure", func(t *testing.T) {
+		imageDir := filepath.Join(t.TempDir(), "missing-image")
+		rotationDir := filepath.Join(t.TempDir(), "missing-rotation")
+		_, err := LoadTrustStore(imageDir, rotationDir)
 		requireRule(t, err, "trust.missing")
 	})
 	t.Run("missing rotation store is empty", func(t *testing.T) {
@@ -46,6 +47,51 @@ func TestLoadTrustStoreMissingStores(t *testing.T) {
 			t.Fatal("image key is missing from the trust store")
 		}
 	})
+	t.Run("missing image store is empty", func(t *testing.T) {
+		publicKey, _ := newTestKey(t)
+		rotationDir := t.TempDir()
+		if err := os.Chmod(rotationDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeTrustKey(t, rotationDir, publicKey)
+		store, err := LoadTrustStore(filepath.Join(t.TempDir(), "missing-image"), rotationDir)
+		if err != nil {
+			t.Fatalf("load trust store: %v", err)
+		}
+		if _, present := store.Lookup(KeyID(publicKey)); !present {
+			t.Fatal("rotation key is missing from the trust store")
+		}
+	})
+	t.Run("both stores empty is a failure", func(t *testing.T) {
+		imageDir := t.TempDir()
+		rotationDir := t.TempDir()
+		if err := os.Chmod(imageDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(rotationDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_, err := LoadTrustStore(imageDir, rotationDir)
+		requireRule(t, err, "trust.missing")
+	})
+}
+
+func TestLoadTrustStoreDuplicateKeyIDUsesImageStore(t *testing.T) {
+	publicKey, _ := newTestKey(t)
+	imageDir, _ := newTrustDirs(t, publicKey)
+	rotationDir := t.TempDir()
+	if err := os.Chmod(rotationDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTrustKey(t, rotationDir, publicKey)
+
+	store, err := LoadTrustStore(imageDir, rotationDir)
+	if err != nil {
+		t.Fatalf("identical duplicate key id was rejected: %v", err)
+	}
+	if _, present := store.Lookup(KeyID(publicKey)); !present {
+		t.Fatal("duplicate same-material key is missing")
+	}
 }
 
 func TestLoadTrustStoreRejectsBadEntries(t *testing.T) {
@@ -147,7 +193,7 @@ func TestLoadTrustStoreRejectsBadEntries(t *testing.T) {
 		_, err := LoadTrustStore(imageDir, rotationDir)
 		requireRule(t, err, "trust.duplicate")
 	})
-	t.Run("duplicate id with the same material", func(t *testing.T) {
+	t.Run("duplicate id with the same material is accepted", func(t *testing.T) {
 		publicKey, _ := newTestKey(t)
 		imageDir, _ := newTrustDirs(t, publicKey)
 		rotationDir := t.TempDir()

@@ -3,8 +3,13 @@
 This kit is not an update payload. It is unsigned, must be verified with the published SHA-256
 before running, and installs only the CI test anchor.
 
-Version `@BUNDLE_VERSION@`, generation `@GENERATION@`, source commit
+Baseline version `@BASELINE_VERSION@`, generation 0, source commit
 `@PAYLOAD_COMMIT@`.
+
+This kit installs the factory baseline, not a published application bundle. The
+baseline version uses the `0.0.0-factory-` prefix and generation 0, so it never
+equals a bundle built from the same commit. The status API reports it with
+`baseline: true`; a published bundle reports `baseline: false`.
 
 This archive prepares a disposable Debian 13 amd64 test machine for the beta channel. It installs
 the Bittern CLI, the status and UI daemon, the fixed agent launcher, the units, the provisional
@@ -29,7 +34,7 @@ path.
 | `storage-setup.sh` | Idempotent recording-drive setup, list and interactive choice |
 | `templates/` | Renderer inputs carried for inspection and the later installer path |
 | `trust/release-keys/@KEY_ID@.pub` | CI test anchor installed into `/etc/bittern/trust/release-keys` |
-| `VERSION` | Version stamp naming the generation, version, and source commit |
+| `VERSION` | Generated version stamp: `baseline: true`, `channel`, generation 0, the baseline version, the source commit, and the payload digest |
 | `SHA256SUMS` | Checksums for every file above and this README; the published checksum file beside the tarball names the tarball |
 
 The kit contains no manifest and no signature. It never carries a release anchor. The update helper
@@ -115,10 +120,25 @@ install and boot without recordings and the wizard reports storage.
 ## Test trust anchor
 
 `install.sh` copies `trust/release-keys/@KEY_ID@.pub` to
-`/etc/bittern/trust/release-keys/@KEY_ID@.pub` with mode 0644. That key is the public half of the
-CI-only test key, and its key id is the lowercase SHA-256 of the file. It signs bench bundles only.
-It is never the release key and must never be installed as a release anchor. A production release is
-signed offline under ADR 0029 and is not trusted by a device that carries only this anchor.
+`/etc/bittern/trust/release-keys/@KEY_ID@.pub` with mode 0644. The rotation directory is created
+mode 0755 and root-owned. The kit does not create or write `/usr/lib/bittern/trust/release-keys`;
+that image store belongs to the product image. The release loader reads both stores, trusts the
+union, and accepts a missing store when the other one has at least one key. A duplicate key id with
+the same bytes is one key, and a duplicate with different bytes is rejected.
+
+That key is the public half of the CI-only test key, and its key id is the lowercase SHA-256 of the
+file. It signs bench bundles only. It is never the release key and must never be installed as a
+release anchor. A production release is signed offline under ADR 0029 and is not trusted by a device
+that carries only this anchor.
+
+## Install-time channel
+
+`install.sh` reads the generated `channel` line from `VERSION`, validates it against the schema
+values `stable` and `beta`, and writes it as a one-line root-owned file at
+`/etc/bittern/install-channel`, mode 0644. First boot consumes that file only when it creates a new
+`appliance.yaml`. If the file is absent, first boot writes the schema default `stable`. An existing
+`appliance.yaml` is never overwritten, so a channel the operator later sets in the configuration
+survives a reinstall. The file is install-time input, not an `appliance.yaml` field.
 
 ## Before first boot
 

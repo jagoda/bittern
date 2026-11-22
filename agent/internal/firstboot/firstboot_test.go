@@ -416,6 +416,105 @@ func TestFirstBootCompleteAndRerunNoop(t *testing.T) {
 	}
 }
 
+func writeInstallChannel(t *testing.T, configRoot, value string) {
+	t.Helper()
+	if err := os.MkdirAll(configRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(configRoot, installChannelFile)
+	if err := os.WriteFile(path, []byte(value), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readUpdateChannel(t *testing.T, configPath string) string {
+	t.Helper()
+	cfg, validationErrors := config.Load(configPath)
+	if len(validationErrors) != 0 {
+		t.Fatalf("appliance.yaml is invalid: %v", validationErrors)
+	}
+	return cfg.Updates.Channel
+}
+
+func TestFirstBootInstallChannelBeta(t *testing.T) {
+	system := newFakeSystem()
+	options, roots, _ := testOptions(t, system, emptyInventory())
+	writeInstallChannel(t, roots.config, "beta\n")
+	if _, err := Run(options); err != nil {
+		t.Fatal(err)
+	}
+	if channel := readUpdateChannel(t, filepath.Join(roots.config, "appliance.yaml")); channel != "beta" {
+		t.Fatalf("first boot channel = %q, want beta", channel)
+	}
+}
+
+func TestFirstBootInstallChannelDefaultsStable(t *testing.T) {
+	system := newFakeSystem()
+	options, roots, _ := testOptions(t, system, emptyInventory())
+	if _, err := Run(options); err != nil {
+		t.Fatal(err)
+	}
+	if channel := readUpdateChannel(t, filepath.Join(roots.config, "appliance.yaml")); channel != "stable" {
+		t.Fatalf("first boot channel = %q, want stable", channel)
+	}
+}
+
+func TestFirstBootInstallChannelRejectsUnknownValue(t *testing.T) {
+	system := newFakeSystem()
+	options, roots, _ := testOptions(t, system, emptyInventory())
+	writeInstallChannel(t, roots.config, "rc\n")
+	_, err := Run(options)
+	if err == nil {
+		t.Fatal("first boot accepted an unknown install channel")
+	}
+	if !strings.Contains(err.Error(), "expected one of stable, beta") {
+		t.Fatalf("error does not name the allowed channels: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(roots.config, "appliance.yaml")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("an invalid install channel wrote appliance.yaml: %v", statErr)
+	}
+}
+
+func TestFirstBootInstallChannelDoesNotOverrideOperatorChannel(t *testing.T) {
+	configRoot := t.TempDir()
+	configPath := filepath.Join(configRoot, "appliance.yaml")
+	writeInstallChannel(t, configRoot, "beta\n")
+	cfg, created, err := loadOrCreateConfig(configPath, "bittern", false, emptyInventory(), &safeLogger{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created || cfg.Updates.Channel != "beta" {
+		t.Fatalf("initial config channel = %q (created=%t), want beta", cfg.Updates.Channel, created)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator := bytes.Replace(data, []byte("channel: beta\n"), []byte("channel: stable\n"), 1)
+	if bytes.Equal(operator, data) {
+		t.Fatal("could not change the operator channel in the generated config")
+	}
+	if err := os.WriteFile(configPath, operator, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A reinstall writes the kit channel again. The existing operator config
+	// must be kept.
+	writeInstallChannel(t, configRoot, "beta\n")
+	cfg, created, err = loadOrCreateConfig(configPath, "bittern", false, emptyInventory(), &safeLogger{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Fatal("a reinstall replaced the existing appliance.yaml")
+	}
+	if cfg.Updates.Channel != "stable" {
+		t.Fatalf("operator channel after reinstall = %q, want stable", cfg.Updates.Channel)
+	}
+}
+
 func TestFirstBootWritesPreInitializationCoral(t *testing.T) {
 	inventory := preInitializationCoralInventory(t)
 	if inventory.Proposal.Detector != "coral_usb" {

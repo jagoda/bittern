@@ -81,11 +81,11 @@ absent in both trust stores.
 
 1. The beta kit `install.sh` ran on the clean guest and installed the appliance units, the launcher,
    and `/usr/lib/bittern/platform.json` as schema 1, generation 1, mode 0644, owner root.
-2. The kit installed the ephemeral public anchor in the rotation store, and the scenario placed the
-   same anchor in the image store. Both were digest-checked against the key id; the committed CI test
-   anchor was absent from both.
+2. The kit installed the ephemeral public anchor in the rotation store, mode 0755 root-owned, and
+   the anchor was digest-checked against the key id. The image trust store was absent, the scenario
+   asserted that it stayed absent, and the committed CI test anchor was absent.
 3. First boot committed generation 1 of the rendered configuration with `cam0` down, and the device
-   channel was set to `beta` before any bundle was offered.
+   channel was `beta` from the kit's generated `install-channel` file before any bundle was offered.
 4. Generation 1 installed from no previous bundle and committed. `app/current` was `1`,
    `/api/version` was `0.0.0-beta.1-014fae8df56b`, `/proc/<pid>/exe` was
    `/var/lib/bittern/app/bundles/1/files/usr/bin/bitternd`, and the history record's `from` was null.
@@ -171,30 +171,28 @@ worktree. It is gitignored and not part of this note.
 
 ## Findings
 
-### The beta kit does not install the image trust store
+### The beta kit does not install the image trust store (fixed 2026-11-22)
 
 The kit installs the anchor at `/etc/bittern/trust/release-keys/<key_id>.pub`. The update helper
-calls `release.LoadTrustStore` with the image store `/usr/lib/bittern/trust/release-keys` as a
-required directory and the rotation store as optional. On a kit-prepared guest the image store is
-absent, so the first run was rejected before any live write:
+originally required the image store `/usr/lib/bittern/trust/release-keys`, so a kit-prepared guest
+rejected the first run with `trust.missing`:
 
 ```text
 failed step: verify-manifest
 reason: /usr/lib/bittern/trust/release-keys: trust.missing: the image trust store is missing
 ```
 
-The scenario creates the image store and installs the ephemeral anchor there. This is a workaround,
-not evidence that the kit's trust installation works. The follow-up is a decision: the kit installs
-the anchor in the image store as well, or the helper accepts an absent image store when the rotation
-store exists. The second option weakens the image-store rule in ADR 0029 and needs review.
+The loader now reads both stores, accepts a missing store when the other yields a key, rejects only
+the union with no key, and documents the duplicate-id rule. The scenario no longer creates the image
+store. See [the wave three note](2026-11-22-beta-kit-wave-three.md).
 
-### The beta kit does not record the beta channel
+### The beta kit does not record the beta channel (fixed 2026-11-22)
 
-First boot writes the schema default `updates.channel: stable`. A beta-signed bundle is then rejected
-with `channel.mismatch`. The scenario changes the channel to `beta` in `appliance.yaml` after first
-boot, which is the owner-side change an operator would make. The follow-up is to make the beta
-installation record `beta`, either from the kit or from an explicit first-boot input. The scenario is
-evidence for the transaction, not for channel selection.
+First boot originally wrote the schema default `updates.channel: stable`, and the scenario changed
+the channel to `beta` in `appliance.yaml` after first boot. The kit now writes a generated
+`install-channel` file and first boot consumes it only when it creates a new configuration. The
+scenario no longer edits `appliance.yaml`. See
+[the wave three note](2026-11-22-beta-kit-wave-three.md).
 
 ### The integrity gate is a detection window, not a lock
 
@@ -208,28 +206,29 @@ not a product change. The gate detects a modification present when it probes; it
 root process from modifying its own bundle afterwards. Recorded as a limitation, no product change in
 this scenario.
 
-### A committed history record carries a restored generation
+### A committed history record carries a restored generation (fixed 2026-11-22)
 
-The generation 2 committed record has an empty rollback result but
-`rollback.restored_generation: 1`. It is readable as a rollback that did not happen. No assertion
-depends on it, and this scenario does not change it. It is a small support-cleanliness follow-up.
+The generation 2 committed record originally had an empty rollback result but
+`rollback.restored_generation: 1`. It was readable as a rollback that did not happen. The field is
+now present only for a result that actually restored a generation, and the scenario asserts that
+every non-rollback record omits it.
 
 ## Baseline and limits
 
 The scenario starts from the QEMU firstboot baseline row in
-[field parity](../engineering/field-parity.md#environments) and has the declared differences listed
-in the [harness README](../../tests/qemu/README.md#update-scenario): it places the image-store anchor,
-sets the beta channel, and configures no camera. The first two are workarounds for the findings above
-and mean the scenario is not evidence for those kit behaviors. The third means the Frigate database,
-camera, recording and Frigate health paths are not covered.
+[field parity](../engineering/field-parity.md#environments) and has the declared difference listed
+in the [harness README](../../tests/qemu/README.md#update-scenario): it configures no camera. It uses
+the kit's install path alone for the trust store and the channel. The missing camera means the
+Frigate database, camera, recording and Frigate health paths are not covered.
 
 The scenario is opt-in and stays outside `make check`, like the other QEMU targets. On this host the
 KVM path is fast enough for repeated local runs. TCG remains unmeasured.
 
 ## Next steps
 
-- Decide and implement the beta kit trust-store and channel fixes, then remove the two workarounds
-  from the scenario and re-run it as kit evidence.
+- ~~Decide and implement the beta kit trust-store and channel fixes, then remove the two workarounds
+  from the scenario and re-run it as kit evidence.~~ Done in
+  [the wave three note](2026-11-22-beta-kit-wave-three.md).
 - Add a camera and a mounted recording disk, and extend the scenario to the Frigate database backup
   and restore, the image step, the camera snapshot, and the Frigate health probe. That is the rest of
   BIT-009 slice three acceptance.
@@ -244,4 +243,6 @@ KVM path is fast enough for repeated local runs. TCG remains unmeasured.
   `make qemu-update GO=/usr/local/go/bin/go` passed in 82.5 s; the log is
   `build/qemu/logs/update-20261122-133856/`.
 - `make qemu-test` passed on 2026-11-22; cold boot 81.8 s, snapshot 6.1 s, suite 34.4 s.
-- `make check`, `go vet ./...` and `gofmt -l` pass. No Go source changed.
+- The kit-only rerun is in [the wave three note](2026-11-22-beta-kit-wave-three.md). It passed with
+  exit 0 and log `build/qemu/logs/update-20261122-135636/`.
+- `make check`, `go vet ./...` and `gofmt -l` pass.

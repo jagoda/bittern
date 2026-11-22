@@ -12,6 +12,12 @@ GENERATION ?= 1
 BUNDLE_VERSION ?= 0.0.0-beta.$(GENERATION)
 PAYLOAD_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || printf 'unknown')
 PAYLOAD_COMMIT_SHORT = $(shell printf '%s' '$(PAYLOAD_COMMIT)' | cut -c1-12)
+# The kit baseline is not a published generation. Its version never matches a
+# bundle built from the same commit, so the UI cannot offer the running factory
+# version as an update. The full commit and generation 0 are in the kit VERSION
+# stamp; the binary carries the short form.
+BASELINE_VERSION ?= 0.0.0-factory-$(PAYLOAD_COMMIT_SHORT)
+BUNDLE_CHANNEL ?= beta
 PAYLOAD_DIR = build/payload
 BUNDLE_STAGE = $(PAYLOAD_DIR)/bundle
 APP_PAYLOAD = $(PAYLOAD_DIR)/bittern-app.tar.gz
@@ -37,7 +43,7 @@ SCHEMA_MIN ?= 1
 SCHEMA_MAX ?= 2
 UPDATER_MIN ?= 1
 
-.PHONY: help check schema link-check style-check design-check bundle-check cleanup-test storage-test unit-enablement-check qemu-test qemu-firstboot qemu-firstboot-stock qemu-firstboot-clean qemu-firstboot-late-camera qemu-adoption qemu-update qemu-stop assets test render detect render-poc status ui-test ui-browser-check bitternd bittern-release apply-test first-boot-poc beta-payload
+.PHONY: help check schema link-check style-check design-check bundle-check cleanup-test storage-test unit-enablement-check version-check qemu-test qemu-firstboot qemu-firstboot-stock qemu-firstboot-clean qemu-firstboot-late-camera qemu-adoption qemu-update qemu-stop assets test render detect render-poc status ui-test ui-browser-check bitternd bittern-release apply-test first-boot-poc beta-payload
 
 help:
 	@printf '%s\n' \
@@ -52,6 +58,7 @@ help:
 		'  make cleanup-test Test packaging/cleanup.sh against a temporary root' \
 		'  make storage-test Test packaging/storage-setup.sh against fixture disks' \
 		'  make unit-enablement-check  Check units enabled by the payload against the QEMU reboot assertions' \
+		'  make version-check  Check the factory baseline and bundle version stamps stay distinct' \
 		'  make qemu-test   Boot the two-NIC QEMU harness and run its tests' \
 		'  make qemu-firstboot  Run first boot, the TLS wizard and one camera in QEMU' \
 		'  make qemu-firstboot-stock  Run first boot from stock NIC names in QEMU' \
@@ -104,6 +111,7 @@ check:
 	$(PYTHON) tests/cleanup/test_cleanup.py || status=1; \
 	$(PYTHON) tests/storage/test_storage_setup.py || status=1; \
 	$(PYTHON) tests/checks/unit_enablement.py || status=1; \
+	$(SUBMAKE) version-check || status=1; \
 	$(SUBMAKE) test || status=1; \
 	exit $$status
 
@@ -118,6 +126,24 @@ storage-test:
 
 unit-enablement-check:
 	@$(PYTHON) tests/checks/unit_enablement.py
+
+# A factory baseline and a published bundle from the same commit must never
+# share a version string. The baseline must not look like a generation tag.
+version-check:
+	@set -eu; \
+	baseline='$(BASELINE_VERSION)'; \
+	bundle='$(BUNDLE_VERSION)-$(PAYLOAD_COMMIT_SHORT)'; \
+	[ "$$baseline" != "$$bundle" ] || { \
+		printf 'version stamp collision: baseline and bundle are both %s\n' "$$baseline" >&2; exit 1; }; \
+	case "$$baseline" in \
+		0.0.0-factory-*) ;; \
+		*) printf 'baseline version %s is not a factory baseline\n' "$$baseline" >&2; exit 1 ;; \
+	esac; \
+	case "$$bundle" in \
+		0.0.0-beta.*) ;; \
+		*) printf 'bundle version %s is not a published beta version\n' "$$bundle" >&2; exit 1 ;; \
+	esac; \
+	printf 'version stamp: baseline %s; bundle %s\n' "$$baseline" "$$bundle"
 
 qemu-test:
 	@$(PYTHON) tests/qemu/run.py test
@@ -173,16 +199,19 @@ beta-payload: assets bittern-release
 		-ldflags='-s -w -X main.version=$(BUNDLE_VERSION)-$(PAYLOAD_COMMIT_SHORT)' \
 		-o "$$payload_out/bundle/usr/bin/bitternd" ./cmd/bitternd); \
 	(cd $(AGENT_DIR) && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOPROXY=off GOFLAGS=-mod=vendor \
+		$(GO) build -trimpath -buildvcs=false \
+		-ldflags='-s -w -X main.version=$(BASELINE_VERSION) -X main.factoryBaseline=true' \
+		-o "$$kit/bitternd" ./cmd/bitternd); \
+	(cd $(AGENT_DIR) && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOPROXY=off GOFLAGS=-mod=vendor \
 		$(GO) build -trimpath -buildvcs=false -ldflags='-s -w' \
 		-o "$$kit/bittern-launch" ./cmd/bittern-launch); \
 	agent/bin/bittern-release pack --tree "$$bundle" --out "$$payload_out" \
-		--version "$(BUNDLE_VERSION)" --generation "$(GENERATION)" --channel beta \
+		--version "$(BUNDLE_VERSION)" --generation "$(GENERATION)" --channel "$(BUNDLE_CHANNEL)" \
 		--source-commit "$(PAYLOAD_COMMIT)" --key-id "$(KEY_ID)" \
 		--os-generation-min "$(OS_GENERATION_MIN)" --os-generation-max "$(OS_GENERATION_MAX)" \
 		--schema-min "$(SCHEMA_MIN)" --schema-max "$(SCHEMA_MAX)" --updater-min "$(UPDATER_MIN)" \
 		--created "$(PAYLOAD_CREATED)" --epoch "$(PAYLOAD_EPOCH)"; \
 	install -m 0755 "$$bundle/usr/bin/bittern" "$$kit/bittern"; \
-	install -m 0755 "$$bundle/usr/bin/bitternd" "$$kit/bitternd"; \
 	install -m 0644 packaging/platform.json "$$kit/platform.json"; \
 	install -m 0644 agent/packaging/bittern-first-boot.service "$$kit/bittern-first-boot.service"; \
 	install -m 0644 agent/packaging/bittern-image-prewarm.service "$$kit/bittern-image-prewarm.service"; \
@@ -200,13 +229,15 @@ beta-payload: assets bittern-release
 		-e 's/@GENERATION@/$(GENERATION)/g' \
 		-e 's/@PAYLOAD_COMMIT@/$(PAYLOAD_COMMIT)/g' \
 		-e 's/@PAYLOAD_COMMIT_SHORT@/$(PAYLOAD_COMMIT_SHORT)/g' \
+		-e 's/@BASELINE_VERSION@/$(BASELINE_VERSION)/g' \
 		-e 's/@KEY_ID@/$(KEY_ID)/g' \
 		packaging/README-beta-kit.md > "$$kit/README.md"; \
 	{ \
 		printf 'product: bittern\n'; \
-		printf 'channel: beta\n'; \
-		printf 'generation: %s\n' "$(GENERATION)"; \
-		printf 'version: %s\n' "$(BUNDLE_VERSION)"; \
+		printf 'baseline: true\n'; \
+		printf 'channel: %s\n' "$(BUNDLE_CHANNEL)"; \
+		printf 'generation: 0\n'; \
+		printf 'version: %s\n' "$(BASELINE_VERSION)"; \
 		printf 'source_commit: %s\n' "$(PAYLOAD_COMMIT)"; \
 		printf 'payload_sha256: '; sha256sum "$(APP_PAYLOAD)" | cut -d' ' -f1; \
 	} > "$$kit/VERSION"; \

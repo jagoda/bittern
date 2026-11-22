@@ -139,24 +139,44 @@ func TestStatusEndpoint(t *testing.T) {
 }
 
 func TestVersionEndpoint(t *testing.T) {
-	handler := newHandler(testBuilder(t), logging.New(&bytes.Buffer{}, redact.New()), "test-1")
-	request := httptest.NewRequest(http.MethodGet, "/api/version", nil)
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-
-	if response.Code != http.StatusOK {
-		t.Fatalf("status code: %d", response.Code)
-	}
-	var payload struct {
+	readVersion := func(t *testing.T, version string) struct {
 		Version      string `json:"version"`
 		StatusSchema int    `json:"status_schema"`
+		Baseline     bool   `json:"baseline"`
+	} {
+		t.Helper()
+		handler := newHandler(testBuilder(t), logging.New(&bytes.Buffer{}, redact.New()), version)
+		request := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status code: %d", response.Code)
+		}
+		var payload struct {
+			Version      string `json:"version"`
+			StatusSchema int    `json:"status_schema"`
+			Baseline     bool   `json:"baseline"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.Version != "test-1" || payload.StatusSchema != status.SchemaVersion {
-		t.Fatalf("unexpected version payload: %+v", payload)
-	}
+
+	t.Run("bundle", func(t *testing.T) {
+		payload := readVersion(t, "0.0.0-beta.1-0123456789ab")
+		if payload.Version != "0.0.0-beta.1-0123456789ab" || payload.StatusSchema != status.SchemaVersion || payload.Baseline {
+			t.Fatalf("unexpected bundle version payload: %+v", payload)
+		}
+	})
+	t.Run("factory baseline", func(t *testing.T) {
+		factoryBaseline = "true"
+		defer func() { factoryBaseline = "false" }()
+		payload := readVersion(t, "0.0.0-factory-0123456789ab")
+		if payload.Version != "0.0.0-factory-0123456789ab" || payload.StatusSchema != status.SchemaVersion || !payload.Baseline {
+			t.Fatalf("unexpected factory version payload: %+v", payload)
+		}
+	})
 }
 
 func TestStatusEndpointRejectsOtherMethods(t *testing.T) {

@@ -326,12 +326,16 @@ type Endpoint struct {
 	SourceCommit   string `json:"source_commit,omitempty"`
 }
 
-// RollbackRecord records the rollback outcome in history.
+// RollbackRecord records the rollback outcome in history. RestoredGeneration
+// is present only when the operation actually restored a generation: a
+// rolled-back result, or a failed manual rollback that reverted to the
+// committed bundle after the pointer moved. A committed record, a pre-live
+// rejection and a state-unknown rollback omit it.
 type RollbackRecord struct {
 	Result             string `json:"result"`
 	FailedStep         string `json:"failed_step"`
 	Failure            string `json:"failure"`
-	RestoredGeneration int64  `json:"restored_generation"`
+	RestoredGeneration *int64 `json:"restored_generation,omitempty"`
 	Baseline           bool   `json:"baseline,omitempty"`
 }
 

@@ -224,6 +224,12 @@ claim QSV because detection only sees the render node, not the vendor-specific m
 `updates` intentionally has no update mechanism, A/B, automatic-update, or update-check field while
 OQ-04, OQ-05, and OQ-12 remain open.
 
+The preparation kit records its install-time channel in `/etc/bittern/install-channel`, a one-line
+root-owned file outside `appliance.yaml`. First boot reads it only when it creates a new
+`appliance.yaml`; a missing file means the schema default `stable`. An existing configuration is
+never overwritten, so an owner's later channel change survives a reinstall. The file is install-time
+input, not a configuration field, and is deliberately not part of this schema.
+
 ## privacy
 
 | Field | Type | Required | Default | Meaning |

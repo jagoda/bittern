@@ -429,7 +429,11 @@ func loadOrCreateConfig(path, hostname string, recordingConfigured bool, invento
 		return nil, false, err
 	}
 
-	document := minimalConfig(hostname, recordingConfigured, inventory)
+	channel, err := readInstallChannel(filepath.Dir(path))
+	if err != nil {
+		return nil, false, err
+	}
+	document := minimalConfig(hostname, recordingConfigured, inventory, channel)
 	data, err = document.Marshal()
 	if err != nil {
 		return nil, false, err

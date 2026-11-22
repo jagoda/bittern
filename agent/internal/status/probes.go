@@ -884,8 +884,11 @@ func updateOperationSection(record *update.History) *UpdateOperationSection {
 	if record.To != nil {
 		section.ToGeneration = &record.To.Generation
 	}
-	if record.Rollback.RestoredGeneration > 0 || record.Rollback.Baseline {
-		restored := record.Rollback.RestoredGeneration
+	if record.Rollback.RestoredGeneration != nil || record.Rollback.Baseline {
+		restored := int64(0)
+		if record.Rollback.RestoredGeneration != nil {
+			restored = *record.Rollback.RestoredGeneration
+		}
 		section.RestoredGeneration = &restored
 	}
 	return section

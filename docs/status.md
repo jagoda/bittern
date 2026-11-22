@@ -261,9 +261,15 @@ new field as it must tolerate any unknown field.
 | Endpoint | Response |
 | --- | --- |
 | `GET /api/status` | The status document, schema 1 |
-| `GET /api/version` | `{"version":"dev","status_schema":1}` |
+| `GET /api/version` | `{"version":"dev","status_schema":1,"baseline":false}` |
 
 Both endpoints are read-only and reject other methods with `405`.
+
+`baseline` is true only for the preparation kit factory build. That build reports a
+`0.0.0-factory-<commit>` version and generation 0, and it is not a published generation. A bundle
+built from the same commit reports its `0.0.0-beta.<generation>-<commit>` version with
+`baseline: false`, so a reader never has to guess whether two equal-looking versions are the same
+artifact.
 
 `bitternd` defaults to `--listen 127.0.0.1:8080` and
 `--config /etc/bittern/appliance.yaml`. A non-loopback `--listen` address is

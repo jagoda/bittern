@@ -414,3 +414,28 @@ func TestUpdateFirstInstallHealthFailureRestoresZero(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateCommittedHistoryOmitsRestoredGeneration(t *testing.T) {
+	env := newTestEnv(t)
+	env.mustInstall(t, env.writeValidBundle(t, 1))
+	result := env.mustInstall(t, env.writeValidBundle(t, 2))
+	path := filepath.Join(env.stateRoot, "update", "history", result.OperationID+".json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatal(err)
+	}
+	rollback, ok := record["rollback"].(map[string]any)
+	if !ok {
+		t.Fatalf("history record has no rollback object: %s", raw)
+	}
+	if value, present := rollback["restored_generation"]; present {
+		t.Fatalf("committed history record carries restored_generation %v", value)
+	}
+	if record["result"] != ResultCommitted {
+		t.Fatalf("history result = %v, want %s", record["result"], ResultCommitted)
+	}
+}

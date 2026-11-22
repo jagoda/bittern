@@ -76,9 +76,8 @@ func (r *runner) buildHistory(result string, manifest *release.Manifest, manifes
 		Schema:        SchemaRecord{Before: r.journal.SchemaBefore, After: r.journal.SchemaAfter},
 		Payload:       payloadRecord(manifest),
 		Rollback: RollbackRecord{
-			FailedStep:         r.journal.RollbackFailedStep,
-			Failure:            r.redactor.String(r.journal.RollbackFailure),
-			RestoredGeneration: r.journal.PreviousGeneration,
+			FailedStep: r.journal.RollbackFailedStep,
+			Failure:    r.redactor.String(r.journal.RollbackFailure),
 		},
 	}
 	if r.journal.CandidateVersion != "" && record.To == nil {
@@ -95,7 +94,11 @@ func (r *runner) buildHistory(result string, manifest *release.Manifest, manifes
 	switch {
 	case result == ResultRolledBack:
 		record.Rollback.Result = ResultRolledBack
+		restored := r.journal.PreviousGeneration
+		record.Rollback.RestoredGeneration = &restored
 	case result == ResultStateUnknown:
+		// The previous bundle could not be verified, so no generation was
+		// confirmed restored. The result names the state, not a restore.
 		record.Rollback.Result = ResultStateUnknown
 	default:
 		record.Rollback.Result = ""

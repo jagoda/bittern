@@ -363,7 +363,11 @@ func printHistory(w io.Writer, record *update.History) {
 		fmt.Fprintf(w, "  rollback reason: %s\n", record.Reason)
 	}
 	if record.Rollback.Result != "" {
-		fmt.Fprintf(w, "  rollback: %s, restored generation %d\n", record.Rollback.Result, record.Rollback.RestoredGeneration)
+		if record.Rollback.RestoredGeneration != nil {
+			fmt.Fprintf(w, "  rollback: %s, restored generation %d\n", record.Rollback.Result, *record.Rollback.RestoredGeneration)
+		} else {
+			fmt.Fprintf(w, "  rollback: %s\n", record.Rollback.Result)
+		}
 	}
 	if record.Rollback.Baseline {
 		fmt.Fprintln(w, "  target: baseline (no active bundle)")

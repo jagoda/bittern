@@ -2,6 +2,12 @@ package firstboot
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 
@@ -15,6 +21,12 @@ const (
 	mediaMountPoint   = "/var/lib/bittern/media"
 	defaultRetention  = 14
 	defaultReserveGB  = 50
+
+	// defaultUpdateChannel is the schema default. The install channel file is
+	// the only install-time override and is consumed only when first boot
+	// creates a new appliance.yaml.
+	defaultUpdateChannel = "stable"
+	installChannelFile   = "install-channel"
 )
 
 type minimalIdentity struct {
@@ -111,9 +123,12 @@ type minimalDocument struct {
 	Hardware      *minimalHardware `yaml:"hardware,omitempty"`
 }
 
-func minimalConfig(hostname string, recordingConfigured bool, inventory hardware.Inventory) minimalDocument {
+func minimalConfig(hostname string, recordingConfigured bool, inventory hardware.Inventory, channel string) minimalDocument {
 	if hostname == "" {
 		hostname = "bittern"
+	}
+	if channel == "" {
+		channel = defaultUpdateChannel
 	}
 
 	drives := []minimalDrive{}
@@ -159,12 +174,55 @@ func minimalConfig(hostname string, recordingConfigured bool, inventory hardware
 		},
 		Cameras: []minimalCamera{},
 		Storage: minimalStorage{Recording: recording},
-		Updates: minimalUpdates{Channel: "stable"},
+		Updates: minimalUpdates{Channel: channel},
 		Privacy: minimalPrivacy{Tailscale: minimalTailscale{
 			Enabled:           false,
 			CameraSubnetRoute: false,
 		}},
 		Hardware: detectedHardware(inventory),
+	}
+}
+
+// readInstallChannel reads the installer's one-line channel record from the
+// config root. A missing file keeps the schema default. The file is
+// install-time input, not an appliance.yaml field: it is read only when first
+// boot creates a new configuration, so a later operator change in
+// appliance.yaml is never overwritten.
+func readInstallChannel(configRoot string) (string, error) {
+	path := filepath.Join(configRoot, installChannelFile)
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return defaultUpdateChannel, nil
+		}
+		return "", fmt.Errorf("firstboot: inspect install channel %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("firstboot: install channel %s is a symlink; the installer must write a regular root-owned file", path)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("firstboot: install channel %s is not a regular file", path)
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return "", fmt.Errorf("firstboot: install channel %s is group- or other-writable; the installer must write it mode 0644 root-owned", path)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", fmt.Errorf("firstboot: install channel %s owner cannot be determined", path)
+	}
+	if stat.Uid != uint32(os.Geteuid()) {
+		return "", fmt.Errorf("firstboot: install channel %s owner uid %d is not the trusted uid %d", path, stat.Uid, os.Geteuid())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("firstboot: read install channel %s: %w", path, err)
+	}
+	value := strings.TrimSuffix(string(data), "\n")
+	switch value {
+	case "stable", "beta":
+		return value, nil
+	default:
+		return "", fmt.Errorf("firstboot: install channel %s is %q; expected one of stable, beta", path, value)
 	}
 }
 

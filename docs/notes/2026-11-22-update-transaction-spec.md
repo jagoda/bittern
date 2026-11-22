@@ -36,7 +36,7 @@ check, key selection, and signature verification all pass.
 | --- | --- |
 | Engine core | A package at `agent/internal/update` implements the paths, journal, lock, verification adapter, step runner, activation pointer, committed state, history, health gate, and rollback in this note. The package name is a proposal, not an ADR decision. |
 | Local-file bundle source | A source reads `manifest.json`, `manifest.json.sig`, and the payload file named by `manifest.json` from a directory. It performs no network access. It is the test source and the shape a future USB source can reuse. |
-| Test trust store | Tests generate an Ed25519 key per run and load its public key through the existing `release.LoadTrustStore` against a temporary directory. No private key is committed. This is the test-key path in [ADR 0029](../adr/0029-release-signing-and-key-custody.md), lines 411 to 438. |
+| Test trust store | Tests generate an Ed25519 key per run and load its public key through the existing `release.LoadTrustStore` against temporary image and rotation directories. No private key is committed. This is the test-key path in [ADR 0029](../adr/0029-release-signing-and-key-custody.md), lines 411 to 438. |
 | Unit tests | The named cases in section 13, including the per-step power-cut matrix, the rejection matrix, lock contention, idempotency, a cut during rollback, and the no-live-write-on-rejection assertion. |
 | Platform provider seam | An interface supplies the running platform generation. Slice one uses a test provider. Registration in the running helper is slice two. |
 | Base fingerprint | A read-only collector records the Debian version, kernel, Docker version, device availability, and firmware presence in the committed state and history. It is evidence, not a trust input. |
@@ -308,11 +308,23 @@ before any manifest field is trusted. Key selection and signature verification f
 signature gate passes, `version`, `generation`, `channel`, compatibility, payload, and file fields
 are untrusted input.
 
+### Trust store locations
+
+The engine passes both ADR 0029 paths to `release.LoadTrustStore`: the image store at
+`/usr/lib/bittern/trust/release-keys` and the rotation store at
+`/etc/bittern/trust/release-keys`. Both are read and the verifier trusts the union. Either directory
+may be absent; a missing directory is not an error when the other store yields at least one valid
+key. If neither store yields a key, the transaction fails at `verify-manifest` with `trust.missing`.
+The image store is read first. A duplicate key id with identical bytes is one key, so the image copy
+is the effective entry; a duplicate id with different key material is `trust.duplicate` and is never
+resolved by precedence. This is the documented rule the beta preparation kit relies on: the kit
+installs its CI test anchor in the rotation store and leaves the image store to the product image.
+
 | # | Check | Existing function and location | Expected failure |
 | --- | --- | --- | --- |
 | 1 | Detached signature envelope | Read `manifest.sig` and any `manifest.sig.<key_id>`; enforce 64 bytes. The rules are in [ADR 0029](../adr/0029-release-signing-and-key-custody.md), lines 268 to 274. | `signature.missing`, `signature.length` |
 | 2 | Canonical manifest | `release.ParseManifest` calls `release.checkCanonical` and re-encodes the document ([agent/internal/release/manifest.go](../../agent/internal/release/manifest.go), lines 93 to 108; [canonical.go](../../agent/internal/release/canonical.go), lines 18 to 48). | `canonical.empty`, `canonical.syntax`, `canonical.whitespace`, `canonical.non-ascii`, `canonical.null`, `canonical.trailing`, `canonical.reencode`, `canonical.depth` |
-| 3 | Key selection and signature | `release.LoadTrustStore` and `release.VerifyManifest` ([trust.go](../../agent/internal/release/trust.go), lines 35 to 53; [verify.go](../../agent/internal/release/verify.go), lines 46 to 80). | `signature.unknown-key`, `signature.key-id`, `signature.invalid`, `trust.*` |
+| 3 | Key selection and signature | `release.LoadTrustStore` and `release.VerifyManifest` ([trust.go](../../agent/internal/release/trust.go); [verify.go](../../agent/internal/release/verify.go)). The two store locations and the duplicate-id rule are in "Trust store locations" above. | `signature.unknown-key`, `signature.key-id`, `signature.invalid`, `trust.missing`, `trust.duplicate`, `trust.*` |
 | 4 | Identity | `Manifest.Validate` and the expected kind in `VerifyManifest` ([manifest.go](../../agent/internal/release/manifest.go), lines 112 to 149; [verify.go](../../agent/internal/release/verify.go), lines 73 to 75). | `manifest.version`, `manifest.kind`, `manifest.product` |
 | 5 | Channel match | Compare the verified `manifest.Channel` with `config.Updates.Channel` from the loaded `appliance.yaml` ([agent/internal/config/types.go](../../agent/internal/config/types.go), lines 148 to 151). The allowed channel values are already checked by `Manifest.Validate` ([manifest.go](../../agent/internal/release/manifest.go), lines 131 to 133). | `manifest.channel` for an unknown value; `channel.mismatch` for a verified manifest on the wrong channel |
 | 6 | Generation | `release.VerifyManifest` compares against the committed generation ([verify.go](../../agent/internal/release/verify.go), lines 76 to 78). For a new install the engine passes the committed generation. For a resume it passes the committed generation and, if the only failure is `generation.rollback`, accepts the manifest only when the active journal's `candidate_manifest_sha256` equals the SHA-256 of the verified canonical bytes and `manifest.Generation` equals the journal's candidate. Lower is always rejected. | `generation.rollback`; a resume mismatch is `generation.resume-mismatch` |
@@ -912,6 +924,20 @@ worker.
 The field name changes from the slice zero placeholder `generation` to `current_generation`. The old
 field was never populated by a release, no deployed reader exists, and the new name removes the
 ambiguity with `render.generation`. [docs/status.md](../status.md) is updated in the same change.
+
+### Factory baseline and bundle versions
+
+The beta preparation kit installs a factory baseline, not a published bundle. It runs from
+`/usr/bin/bitternd` with no activation pointer and committed generation 0. Its binary version is
+`0.0.0-factory-<source-commit-short>` and its `/api/version` response carries `baseline: true`. The
+kit `VERSION` stamp records `baseline: true`, `generation: 0`, the full source commit, the channel,
+the baseline version, and the payload digest.
+
+A published bundle uses `0.0.0-beta.<generation>-<source-commit-short>` and reports
+`baseline: false`. The two strings differ even when the kit and generation 1 were built from the
+same commit, so the UI must never offer the running factory version as an update. A future change
+must not collapse the baseline into the published version string or drop the `baseline` flag; the
+`make version-check` check and the QEMU update scenario both assert the distinction.
 
 ### The shared operation lock
 

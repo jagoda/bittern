@@ -19,9 +19,6 @@ func loadTrustStore(options Options) (*release.TrustStore, error) {
 	if options.TrustStore != nil {
 		return options.TrustStore, nil
 	}
-	if options.TrustImageDir == "" {
-		return nil, errorf("trust.missing", "the image trust store directory is empty")
-	}
 	return release.LoadTrustStore(options.TrustImageDir, options.TrustRotationDir)
 }
 

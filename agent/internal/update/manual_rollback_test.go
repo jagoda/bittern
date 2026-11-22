@@ -66,7 +66,7 @@ func TestManualRollbackSequenceOneToTwoThenTwoToOne(t *testing.T) {
 	if record == nil || record.Kind != kindAppBundleRollback || record.Result != ResultRolledBack {
 		t.Fatalf("history = %+v, want an app-bundle-rollback rolled-back record", record)
 	}
-	if record.Rollback.RestoredGeneration != 1 || record.Rollback.Baseline {
+	if record.Rollback.RestoredGeneration == nil || *record.Rollback.RestoredGeneration != 1 || record.Rollback.Baseline {
 		t.Fatalf("rollback record = %+v, want restored generation 1 and not baseline", record.Rollback)
 	}
 	if record.Reason == "" {
@@ -126,7 +126,7 @@ func TestManualRollbackSequenceOneToBaseline(t *testing.T) {
 	if record == nil || record.Kind != kindAppBundleRollback || record.Result != ResultRolledBack {
 		t.Fatalf("history = %+v, want a baseline rollback record", record)
 	}
-	if !record.Rollback.Baseline || record.Rollback.RestoredGeneration != 0 {
+	if !record.Rollback.Baseline || record.Rollback.RestoredGeneration == nil || *record.Rollback.RestoredGeneration != 0 {
 		t.Fatalf("rollback record = %+v, want baseline true and restored generation 0", record.Rollback)
 	}
 	if record.Reason != "bench reverted the only release" {
@@ -168,6 +168,8 @@ func TestManualRollbackWithoutABaselineOrPreviousBundleRejects(t *testing.T) {
 		t.Fatal(err)
 	} else if record == nil || record.Result != ResultRejected {
 		t.Fatalf("history = %+v, want a rejected rollback record", record)
+	} else if record.Rollback.RestoredGeneration != nil {
+		t.Fatalf("rejected rollback carries a restored generation: %+v", record.Rollback)
 	}
 	if calls := env.system.snapshot(); len(calls) != 0 {
 		t.Fatalf("rejected rollback touched units: %v", calls)
@@ -237,8 +239,8 @@ func TestManualRollbackRestoresTheCommittedBundleWhenThePreviousFailsToStart(t *
 	if record == nil || record.Result != ResultFailed {
 		t.Fatalf("history = %+v, want a failed rollback record", record)
 	}
-	if record.Rollback.RestoredGeneration != 2 {
-		t.Fatalf("restored generation = %d, want the committed 2", record.Rollback.RestoredGeneration)
+	if record.Rollback.RestoredGeneration == nil || *record.Rollback.RestoredGeneration != 2 {
+		t.Fatalf("restored generation = %v, want the committed 2", record.Rollback.RestoredGeneration)
 	}
 	assertNoJournal(t, env.stateRoot)
 }
@@ -312,8 +314,8 @@ func TestManualRollbackBaselineRestoresTheCommittedBundleWhenTheBaselineFailsToS
 	if record == nil || record.Result != ResultFailed || !record.Rollback.Baseline {
 		t.Fatalf("history = %+v, want a failed baseline rollback record", record)
 	}
-	if record.Rollback.RestoredGeneration != 1 {
-		t.Fatalf("restored generation = %d, want 1", record.Rollback.RestoredGeneration)
+	if record.Rollback.RestoredGeneration == nil || *record.Rollback.RestoredGeneration != 1 {
+		t.Fatalf("restored generation = %v, want 1", record.Rollback.RestoredGeneration)
 	}
 	assertNoJournal(t, env.stateRoot)
 }

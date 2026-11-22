@@ -156,11 +156,15 @@ rejected.
 
 A root-owned rotation store under `/etc/bittern/trust/release-keys/` may add keys before a new image
 retires an old one. It follows the same ownership, mode, content, and naming rules. The verifier reads
-both directories and trusts the union. A key in the image store cannot be removed by the rotation
-store; retiring it requires a new image that does not carry it. The verifier rejects symlinks,
-non-root ownership, group- or other-writable files, duplicate key ids with different key material,
-and a key file whose id does not match its content. A missing image store is a failure; a missing
-rotation store is treated as empty. The verifier fails closed if it cannot read a valid image store.
+both directories and trusts the union. Either directory may be absent: a missing directory is not an
+error when the other store yields at least one valid key. The union must contain at least one key, so
+two absent or empty stores are `trust.missing`. The image store is read first. A duplicate key id
+with identical bytes is one key; a duplicate id with different key material is `trust.duplicate` and
+is rejected rather than overriding the image key. A key in the image store cannot be removed by the
+rotation store; retiring it requires a new image that does not carry it. The verifier rejects
+symlinks, non-root ownership, group- or other-writable files, duplicate key ids with different key
+material, and a key file whose id does not match its content. The verifier fails closed if it cannot
+read a valid trust store or if neither store yields a key.
 
 The rotation store must survive an OS slot switch and an OS rollback. If it lives inside an OS slot,
 a rollback can remove a key that the current app bundle depends on. The image ADR must place it on the
@@ -541,8 +545,9 @@ are consistent.
 - Add canonicalization test vectors and the negative tests listed in this ADR.
 - Add the signing step to the release process and verify every release on a clean machine before
   publication.
-- Decide the rotation carrier and the trust-store location with the image and release ADRs, and prove
-  that the store survives an OS slot switch.
+- Decide the rotation carrier and the storage location with the image and release ADRs, and prove
+  that the store survives an OS slot switch. Section 4 now records the union rule, the missing-store
+  rule, and the duplicate-id rule; this follow-up owns the carrier and the slot-surviving placement.
 - Record the key id and manifest digest in the update record and the support bundle.
 - Add the signing and verification check to the ADR 0012 release checklist and the release notes.
 - Revisit TUF or cosign if the project grows beyond one maintainer or needs a hosted repository with

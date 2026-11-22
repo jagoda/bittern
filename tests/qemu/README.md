@@ -15,8 +15,9 @@ healthy, one camera, and a JPEG snapshot. The same scenario reads `bittern setup
 decodes the terminal QR to the exact `https://<lan0-address>/ui/setup#token=<token>` payload, checks
 the grouped token and short code, completes setup from the fragment, and scans the journal and
 status for either value. The BIT-009 update scenario passed on 2026-11-22 under KVM; its scope and
-the two beta-kit gaps it works around are in
-[the update scenario note](../../docs/notes/2026-11-22-qemu-update-scenario.md).
+the kit-only rerun are in
+[the update scenario note](../../docs/notes/2026-11-22-qemu-update-scenario.md) and
+[the wave three note](../../docs/notes/2026-11-22-beta-kit-wave-three.md).
 
 The carrierless run and measured phase times are in
 [the first-boot note](../../docs/notes/2026-11-14-qemu-firstboot.md).
@@ -373,9 +374,10 @@ exists only inside the QEMU guest.
 
 `run.py update` proves the BIT-009 app bundle transaction on the same two guests. It restores the
 firstboot baseline, installs the beta preparation kit from `make beta-payload` with a per-run
-ephemeral Ed25519 anchor, asserts the installed platform metadata, runs first boot, records the beta
-channel, and starts the installed agent. It then offers four signed bundle generations through the
-real `bittern update install` path:
+ephemeral Ed25519 anchor, asserts the installed platform metadata, runs first boot with the kit's
+install channel, and starts the installed agent. It asserts that the image trust store is absent and
+that the rotation store alone verifies the bundles. It then offers four signed bundle generations
+through the real `bittern update install` path:
 
 | Generation | Purpose | Expected result |
 | --- | --- | --- |
@@ -385,11 +387,13 @@ real `bittern update install` path:
 | 4 and copies | Valid generation 4, a payload byte flip, a signature byte flip, and generation 1 again | rejected at `verify-payload` (`payload.digest`), `verify-manifest` (`signature.invalid`) and `verify-manifest` (`generation.rollback`) before any unit stops |
 
 On every commit the scenario requires `app/current`, `bittern update status`, `/api/version`,
-`readlink /proc/<pid>/exe` and the history record to agree on the generation and version. On the
-rollback it requires the journal to be gone, the pointer and running version back on generation 2,
-the failed candidate retained, and the history to name `health` with a `bundle-integrity` failure. On
-every rejection it requires the pointer, committed state, `bitternd.service` InvocationID and running
-version to be unchanged, with no journal or request left and a `rejected` history result.
+`readlink /proc/<pid>/exe` and the history record to agree on the generation and version. The
+factory baseline must report `baseline: true` and a `0.0.0-factory-<commit>` version that differs
+from the generation 1 bundle built from the same commit; every bundle reports `baseline: false`. On
+the rollback it requires the journal to be gone, the pointer and running version back on generation
+2, the failed candidate retained, and the history to name `health` with a `bundle-integrity` failure.
+On every rejection it requires the pointer, committed state, `bitternd.service` InvocationID and
+running version to be unchanged, with no journal or request left and a `rejected` history result.
 
 The private seed is written under `build/qemu/update`, used only on the host, and deleted after the
 last signature; only the public anchor reaches the guest. The committed CI test anchor is asserted
@@ -399,19 +403,18 @@ The scenario starts from the QEMU firstboot baseline row in
 [the field-parity table](../../docs/engineering/field-parity.md#environments) and has these declared
 differences:
 
-- It places the ephemeral anchor in the image trust store as well as the rotation store the kit
-  writes, because the update helper requires the image store to exist. It is evidence for the
-  transaction, not for the kit's trust-store installation.
-- It sets `updates.channel` from the first-boot default `stable` to `beta`, because the beta kit
-  carries beta bundles and first boot does not record the kit's channel. It is evidence for the
-  transaction, not for the kit's channel selection.
 - It configures no camera. `frigateConfigured` is false, so the plan has no Frigate stop, image or
   start step, `backup-data` records `not-configured`, and the Frigate health probe is not run. The
   Frigate database snapshot and restore are not covered.
+- It uses the kit's install path alone for the trust store and channel. The scenario fails if the
+  image trust store exists or if `appliance.yaml` changes after first boot, so either former
+  workaround cannot be reintroduced silently.
 
-The scenario is opt-in and not part of `make check`. On 2026-11-22 it passed in the development
-container with KVM in 80.2 s wall time; the phases and the guest evidence are in
-[the update scenario note](../../docs/notes/2026-11-22-qemu-update-scenario.md).
+The scenario is opt-in and not part of `make check`. On 2026-11-22 the original run passed in the
+development container with KVM in 80.2 s wall time, and the kit-only rerun passed with exit 0. The
+phases and the guest evidence are in
+[the update scenario note](../../docs/notes/2026-11-22-qemu-update-scenario.md) and
+[the wave three note](../../docs/notes/2026-11-22-beta-kit-wave-three.md).
 
 ## Tests
 

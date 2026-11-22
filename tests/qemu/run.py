@@ -1830,6 +1830,19 @@ def build_installer_payload(bittern: Path, bitternd: Path, launcher: Path) -> Pa
             else 0o644
         )
         checksums.append(f"{hashlib.sha256(destination.read_bytes()).hexdigest()}  {name}\n")
+    version_stamp = (
+        "product: bittern\n"
+        "baseline: true\n"
+        "channel: stable\n"
+        "generation: 0\n"
+        "version: 0.0.0-poc\n"
+        "source_commit: unknown\n"
+    )
+    (stage / "VERSION").write_text(version_stamp, encoding="utf-8")
+    (stage / "VERSION").chmod(0o644)
+    checksums.append(
+        f"{hashlib.sha256((stage / 'VERSION').read_bytes()).hexdigest()}  VERSION\n"
+    )
     (stage / "SHA256SUMS").write_text("".join(checksums), encoding="utf-8")
     with tarfile.open(archive, "w:gz") as handle:
         handle.add(stage, arcname=stage.name)
@@ -5269,6 +5282,7 @@ UPDATE_POINTER = "/var/lib/bittern/app/current"
 UPDATE_PLATFORM = "/usr/lib/bittern/platform.json"
 UPDATE_TRUST_DIR = "/etc/bittern/trust/release-keys"
 UPDATE_IMAGE_TRUST_DIR = "/usr/lib/bittern/trust/release-keys"
+INSTALL_CHANNEL_FILE = "install-channel"
 
 
 def build_release_tool() -> Path:
@@ -5479,10 +5493,12 @@ class UpdateScenario(FirstbootScenario):
         self.work = BUILD / "update"
         self.key_id = ""
         self.commit = ""
+        self.baseline_version = ""
         self.versions: dict[int, str] = {}
         self.kit_archive: Path | None = None
-        self.public_key_path: Path | None = None
         self.staged: dict[str, Path] = {}
+        self.appliance_config_sha256 = ""
+        self.appliance_config_mtime = ""
 
     def run(self) -> int:
         self.run_phase("update-assets", self.prepare_update_assets)
@@ -5490,7 +5506,6 @@ class UpdateScenario(FirstbootScenario):
         self.run_phase("install", self.install_components)
         self.run_phase("platform", self.assert_platform_and_anchor)
         self.run_phase("first-boot", self.run_first_boot)
-        self.run_phase("device-channel", self.set_device_channel)
         self.run_phase("agent-baseline", self.assert_baseline_agent)
         self.run_phase("install-generation-1", self.install_generation_1)
         self.run_phase("update-generation-2", self.update_generation_2)
@@ -5517,13 +5532,13 @@ class UpdateScenario(FirstbootScenario):
         tool = build_release_tool()
         key, public, key_id = generate_ephemeral_key(tool, self.work / "keys")
         self.key_id = key_id
-        self.public_key_path = public
         commit = run_command(["git", "rev-parse", "HEAD"], cwd=ROOT, timeout=30)
         self.commit = commit.stdout.strip()
         if commit.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", self.commit):
             raise HarnessError(
                 f"cannot read the source commit for the bundle manifests: {self.commit!r}"
             )
+        self.baseline_version = f"0.0.0-factory-{self.commit[:12]}"
         created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self.kit_archive = build_beta_kit(public, created)
         for generation in (1, 2, 3, 4):
@@ -5575,6 +5590,7 @@ class UpdateScenario(FirstbootScenario):
         self.capture(
             "update-assets.txt",
             f"key id {self.key_id}\ncommit {self.commit}\n"
+            f"baseline {self.baseline_version}\n"
             f"versions {json.dumps(self.versions, sort_keys=True)}\n"
             f"kit {self.kit_archive.name}\n",
         )
@@ -5596,6 +5612,27 @@ class UpdateScenario(FirstbootScenario):
         )
         self.installer_path = "/tmp/bittern-beta-kit/bittern-beta-kit"
         self.installer_archive = remote
+        stamp = self.appliance.ssh(
+            f"sudo -n cat {shlex.quote(self.installer_path)}/VERSION", timeout=30
+        ).stdout
+        fields: dict[str, str] = {}
+        for line in stamp.splitlines():
+            key, separator, value = line.partition(":")
+            if separator:
+                fields[key.strip()] = value.strip()
+        expected = {
+            "baseline": "true",
+            "channel": "beta",
+            "generation": "0",
+            "version": self.baseline_version,
+            "source_commit": self.commit,
+        }
+        for key, value in expected.items():
+            if fields.get(key) != value:
+                raise HarnessError(
+                    f"kit VERSION {key} is {fields.get(key)!r}, expected {value!r}:\n{stamp}"
+                )
+        self.capture("kit-version.txt", stamp)
 
     def assert_platform_and_anchor(self) -> str:
         platform = self.appliance.ssh(f"sudo -n cat {UPDATE_PLATFORM}", timeout=30).stdout
@@ -5620,36 +5657,42 @@ class UpdateScenario(FirstbootScenario):
             raise HarnessError(
                 f"the rotation anchor digest {rotation_digest} does not equal the key id"
             )
-        # The update helper requires the image trust store from ADR 0029 to
-        # exist; the beta kit installs only the rotation anchor. The scenario
-        # places the same ephemeral public key at the image path so a signed
-        # bundle can be verified. This is a kit gap recorded in the scenario
-        # note, not a product weakening: the anchor is still a trust input.
-        if self.public_key_path is None:
-            raise HarnessError("the ephemeral public key was not recorded")
-        remote_key = f"/tmp/{self.public_key_path.name}"
-        self.appliance.scp_to(self.public_key_path, remote_key, timeout=60)
-        self.appliance.ssh(
-            f"sudo -n install -d -o root -g root -m 0755 {UPDATE_IMAGE_TRUST_DIR}; "
-            f"sudo -n install -o root -g root -m 0644 {remote_key} "
-            f"{UPDATE_IMAGE_TRUST_DIR}/{self.key_id}.pub; "
-            f"sudo -n rm -f {remote_key}",
-            timeout=60,
-        )
-        image_anchor = f"{UPDATE_IMAGE_TRUST_DIR}/{self.key_id}.pub"
-        image_digest = self.appliance.ssh(
-            f"sudo -n sha256sum {image_anchor}", timeout=30
-        ).stdout.split()[0]
-        if image_digest != self.key_id:
-            raise HarnessError(
-                f"the image anchor digest {image_digest} does not equal the key id"
-            )
-        anchor_stat = self.appliance.ssh(
-            f"sudo -n stat -c '%a %U' {image_anchor}", timeout=30
+        rotation_stat = self.appliance.ssh(
+            f"sudo -n stat -c '%a %U' {rotation}", timeout=30
         ).stdout.strip()
-        if anchor_stat != "644 root":
+        if rotation_stat != "644 root":
             raise HarnessError(
-                f"the image anchor ownership or mode is {anchor_stat!r}, expected 644 root"
+                f"the rotation anchor ownership or mode is {rotation_stat!r}, expected 644 root"
+            )
+        rotation_dir_stat = self.appliance.ssh(
+            f"sudo -n stat -c '%a %U' {UPDATE_TRUST_DIR}", timeout=30
+        ).stdout.strip()
+        if rotation_dir_stat != "755 root":
+            raise HarnessError(
+                f"the rotation store ownership or mode is {rotation_dir_stat!r}, expected 755 root"
+            )
+        image_present = self.appliance.ssh(
+            f"test -e {UPDATE_IMAGE_TRUST_DIR}", timeout=30, check=False
+        )
+        if image_present.returncode == 0:
+            raise HarnessError(
+                f"the image trust store {UPDATE_IMAGE_TRUST_DIR} exists on a kit device; "
+                "the scenario must prove the rotation store alone is enough"
+            )
+        install_channel = f"/etc/bittern/{INSTALL_CHANNEL_FILE}"
+        channel = self.appliance.ssh(
+            f"sudo -n cat {install_channel}", timeout=30
+        ).stdout.strip()
+        if channel != "beta":
+            raise HarnessError(
+                f"the kit install channel is {channel!r}, expected beta"
+            )
+        channel_stat = self.appliance.ssh(
+            f"sudo -n stat -c '%a %U' {install_channel}", timeout=30
+        ).stdout.strip()
+        if channel_stat != "644 root":
+            raise HarnessError(
+                f"the install channel ownership or mode is {channel_stat!r}, expected 644 root"
             )
         real_ci = hashlib.sha256(
             (ROOT / "packaging" / "trust" / "beta-ci.pub").read_bytes()
@@ -5657,7 +5700,6 @@ class UpdateScenario(FirstbootScenario):
         if real_ci == self.key_id:
             raise HarnessError("the ephemeral key equals the committed CI test key")
         self.appliance.ssh(f"test ! -e {UPDATE_TRUST_DIR}/{real_ci}.pub", timeout=30)
-        self.appliance.ssh(f"test ! -e {UPDATE_IMAGE_TRUST_DIR}/{real_ci}.pub", timeout=30)
         self.appliance.ssh("test -x /usr/libexec/bittern/bitternd", timeout=30)
         enabled = self.appliance.ssh(
             "systemctl is-enabled bittern-update.service", timeout=30
@@ -5667,18 +5709,22 @@ class UpdateScenario(FirstbootScenario):
         evidence = (
             f"$ cat {UPDATE_PLATFORM}\n{platform}\n"
             f"$ stat -c '%a %U' {UPDATE_PLATFORM}\n{platform_stat}\n"
-            f"$ sha256sum {image_anchor}\n{image_digest}  {image_anchor}\n"
-            f"$ stat -c '%a %U' {image_anchor}\n{anchor_stat}\n"
             f"$ sha256sum {rotation}\n{rotation_digest}  {rotation}\n"
+            f"$ stat -c '%a %U' {rotation}\n{rotation_stat}\n"
+            f"$ stat -c '%a %U' {UPDATE_TRUST_DIR}\n{rotation_dir_stat}\n"
+            f"$ cat {install_channel}\n{channel}\n"
+            f"$ stat -c '%a %U' {install_channel}\n{channel_stat}\n"
+            f"$ test -e {UPDATE_IMAGE_TRUST_DIR}\nabsent\n"
         )
         self.capture("update-platform.txt", evidence)
         return (
             "platform metadata is schema 1 generation 1, mode 0644 root; the ephemeral "
-            "anchor is installed in the image and rotation stores, and the committed CI "
-            "test anchor is absent from both"
+            "anchor is installed in the rotation store at mode 0644 root, the image trust "
+            "store is absent, the install channel is beta, and the committed CI test "
+            "anchor is absent"
         )
 
-    def wait_version(self) -> str:
+    def version_payload(self) -> dict[str, Any]:
         result = self.appliance.ssh(
             "for _ in $(seq 1 60); do "
             "curl -fsS --max-time 3 http://127.0.0.1:8080/api/version && exit 0; "
@@ -5691,47 +5737,83 @@ class UpdateScenario(FirstbootScenario):
                 "bitternd did not answer /api/version:\n" + result.stdout + result.stderr
             )
         try:
-            return str(json.loads(result.stdout.strip().splitlines()[-1])["version"])
-        except (ValueError, KeyError) as exc:
+            payload = json.loads(result.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError) as exc:
             raise HarnessError(f"cannot parse /api/version: {result.stdout!r}") from exc
+        if not isinstance(payload, dict) or "version" not in payload or "baseline" not in payload:
+            raise HarnessError(f"unexpected /api/version payload: {payload!r}")
+        return payload
 
-    def set_device_channel(self) -> str:
-        # First boot writes the schema default channel, stable. The beta kit is
-        # for the beta channel, and the signed bundles claim beta, so the
-        # scenario records the device channel the way an owner would before the
-        # update. The channel is not a rendered input.
+    def wait_version(self) -> str:
+        return str(self.version_payload()["version"])
+
+    def assert_device_channel(self) -> str:
+        # The kit writes the install channel and first boot consumes it. No
+        # owner edit is part of this scenario.
         path = "/etc/bittern/appliance.yaml"
-        before = self.appliance.ssh(f"sudo -n cat {path}", timeout=30).stdout
-        if "channel: stable" not in before:
-            raise HarnessError(f"first boot did not write the default channel:\n{before}")
-        self.appliance.ssh(
-            f"sudo -n sed -i 's/^    channel: stable$/    channel: beta/' {path}", timeout=30
+        config = self.appliance.ssh(f"sudo -n cat {path}", timeout=30).stdout
+        if "channel: beta" not in config:
+            raise HarnessError(
+                f"first boot did not record the kit channel beta:\n{config}"
+            )
+        install_channel = f"/etc/bittern/{INSTALL_CHANNEL_FILE}"
+        channel = self.appliance.ssh(
+            f"sudo -n cat {install_channel}", timeout=30
+        ).stdout.strip()
+        if channel != "beta":
+            raise HarnessError(
+                f"the kit install channel is {channel!r}, expected beta"
+            )
+        digest = self.appliance.ssh(
+            f"sudo -n sha256sum {path}", timeout=30
+        ).stdout.split()[0]
+        stamp = self.appliance.ssh(
+            f"sudo -n stat -c '%Y:%s' {path}", timeout=30
+        ).stdout.strip()
+        if not digest or not stamp:
+            raise HarnessError("cannot record the appliance.yaml digest and timestamp")
+        self.appliance_config_sha256 = digest
+        self.appliance_config_mtime = stamp
+        self.capture("appliance-channel.txt", config)
+        return (
+            f"first boot recorded the kit channel beta (sha256 {digest}, stamp {stamp}) "
+            "without an owner edit"
         )
-        after = self.appliance.ssh(f"sudo -n cat {path}", timeout=30).stdout
-        if "channel: beta" not in after:
-            raise HarnessError(f"the device channel was not changed to beta:\n{after}")
-        self.capture("appliance-channel.txt", after)
-        return "the device channel is beta before any bundle is offered"
+
+    def run_first_boot(self) -> str:
+        detail = super().run_first_boot()
+        return detail + "; " + self.assert_device_channel()
 
     def assert_baseline_agent(self) -> str:
         self.appliance.ssh("sudo -n systemctl restart bitternd.service", timeout=90)
-        version = self.wait_version()
-        # The kit packer stamps its own bitternd with the generation 1 version,
-        # so the installed baseline and the generation 1 bundle carry the same
-        # string. The generation 2 assertion below is the version change.
-        if version != self.versions[1]:
+        payload = self.version_payload()
+        version = str(payload["version"])
+        if version != self.baseline_version:
             raise HarnessError(
-                f"the installed baseline agent reports {version!r}, expected the kit build "
-                f"{self.versions[1]!r}"
+                f"the installed baseline agent reports {version!r}, expected the factory "
+                f"baseline {self.baseline_version!r}"
+            )
+        if payload.get("baseline") is not True:
+            raise HarnessError(
+                f"the factory baseline is not reported distinctly: {payload!r}"
+            )
+        if version == self.versions[1]:
+            raise HarnessError(
+                "the factory baseline and the generation 1 bundle share a version string"
             )
         if self.appliance.ssh(f"test ! -e {UPDATE_POINTER}", timeout=30).returncode != 0:
             raise HarnessError("the activation pointer exists before the first bundle install")
         status = self.appliance.ssh("sudo -n bittern update status", timeout=30).stdout
         if "committed: no update state" not in status:
             raise HarnessError(f"update status is not empty before the first install:\n{status}")
+        evidence = (
+            f"$ GET /api/version\n{json.dumps(payload, sort_keys=True)}\n"
+            f"$ bittern update status\n{status}\n"
+        )
+        self.capture("baseline-version.txt", evidence)
         return (
-            f"baseline agent reports {self.versions[1]}; no activation pointer and no "
-            "committed update state"
+            f"factory baseline reports {version} with baseline=true, generation 1 bundle "
+            f"is {self.versions[1]}, no activation pointer and no committed update state"
         )
 
     def stage_update_sources(self) -> None:
@@ -5794,10 +5876,15 @@ class UpdateScenario(FirstbootScenario):
                 f"the activation pointer is {pointer!r}, expected generation {generation}"
             )
         expected = self.versions[generation]
-        version = self.wait_version()
+        payload = self.version_payload()
+        version = str(payload["version"])
         if version != expected:
             raise HarnessError(
                 f"the running agent reports {version!r}, expected {expected!r}"
+            )
+        if payload.get("baseline") is not False:
+            raise HarnessError(
+                f"the bundle agent is reported as a factory baseline: {payload!r}"
             )
         pid = self.appliance.ssh(
             "systemctl show -p MainPID --value bitternd.service", timeout=30
@@ -5825,7 +5912,7 @@ class UpdateScenario(FirstbootScenario):
         start_log = self.agent_start_log()
         evidence = (
             f"$ cat {UPDATE_POINTER}\n{pointer}\n"
-            f"$ GET /api/version\n{version}\n"
+            f"$ GET /api/version\n{json.dumps(payload, sort_keys=True)}\n"
             f"$ readlink /proc/{pid}/exe\n{executable}\n"
             f"$ journalctl -u bitternd.service (daemon.start)\n{start_log}\n"
             f"$ bittern update status\n{status}\n"
@@ -6013,22 +6100,58 @@ class UpdateScenario(FirstbootScenario):
         for path in paths:
             raw = self.appliance.ssh(f"sudo -n cat {shlex.quote(path)}", timeout=30).stdout
             try:
-                results.append(json.loads(raw).get("result"))
+                record = json.loads(raw)
             except json.JSONDecodeError as exc:
                 raise HarnessError(f"cannot parse the history record {path}: {raw!r}") from exc
+            results.append(record.get("result"))
+            rollback = record.get("rollback") or {}
+            if record.get("result") != "rolled-back" and "restored_generation" in rollback:
+                raise HarnessError(
+                    f"a {record.get('result')} history record carries "
+                    f"rollback.restored_generation: {record}"
+                )
         counts = {name: results.count(name) for name in ("committed", "rolled-back", "rejected")}
         if counts != {"committed": 2, "rolled-back": 1, "rejected": 3}:
             raise HarnessError(f"unexpected update history results: {counts} ({results})")
         pointer = self.appliance.ssh(f"sudo -n cat {UPDATE_POINTER}", timeout=30).stdout.strip()
+
+        config_path = "/etc/bittern/appliance.yaml"
+        config_digest = self.appliance.ssh(
+            f"sudo -n sha256sum {config_path}", timeout=30
+        ).stdout.split()[0]
+        config_stamp = self.appliance.ssh(
+            f"sudo -n stat -c '%Y:%s' {config_path}", timeout=30
+        ).stdout.strip()
+        if (
+            config_digest != self.appliance_config_sha256
+            or config_stamp != self.appliance_config_mtime
+        ):
+            raise HarnessError(
+                "appliance.yaml changed after the kit recorded its channel: "
+                f"{self.appliance_config_sha256}/{self.appliance_config_mtime} -> "
+                f"{config_digest}/{config_stamp}"
+            )
+        image_present = self.appliance.ssh(
+            f"test -e {UPDATE_IMAGE_TRUST_DIR}", timeout=30, check=False
+        )
+        if image_present.returncode == 0:
+            raise HarnessError(
+                f"the image trust store {UPDATE_IMAGE_TRUST_DIR} was created after the "
+                "kit install; the scenario must prove the rotation store alone is enough"
+            )
         evidence = (
             f"$ cat {UPDATE_POINTER}\n{pointer}\n"
+            f"$ sha256sum {config_path}\n{config_digest}  {config_path}\n"
+            f"$ stat -c '%Y:%s' {config_path}\n{config_stamp}\n"
+            f"$ test -e {UPDATE_IMAGE_TRUST_DIR}\nabsent\n"
             f"$ bittern update status\n{status}\n"
             f"history results: {json.dumps(counts, sort_keys=True)}\n"
         )
         self.capture("update-final.txt", evidence)
         return (
             "two commits, one rollback and three rejections recorded; the pointer is on "
-            f"generation {pointer} with no journal"
+            f"generation {pointer} with no journal; appliance.yaml and the absent image "
+            "trust store are unchanged after first boot"
         )
 
 

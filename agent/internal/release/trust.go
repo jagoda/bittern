@@ -32,24 +32,39 @@ func KeyID(publicKey ed25519.PublicKey) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// LoadTrustStore reads the image store and the rotation store. A missing image
-// store is a failure; a missing or empty rotation path is treated as empty.
-// Both directories follow the ownership, mode, filename and content rules in
-// ADR 0029 section 4.
+// LoadTrustStore reads the image store and the rotation store. Both locations
+// are optional individually, but the union must contain at least one key: two
+// absent or empty stores are trust.missing. Each directory follows the
+// ownership, mode, filename and content rules in ADR 0029 section 4.
+//
+// The image store is read first, so its copy of a key id wins when the same id
+// appears in both stores with identical key material. A duplicate id with
+// different key material is a trust.duplicate failure rather than an override:
+// the rotation store may add keys, never replace an image key with different
+// bytes.
 func LoadTrustStore(imageDir, rotationDir string) (*TrustStore, error) {
-	if imageDir == "" {
-		return nil, errorAt("", "trust.missing", "the image trust store path is empty")
-	}
 	keys := make(map[string]ed25519.PublicKey)
-	if err := readTrustDir(imageDir, true, keys); err != nil {
-		return nil, err
-	}
-	if rotationDir != "" {
-		if err := readTrustDir(rotationDir, false, keys); err != nil {
+	if imageDir != "" {
+		if err := readTrustDir(imageDir, keys); err != nil {
 			return nil, err
 		}
 	}
+	if rotationDir != "" {
+		if err := readTrustDir(rotationDir, keys); err != nil {
+			return nil, err
+		}
+	}
+	if len(keys) == 0 {
+		return nil, errorAt(imageDir, "trust.missing", "no trusted release keys in the image store %s or the rotation store %s", displayTrustDir(imageDir), displayTrustDir(rotationDir))
+	}
 	return &TrustStore{keys: keys}, nil
+}
+
+func displayTrustDir(dir string) string {
+	if dir == "" {
+		return "(none)"
+	}
+	return dir
 }
 
 // Lookup returns the public key for a key id.
@@ -64,14 +79,13 @@ func (s *TrustStore) Lookup(keyID string) (ed25519.PublicKey, bool) {
 	return append(ed25519.PublicKey(nil), key...), true
 }
 
-func readTrustDir(dir string, required bool, keys map[string]ed25519.PublicKey) error {
+func readTrustDir(dir string, keys map[string]ed25519.PublicKey) error {
 	info, err := os.Lstat(dir)
 	if err != nil {
-		if os.IsNotExist(err) && !required {
-			return nil
-		}
 		if os.IsNotExist(err) {
-			return errorAt(dir, "trust.missing", "the image trust store is missing")
+			// A missing store is empty, not a failure. LoadTrustStore rejects
+			// the case where both stores are missing or empty.
+			return nil
 		}
 		return errorAt(dir, "trust.read", "read the trust store: %v", err)
 	}
@@ -105,6 +119,8 @@ func readTrustDir(dir string, required bool, keys map[string]ed25519.PublicKey) 
 			if !bytes.Equal(existing, key) {
 				return errorAt(filepath.Join(dir, name), "trust.duplicate", "key id %s has different material in the trust store", keyID)
 			}
+			// Same id and same bytes: the first store read owns the entry, so
+			// the image store wins. The key is identical either way.
 			continue
 		}
 		if actualID := KeyID(key); actualID != keyID {
