@@ -60,6 +60,12 @@ the maximum. That is deliberate:
 This is a design delta, not a permanent compatibility matrix. [OQ-35](../open-questions.md) still
 owns the supported delivery model and base.
 
+One consequence is explicit: the kit does not write `/usr/lib/bittern/platform.json`. The file is
+image-owned, and no decision assigns it to the preparation kit. A device prepared by the kit
+therefore fails closed at preflight with `platform.missing` until the image or the QEMU fixture
+writes generation 1. The compatibility claim is honest, but the kit alone does not yet make the
+update path live end to end.
+
 ## Workflow behavior and one honest difference
 
 The task requires `contents: write` only on the publish job, and the `beta` environment gates that
