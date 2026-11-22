@@ -25,8 +25,8 @@
 | Area | Change |
 | --- | --- |
 | Decision | ADR 0033 supersedes [ADR 0031](../adr/0031-update-channel-on-github-releases.md) point 3 for the trigger only. The tag is still the release identity and must equal the manifest generation. ADR 0031's status is `Accepted; tag-as-publish-signal decision superseded in part by ADR-0033`, the partial form in the ADR README. The decision text is unchanged. |
-| Preflight | `packaging/release_preflight.py` and `make release-preflight`. The maintainer's local preflight verifies the exact `main` check run, the `BITTERN_CI_SIGNING_KEY` name in `beta-draft`, the tag and branch policies on both environments, the `beta` reviewer and admin bypass, the next generation, the tag absence, and the Go tag parser. The workflow's preflight job declares no environment and reads no key; the draft job's `beta-draft` gate is where the key is present and used. `--plan` prints the plan; `--tag-path` checks the tag-push fallback without the `main` branch requirement. It never creates a tag, draft, or release. |
-| Tests | `tests/release/test_release_preflight.py`, wired into `make check`: no releases, a contiguous history, a gap, a draft, the other channel, a malformed published tag, hexadecimal versus decimal, a computed tag that already exists, and one test per precondition failure message. |
+| Preflight | `packaging/release_preflight.py` and `make release-preflight`. The maintainer's local preflight verifies the exact `main` check run, the `BITTERN_CI_SIGNING_KEY` name in `beta-draft`, the tag and branch policies on both environments, the `beta` reviewer and admin bypass, the next generation, the tag absence, and the Python tag rule checked against `tests/fixtures/release/tag-cases.json`. The preflight needs only `python3` and `gh`; it does not build or invoke the Go release tool. The workflow's preflight job declares no environment and reads no key; the draft job's `beta-draft` gate is where the key is present and used. `--plan` prints the plan; `--tag-path` checks the tag-push fallback without the `main` branch requirement. It never creates a tag, draft, or release. |
+| Tests | `tests/release/test_release_preflight.py` and `tests/checks/tag_corpus.py`, wired into `make check`: no releases, a contiguous history, a gap, a draft, the other channel, a malformed published tag, hexadecimal versus decimal, a computed tag that already exists, one test per precondition failure message, and a check that the Go parser and Python rule agree with the shared tag corpus. |
 | Release workflow | `release.yml` is `workflow_dispatch` only with an optional `confirm` tag. It runs the preflight, then calls `publish.yml` with the computed tag, generation, and commit. The concurrency group is `bittern-release-beta`, `cancel-in-progress: false`. The workflow level is `contents: read` and `actions: read`; the release job raises `contents: write` for the called tag, draft, and publish jobs. |
 | Publish workflow | `publish.yml` is now callable with `workflow_call`, keeps the `push: tags` and `workflow_dispatch` dry-run triggers, and validates the call's generation with the same Go parser. The draft job creates the tag after the signature verification when `create_tag` is true, checks the remote first, and then creates the draft. The publish job uses the tag output, not `github.ref_name`, and never receives the CI test key. |
 | Runbook | [Beta bench rollout](../runbooks/beta-bench-rollout.md) uses `make release-preflight` instead of the inline precondition commands. Dispatch is the normal path; the tag push is the fallback. The two-release sequence and the expectation table are unchanged. |
@@ -77,8 +77,11 @@ is now the normal one; the fallback remains for a release workflow outage or a b
 
 ## Verification
 
-- `make check` passes in the worktree, including the 33 preflight tests.
+- `make check` passes in the worktree, including the 32 preflight tests and the shared tag corpus
+  check.
 - `go vet ./...` and `gofmt -l` pass for the module; the vendor tree is excluded.
+- `env PATH=/usr/bin:/bin make release-preflight RELEASE_PREFLIGHT_ARGS=--plan` passes with no Go
+  on PATH, so the preflight needs only `python3` and `gh`.
 - `actionlint` passes for all three workflows.
 - `gh workflow view` shows `release.yml` as `workflow_dispatch` only and `publish.yml` with the
   `push: tags app-beta-*` fallback, the dry-run dispatch, and `workflow_call`.

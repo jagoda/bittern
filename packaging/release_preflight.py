@@ -16,8 +16,10 @@ This script is the executable precondition. It verifies, in order:
 - the next generation is the highest published app-beta-* generation plus one,
   ignoring drafts, other channels, and tags without a published release;
 - the computed tag does not exist;
-- the computed tag round-trips through bittern-release tag, the same Go parser
-  the publish workflow uses.
+- the computed tag round-trips through the Python tag rule, which is derived
+  from and checked against the shared corpus at
+  tests/fixtures/release/tag-cases.json. The Go parser tests read the same
+  corpus, and make check fails if either implementation disagrees with it.
 
 It prints the tag, the commit, the generation, and the exact next action. It
 never creates a tag, draft, or release in any mode. --plan is the explicit plan
@@ -32,13 +34,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOL = ROOT / "agent" / "bin" / "bittern-release"
+TAG_CORPUS = ROOT / "tests" / "fixtures" / "release" / "tag-cases.json"
 DEFAULT_REPO = "jagoda/bittern"
 DEFAULT_REVIEWER = "jagoda"
 TAG_PREFIX = "app-beta-"
@@ -49,7 +53,8 @@ CHECK_WORKFLOW = "check.yml"
 SECRET_NAME = "BITTERN_CI_SIGNING_KEY"
 SECRET_ENVIRONMENT = "beta-draft"
 PUBLISH_ENVIRONMENT = "beta"
-MAX_GENERATION = 0xFFFFFF
+TAG_CHANNELS = ("beta", "stable")
+HEX_ALPHABET = "0123456789abcdef"
 
 
 class PreflightError(RuntimeError):
@@ -84,55 +89,248 @@ def gh_json(arguments: list[str], run_command: Runner = run) -> object:
         ) from error
 
 
-def parse_tag_go(tag: str, run_command: Runner = run) -> int:
-    """Parse a tag with the Go parser the publish workflow uses."""
-    if not TOOL.exists():
-        try:
-            display = TOOL.relative_to(ROOT)
-        except ValueError:
-            display = TOOL
-        raise PreflightError(
-            "release-tool-missing",
-            f"{display} is missing; run make bittern-release first",
-        )
-    result = run_command([str(TOOL), "tag", tag])
-    if result.returncode != 0:
-        raise PreflightError(
-            "tag-parser-rejected",
-            f"bittern-release tag {tag} rejected the tag: "
-            f"{result.stderr.strip() or result.stdout.strip()}",
-        )
+def load_tag_corpus(path: Path = TAG_CORPUS) -> list[dict]:
+    """Load and shape-check the shared tag corpus."""
     try:
-        return int(result.stdout.strip())
-    except ValueError as error:
-        raise PreflightError(
-            "tag-parser-output",
-            f"bittern-release tag {tag} printed {result.stdout.strip()!r}, not a generation",
-        ) from error
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise PreflightError("tag-corpus-missing", f"cannot read {path}: {error}") from error
+    except json.JSONDecodeError as error:
+        raise PreflightError("tag-corpus-invalid", f"{path} is not JSON: {error}") from error
+    cases = data.get("cases") if isinstance(data, dict) else data
+    if not isinstance(cases, list) or not cases:
+        raise PreflightError("tag-corpus-invalid", f"{path} has no cases")
+    for index, case in enumerate(cases, start=1):
+        if not isinstance(case, dict):
+            raise PreflightError("tag-corpus-invalid", f"case {index} is not an object")
+        for key in ("tag", "channel", "valid", "generation", "reason"):
+            if key not in case:
+                raise PreflightError("tag-corpus-invalid", f"case {index} has no {key}")
+        if not isinstance(case["tag"], str) or not case["tag"]:
+            raise PreflightError("tag-corpus-invalid", f"case {index} has no tag string")
+        if case["channel"] not in TAG_CHANNELS:
+            raise PreflightError(
+                "tag-corpus-invalid",
+                f"case {index} channel {case['channel']!r} is not one of {TAG_CHANNELS}",
+            )
+        if not isinstance(case["valid"], bool):
+            raise PreflightError("tag-corpus-invalid", f"case {index} has no boolean valid field")
+        if case["valid"]:
+            if not isinstance(case["generation"], int) or case["generation"] < 1:
+                raise PreflightError(
+                    "tag-corpus-invalid",
+                    f"valid case {case['tag']!r} has no positive generation",
+                )
+        else:
+            if case["generation"] is not None:
+                raise PreflightError(
+                    "tag-corpus-invalid",
+                    f"invalid case {case['tag']!r} has a generation",
+                )
+            if not isinstance(case["reason"], str) or not case["reason"]:
+                raise PreflightError(
+                    "tag-corpus-invalid",
+                    f"invalid case {case['tag']!r} has no reason",
+                )
+    return cases
+
+
+@dataclass(frozen=True)
+class TagRule:
+    """The channel prefixes and suffix width derived from the shared corpus.
+
+    The prefixes and suffix width are derived from the valid cases. The
+    lowercase hex alphabet and the nonzero generation rule are candidate rule
+    parts checked against every case by from_corpus before the rule is used.
+    """
+
+    prefixes: dict[str, str]
+    suffix_length: int
+    hex_alphabet: str = HEX_ALPHABET
+
+    @classmethod
+    def from_corpus(cls, cases: list[dict]) -> "TagRule":
+        prefixes: dict[str, str] = {}
+        lengths: set[int] = set()
+        for case in cases:
+            if not case["valid"]:
+                continue
+            match = re.search(r"([0-9a-f]+)$", case["tag"])
+            if match is None:
+                raise PreflightError(
+                    "tag-corpus-invalid",
+                    f"valid case {case['tag']!r} has no lowercase hexadecimal suffix",
+                )
+            suffix = match.group(1)
+            prefix = case["tag"][: -len(suffix)]
+            if not prefix.endswith("-"):
+                raise PreflightError(
+                    "tag-corpus-invalid",
+                    f"valid case {case['tag']!r} does not end its prefix with a separator",
+                )
+            if case["channel"] in prefixes and prefixes[case["channel"]] != prefix:
+                raise PreflightError(
+                    "tag-corpus-invalid",
+                    f"valid {case['channel']} cases disagree on the prefix",
+                )
+            prefixes[case["channel"]] = prefix
+            lengths.add(len(suffix))
+        if len(lengths) != 1:
+            raise PreflightError(
+                "tag-corpus-invalid",
+                f"valid cases use suffix widths {sorted(lengths)}, not one width",
+            )
+        if "beta" not in prefixes:
+            raise PreflightError("tag-corpus-invalid", "the corpus has no valid beta tag")
+        rule = cls(prefixes=prefixes, suffix_length=lengths.pop())
+        if rule.prefixes["beta"] != TAG_PREFIX:
+            raise PreflightError(
+                "tag-corpus-mismatch",
+                f"the corpus beta prefix {rule.prefixes['beta']!r} does not match {TAG_PREFIX!r}",
+            )
+        if f"{rule.prefixes['beta']}*" != TAG_POLICY:
+            raise PreflightError(
+                "tag-corpus-mismatch",
+                f"the corpus beta prefix does not match the environment tag policy {TAG_POLICY!r}",
+            )
+        rule.check_corpus(cases)
+        return rule
+
+    def parse(self, tag: str, channel: str | None = None) -> int:
+        if channel is None:
+            selected = [
+                name for name, prefix in self.prefixes.items() if tag.startswith(prefix)
+            ]
+            if len(selected) != 1:
+                raise PreflightError(
+                    "tag-parser-rejected",
+                    f"tag {tag!r} does not select exactly one channel",
+                )
+            channel = selected[0]
+        prefix = self.prefixes.get(channel)
+        if prefix is None:
+            raise PreflightError(
+                "tag-parser-rejected",
+                f"channel {channel!r} has no tag prefix",
+            )
+        if not tag.startswith(prefix):
+            raise PreflightError(
+                "tag-parser-rejected",
+                f"tag {tag!r} does not start with {prefix!r}",
+            )
+        suffix = tag[len(prefix):]
+        if len(suffix) != self.suffix_length:
+            raise PreflightError(
+                "tag-parser-rejected",
+                f"tag {tag!r} has a {len(suffix)}-character suffix; {prefix!r} needs "
+                f"exactly {self.suffix_length} lowercase hexadecimal characters",
+            )
+        for index, character in enumerate(suffix):
+            if character not in self.hex_alphabet:
+                kind = (
+                    "uppercase hexadecimal"
+                    if character.lower() in self.hex_alphabet
+                    else "non-lowercase-hexadecimal"
+                )
+                raise PreflightError(
+                    "tag-parser-rejected",
+                    f"tag {tag!r} has a {kind} character {character!r} at suffix "
+                    f"position {index + 1}",
+                )
+        generation = int(suffix, 16)
+        if generation == 0:
+            raise PreflightError(
+                "tag-parser-rejected",
+                f"tag {tag!r} decodes generation 0; application bundle generation starts at 1",
+            )
+        return generation
+
+    def compute(self, generation: int, channel: str = "beta") -> str:
+        prefix = self.prefixes.get(channel)
+        if prefix is None:
+            raise PreflightError(
+                "tag-parser-rejected",
+                f"channel {channel!r} has no tag prefix",
+            )
+        if generation < 1:
+            raise PreflightError(
+                "generation-out-of-range",
+                f"generation {generation} is below 1; application bundle generations start at 1",
+            )
+        limit = 1 << (4 * self.suffix_length)
+        if generation >= limit:
+            raise PreflightError(
+                "generation-out-of-range",
+                f"generation {generation} does not fit the {self.suffix_length} "
+                "hexadecimal characters in the tag",
+            )
+        return f"{prefix}{generation:0{self.suffix_length}x}"
+
+    def check_corpus(self, cases: list[dict]) -> None:
+        for case in cases:
+            try:
+                actual = self.parse(case["tag"], case["channel"])
+                valid = True
+            except PreflightError:
+                actual = None
+                valid = False
+            if valid != case["valid"]:
+                raise PreflightError(
+                    "tag-corpus-mismatch",
+                    f"the Python rule says {case['tag']!r} is valid={valid}, "
+                    f"corpus says valid={case['valid']}",
+                )
+            if case["valid"]:
+                if actual != case["generation"]:
+                    raise PreflightError(
+                        "tag-corpus-mismatch",
+                        f"the Python rule reads {actual} from {case['tag']!r}, "
+                        f"corpus says {case['generation']}",
+                    )
+                if case.get("reason"):
+                    raise PreflightError(
+                        "tag-corpus-invalid",
+                        f"valid case {case['tag']!r} has a reason",
+                    )
+            else:
+                if case["generation"] is not None:
+                    raise PreflightError(
+                        "tag-corpus-invalid",
+                        f"invalid case {case['tag']!r} has a generation",
+                    )
+                if not case.get("reason"):
+                    raise PreflightError(
+                        "tag-corpus-invalid",
+                        f"invalid case {case['tag']!r} has no reason",
+                    )
+
+
+_TAG_RULE: TagRule | None = None
+
+
+def tag_rule() -> TagRule:
+    global _TAG_RULE
+    if _TAG_RULE is None:
+        _TAG_RULE = TagRule.from_corpus(load_tag_corpus())
+    return _TAG_RULE
+
+
+def parse_tag(tag: str, channel: str | None = None) -> int:
+    return tag_rule().parse(tag, channel)
 
 
 def compute_tag(generation: int) -> str:
-    if generation < 1:
-        raise PreflightError(
-            "generation-out-of-range",
-            f"generation {generation} is below 1; application bundle generations start at 1",
-        )
-    if generation > MAX_GENERATION:
-        raise PreflightError(
-            "generation-out-of-range",
-            f"generation {generation} does not fit the six hexadecimal characters in the tag",
-        )
-    return f"{TAG_PREFIX}{generation:06x}"
+    return tag_rule().compute(generation)
 
 
 def next_generation(
-    releases: Iterable[dict], parse_tag: Callable[[str], int] = parse_tag_go
+    releases: Iterable[dict], parse_tag: Callable[[str], int] = parse_tag
 ) -> int:
     """Return the highest published beta generation plus one.
 
     Drafts are not published. Tags outside the beta namespace are another
-    channel. A published release whose tag the Go parser rejects is not a
-    valid beta generation, so it is ignored rather than counted.
+    channel. A published release whose tag the tag rule rejects is not a valid
+    beta generation, so it is ignored rather than counted.
     """
     highest = 0
     for release in releases:
@@ -306,7 +504,7 @@ def check_parser(tag: str, expected: int, parse_tag: Callable[[str], int]) -> in
     if generation != expected:
         raise PreflightError(
             "tag-parser-mismatch",
-            f"the Go parser read generation {generation} from {tag}, but the arithmetic "
+            f"the tag rule read generation {generation} from {tag}, but the arithmetic "
             f"computed generation {expected}",
         )
     return generation
@@ -503,14 +701,14 @@ def main(argv: list[str] | None = None) -> int:
     generation = None
     tag = None
     if releases is not None:
-        generation = attempt(lambda: next_generation(releases, parse_tag_go))
+        generation = attempt(lambda: next_generation(releases, parse_tag))
     if generation is not None:
         tag = attempt(lambda: compute_tag(generation))
     if tag is not None and generation is not None:
         exists = attempt(lambda: tag_exists(tag))
         if exists is not None:
             attempt(lambda: check_tag_free(tag, exists))
-            attempt(lambda: check_parser(tag, generation, parse_tag_go))
+            attempt(lambda: check_parser(tag, generation, parse_tag))
             facts["published beta"] = (
                 f"highest {generation - 1}" if generation > 1 else "none"
             )

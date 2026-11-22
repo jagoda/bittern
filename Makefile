@@ -113,6 +113,7 @@ check:
 	$(PYTHON) tests/storage/test_storage_setup.py || status=1; \
 	$(PYTHON) tests/checks/unit_enablement.py || status=1; \
 	$(PYTHON) tests/checks/release_asset_names.py || status=1; \
+	$(PYTHON) tests/checks/tag_corpus.py || status=1; \
 	$(PYTHON) tests/release/test_release_preflight.py || status=1; \
 	$(SUBMAKE) version-check || status=1; \
 	$(SUBMAKE) test || status=1; \
@@ -150,12 +151,14 @@ version-check:
 
 # Release preflight per ADR 0033. This target is read-only: it verifies the
 # main check run, the beta-draft secret name, the environment ref policies,
-# computes the next generation, validates the tag with the same Go parser the
-# publish workflow uses, and prints the next action. It creates no tag, draft,
-# or release. Pass RELEASE_PREFLIGHT_ARGS=--plan for the explicit plan banner,
-# or RELEASE_PREFLIGHT_ARGS=--tag-path for the tag-push fallback checks.
+# computes the next generation, validates the tag with the Python tag rule
+# checked against tests/fixtures/release/tag-cases.json, and prints the next
+# action. It needs only python3 and gh; it does not build or invoke the Go
+# tool. It creates no tag, draft, or release. Pass RELEASE_PREFLIGHT_ARGS=--plan
+# for the explicit plan banner, or RELEASE_PREFLIGHT_ARGS=--tag-path for the
+# tag-push fallback checks.
 RELEASE_PREFLIGHT_ARGS ?=
-release-preflight: bittern-release
+release-preflight:
 	@$(PYTHON) packaging/release_preflight.py $(RELEASE_PREFLIGHT_ARGS)
 
 qemu-test:

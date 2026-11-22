@@ -14,7 +14,6 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Callable
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "packaging" / "release_preflight.py"
@@ -22,6 +21,7 @@ SCRIPT = ROOT / "packaging" / "release_preflight.py"
 spec = importlib.util.spec_from_file_location("release_preflight", SCRIPT)
 assert spec is not None and spec.loader is not None
 release_preflight = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = release_preflight
 spec.loader.exec_module(release_preflight)
 
 PreflightError = release_preflight.PreflightError
@@ -151,13 +151,34 @@ class GenerationTests(unittest.TestCase):
                     release_preflight.compute_tag(generation)
                 self.assertEqual(caught.exception.code, "generation-out-of-range")
 
-    def test_parser_infrastructure_errors_are_not_ignored(self) -> None:
+    def test_corpus_errors_are_not_ignored(self) -> None:
         def broken(_tag: str) -> int:
-            raise PreflightError("release-tool-missing", "no tool")
+            raise PreflightError("tag-corpus-missing", "no corpus")
 
         with self.assertRaises(PreflightError) as caught:
             release_preflight.next_generation([release("app-beta-000001")], broken)
-        self.assertEqual(caught.exception.code, "release-tool-missing")
+        self.assertEqual(caught.exception.code, "tag-corpus-missing")
+
+
+class CorpusTests(unittest.TestCase):
+    def test_corpus_matches_the_python_rule(self) -> None:
+        cases = release_preflight.load_tag_corpus()
+        rule = release_preflight.TagRule.from_corpus(cases)
+        self.assertEqual(rule.prefixes["beta"], "app-beta-")
+        self.assertEqual(rule.prefixes["stable"], "app-stable-")
+        self.assertEqual(rule.suffix_length, 6)
+        for case in cases:
+            with self.subTest(tag=case["tag"], channel=case["channel"]):
+                if case["valid"]:
+                    self.assertEqual(
+                        rule.parse(case["tag"], case["channel"]),
+                        case["generation"],
+                    )
+                else:
+                    with self.assertRaises(PreflightError) as caught:
+                        rule.parse(case["tag"], case["channel"])
+                    self.assertEqual(caught.exception.code, "tag-parser-rejected")
+                    self.assertTrue(case["reason"])
 
 
 class FailureMessageTests(unittest.TestCase):
@@ -339,35 +360,13 @@ class FailureMessageTests(unittest.TestCase):
         )
 
     def test_tag_parser_rejected(self) -> None:
-        with mock.patch.object(release_preflight, "TOOL", Path(sys.executable)):
-            self.assertFailure(
-                "tag-parser-rejected",
-                "rejected the tag",
-                release_preflight.parse_tag_go,
-                "app-beta-000002",
-                fake_command(code=2, stderr="bad tag"),
-            )
-
-    def test_tag_parser_output(self) -> None:
-        with mock.patch.object(release_preflight, "TOOL", Path(sys.executable)):
-            self.assertFailure(
-                "tag-parser-output",
-                "not a generation",
-                release_preflight.parse_tag_go,
-                "app-beta-000002",
-                fake_command(stdout="not-a-number\n"),
-            )
-
-    def test_release_tool_missing(self) -> None:
-        with mock.patch.object(
-            release_preflight, "TOOL", Path("/does/not/exist")
-        ):
-            self.assertFailure(
-                "release-tool-missing",
-                "run make bittern-release",
-                release_preflight.parse_tag_go,
-                "app-beta-000002",
-            )
+        self.assertFailure(
+            "tag-parser-rejected",
+            "uppercase hexadecimal",
+            release_preflight.parse_tag,
+            "app-beta-00001F",
+            "beta",
+        )
 
     def test_tag_check_failed(self) -> None:
         self.assertFailure(

@@ -1,0 +1,152 @@
+{
+  "description": "Shared application bundle tag corpus for ADR 0031. The Go parser tests and the Python release preflight both read this file. The channel field is the namespace under test; for a valid case it is the channel the tag selects.",
+  "cases": [
+    {
+      "tag": "app-beta-000001",
+      "channel": "beta",
+      "valid": true,
+      "generation": 1,
+      "reason": null
+    },
+    {
+      "tag": "app-beta-00001f",
+      "channel": "beta",
+      "valid": true,
+      "generation": 31,
+      "reason": null
+    },
+    {
+      "tag": "app-beta-0000ff",
+      "channel": "beta",
+      "valid": true,
+      "generation": 255,
+      "reason": null
+    },
+    {
+      "tag": "app-beta-000010",
+      "channel": "beta",
+      "valid": true,
+      "generation": 16,
+      "reason": null
+    },
+    {
+      "tag": "app-beta-000009",
+      "channel": "beta",
+      "valid": true,
+      "generation": 9,
+      "reason": null
+    },
+    {
+      "tag": "app-beta-abcdef",
+      "channel": "beta",
+      "valid": true,
+      "generation": 11259375,
+      "reason": null
+    },
+    {
+      "tag": "app-beta-ffffff",
+      "channel": "beta",
+      "valid": true,
+      "generation": 16777215,
+      "reason": null
+    },
+    {
+      "tag": "app-stable-00001f",
+      "channel": "stable",
+      "valid": true,
+      "generation": 31,
+      "reason": null
+    },
+    {
+      "tag": "app-beta-000000",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "generation zero"
+    },
+    {
+      "tag": "app-beta-00001F",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "uppercase hexadecimal character"
+    },
+    {
+      "tag": "app-beta-00001",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "five-character suffix"
+    },
+    {
+      "tag": "app-beta-00001ff",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "seven-character suffix"
+    },
+    {
+      "tag": "app-beta-",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "empty suffix"
+    },
+    {
+      "tag": "app-beta-g00001",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "g prefix"
+    },
+    {
+      "tag": "app-beta-0000g1",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "non-hexadecimal character"
+    },
+    {
+      "tag": "app-beta-ffffffffff",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "ten-character suffix"
+    },
+    {
+      "tag": "app-beta-000001-extra",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "extra segment in the suffix"
+    },
+    {
+      "tag": "APP-BETA-00001f",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "uppercase prefix"
+    },
+    {
+      "tag": "00001f",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "no channel prefix"
+    },
+    {
+      "tag": "app-beta-00001f-",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "trailing separator"
+    },
+    {
+      "tag": "app-stable-0000ff",
+      "channel": "beta",
+      "valid": false,
+      "generation": null,
+      "reason": "stable tag in the beta namespace"
+    }
+  ]
+}

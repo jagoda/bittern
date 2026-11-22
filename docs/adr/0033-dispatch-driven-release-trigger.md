@@ -85,8 +85,10 @@ decision superseded in part by ADR-0033`, following the partial-supersession for
 - computes the next generation as the highest published `app-beta-*` release generation plus one,
   ignoring drafts, other channels, and tags without a published release, and refuses if the
   computed tag already exists;
-- validates the computed tag with `bittern-release tag`, the same Go parser the publish workflow
-  uses, rather than a shell copy of the rule;
+- validates the computed tag with a Python tag rule derived from and checked against the shared
+  corpus at `tests/fixtures/release/tag-cases.json`; the Go parser tests read the same corpus, and
+  `make check` fails when either implementation disagrees with it;
+- needs only `python3` and `gh`; it does not build or invoke the Go release tool;
 - prints the tag, the commit, the generation, and the exact next action, and exits non-zero with a
   specific reason per failure.
 

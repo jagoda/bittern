@@ -49,7 +49,9 @@ Expected: every check passes, and the last lines print the computed tag, the com
 and the next action. The preflight verifies the `check.yml` run on the exact `main` head, the
 `BITTERN_CI_SIGNING_KEY` name in `beta-draft`, the `app-beta-*` tag policy on both environments, the
 `beta` reviewer and admin bypass, the next generation, and the tag absence. It validates the tag with
-the same Go parser the publish workflow uses. It creates no tag, draft, or release.
+a Python rule checked against the shared corpus at `tests/fixtures/release/tag-cases.json`, the same
+corpus the Go parser tests use. The preflight needs only `python3` and `gh`; it does not build or
+invoke the Go release tool. It creates no tag, draft, or release.
 
 The dispatch runs at `main`, so both environments must admit `main` in addition to `app-beta-*`. The
 preflight reports a missing branch policy as `environment-dispatch-ref`; fix the policy rather than
