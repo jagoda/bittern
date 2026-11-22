@@ -1,9 +1,9 @@
 # Beta draft environment and CI test key scope
 
 - Date: 2026-11-22
-- Status: implementation note and operational blocker. The `beta-draft` environment exists with the
-  tag policy and no required reviewer. The CI test key has not been copied into it because GitHub
-  secret values are write-only. The maintainer must re-upload the key before a tag run can sign.
+- Status: implementation note. The `beta-draft` environment exists with the tag policy and no
+  required reviewer. The first CI test key was retired and replaced by a new key in `beta-draft`.
+  The `beta` environment holds no signing secret. No tag was created and no release was published.
 - Related: [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md),
   [ADR 0031](../adr/0031-update-channel-on-github-releases.md),
   [ADR 0029](../adr/0029-release-signing-and-key-custody.md),
@@ -45,30 +45,32 @@ Read back with the environments API on 2026-11-22.
 
 No other job has `contents: write`, and no environment is required for the tag or check jobs.
 
-## Secret state and the remaining command
+## Key rotation
 
-The `beta` environment still lists `BITTERN_CI_SIGNING_KEY`. Its value cannot be read back through
-the API or the CLI because GitHub secret values are write-only, so it cannot be copied
-server-side. The `beta-draft` environment currently has no secrets. The value was not read, printed,
-or moved by this change.
+The first CI test key was generated in this container, uploaded to the `beta` environment, and its
+local copy was shredded. Nobody held the value, and GitHub returns secret values as write-only, so
+the key was rotated instead of re-uploaded. No device carried the first key's anchor, so replacing
+it required no re-seeding.
 
-The maintainer must re-upload the same key to the new environment with this single command from the
-repository checkout:
+The new key pair was generated in a private temporary directory with mode 0700. The seed file was
+mode 0600 and the public file was mode 0644, both checked with `stat`. The seed was base64-encoded
+and piped into `gh secret set --env beta-draft`; the value never appeared on a command line, in a
+kept file, or in output. The stale `beta` secret was then deleted, and the private key and temporary
+directory were shredded and removed.
 
-```sh
-gh secret set BITTERN_CI_SIGNING_KEY --env beta-draft --repo jagoda/bittern
-```
+New CI test key:
 
-The command prompts for the secret value. Do not pass the value on the command line or write it to a
-file. After the command, `gh secret list --env beta-draft` should list the secret by name; the value
-stays unreadable.
+| Item | Value |
+| --- | --- |
+| Key id | `e19d358aa7caaca5e5ddb26560227a285a88bc6f136621f3972e0ac054b5c9f3` |
+| Public key hex | `c4b17fe275cc4632b58c24a4cd09ee1da8d9fb904a5e1907e75601b882855285` |
+| Public file | `packaging/trust/beta-ci.pub`, 32 raw bytes, mode 0644 |
 
-The existing `beta` secret was not deleted. Whether to remove it after the new environment works is
-the maintainer's decision, because the `beta` environment no longer needs the key for this workflow
-but another runbook or manual step may still use it.
+`gh secret list --env beta` is empty. `gh secret list --env beta-draft` lists exactly one secret,
+`BITTERN_CI_SIGNING_KEY`.
 
 ## Limit
 
-The workflow has not run with the new environment. `beta-draft` has no key until the command above
-runs, so a tag-triggered draft job would fail at the signing step. That is a deliberate fail-closed
-state, not a successful signing path. No tag was created and no release was published.
+The workflow has not run with the new key. A tag-triggered draft job has the secret available, but
+the signing, draft, and approval path is not proven until a real tag run happens. No tag was created
+and no release was published.

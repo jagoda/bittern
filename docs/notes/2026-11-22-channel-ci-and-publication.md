@@ -67,8 +67,8 @@ beta preparation kit all wait for their named trigger. The kit exits when the OS
   workflow artifact. It has no secrets and does not publish.
 - Phase two publishes on a bundle tag. It creates a draft, uploads the update and kit assets, and
   publishes the draft after maintainer approval in a protected environment. CI test bundles are
-  signed with a CI-only development key in Actions secrets. That key is for test bundles only; its
-  trust anchor exists only on bench devices and it is never the release key.
+  signed with a CI-only development key in the `beta-draft` environment secret. That key is for test
+  bundles only; its trust anchor exists only on bench devices and it is never the release key.
 - `make beta-payload` is adapted from `make poc-payload` and produces `bittern-beta-kit.tar.gz` and
   `SHA256SUMS`. It supersedes the POC payload target rather than duplicating it.
 - Release signing stays offline and airgapped under [ADR 0029](../adr/0029-release-signing-and-key-custody.md).

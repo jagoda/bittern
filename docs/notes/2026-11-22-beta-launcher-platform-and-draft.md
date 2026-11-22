@@ -102,5 +102,5 @@ and a rollback restores the previous one in the fake. They are not live systemd 
 - No tag was created and no release was published. The publish workflow was not run end to end.
   `gh workflow view` is syntax acceptance, not evidence that the approval, digest check, or visible
   flip works on a real run.
-- The CI test key was not used locally. The `beta-draft` environment secret is an operational
-  change on GitHub that this change cannot populate because secret values are write-only.
+- The CI test key was rotated and stored in `beta-draft`, but the new key has not signed a workflow
+  run. The first key was retired before any device carried its anchor, so no re-seeding is needed.

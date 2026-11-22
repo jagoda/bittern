@@ -143,9 +143,10 @@ generation zero, the stable namespace, and a trailing separator.
 - No tag was created and no release was published. The publish workflow has not run end to end.
   `gh workflow view` accepts the workflow syntax; that is not evidence that the signature, draft,
   asset check, or environment approval path works on a real run.
-- The CI test key was not used locally. The local manifest is unsigned, and the packer tests sign a
-  temporary manifest with a generated test key. The `beta` secret's decoded key id and the anchor
-  equality are checked by the workflow, not by this local run.
+- The new CI test key has not been used in a workflow run. The local manifest is unsigned, and the
+  packer tests sign a temporary manifest with a generated test key. The `beta-draft` secret's decoded
+  key id and the anchor equality are checked by the workflow, not by this local run. The first CI
+  test key was retired before any device carried its anchor, so no re-seeding was required.
 - The QEMU update scenario from BIT-009 slice three is still the release gate. A valid update, an
   invalid signature, a digest mismatch, a downgrade, and a rollback have not been exercised against
   this payload.

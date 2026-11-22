@@ -1298,8 +1298,8 @@ build job now produces the unsigned beta application payload, canonical manifest
 and checksums as `bittern-beta-unsigned-test-build` with five-day retention.
 [`.github/workflows/publish.yml`](../../.github/workflows/publish.yml) runs on an `app-beta-*` tag,
 validates the exact tag rule with the Go parser before any check or build, signs the manifest with
-the `beta` environment CI test key, creates a draft with exactly the five release assets, and
-publishes it after the protected-environment approval. `make beta-payload` supersedes
+the `beta-draft` environment CI test key, creates a draft with exactly the five release assets, and
+publishes it after the protected `beta` environment approval. `make beta-payload` supersedes
 `make poc-payload`. The packer, kit, tag parser, and workflow are not release evidence: no tag was
 created, no release was published, and the QEMU update scenario remains step 5. Details, the
 compatibility rule, and the unproven paths are in
