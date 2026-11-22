@@ -5263,6 +5263,808 @@ systemd-run --on-active=2 --unit=bittern-adoption-netd --collect     /bin/system
         return detail + "; no camera password or encoded credential in the logs"
 
 
+UPDATE_INCOMING = "/var/lib/bittern/update/incoming"
+UPDATE_STATE_DIR = "/var/lib/bittern/update"
+UPDATE_POINTER = "/var/lib/bittern/app/current"
+UPDATE_PLATFORM = "/usr/lib/bittern/platform.json"
+UPDATE_TRUST_DIR = "/etc/bittern/trust/release-keys"
+UPDATE_IMAGE_TRUST_DIR = "/usr/lib/bittern/trust/release-keys"
+
+
+def build_release_tool() -> Path:
+    result = run_command(["make", "bittern-release"], cwd=ROOT, timeout=300)
+    tool = ROOT / "agent" / "bin" / "bittern-release"
+    if result.returncode != 0 or not tool.exists():
+        raise HarnessError(
+            "make bittern-release failed; the update scenario signs its bundles offline:\n"
+            f"{result.stdout}{result.stderr}"
+        )
+    return tool
+
+
+def generate_ephemeral_key(tool: Path, directory: Path) -> tuple[Path, Path, str]:
+    # The private seed stays in build/qemu, which is gitignored, and is deleted
+    # after the bundles are signed. Only the public half reaches the guest.
+    key = directory / "ephemeral.key"
+    pub_dir = directory / "pub"
+    pub_dir.mkdir(parents=True)
+    result = run_command(
+        [str(tool), "init", "--key", str(key), "--pub-dir", str(pub_dir)], timeout=120
+    )
+    if result.returncode != 0:
+        raise HarnessError(f"bittern-release init failed: {result.stdout}{result.stderr}")
+    match = re.search(r"^init: key id ([0-9a-f]{64})$", result.stdout, re.MULTILINE)
+    if not match:
+        raise HarnessError(f"bittern-release init did not report a key id: {result.stdout}")
+    key_id = match.group(1)
+    public = pub_dir / f"{key_id}.pub"
+    if not public.exists():
+        raise HarnessError(f"the ephemeral anchor {public} was not written")
+    if hashlib.sha256(public.read_bytes()).hexdigest() != key_id:
+        raise HarnessError("the ephemeral anchor digest does not equal its key id")
+    return key, public, key_id
+
+
+def go_tool() -> str:
+    # The Makefile uses GO, so a command-line GO=... reaches the recipe
+    # environment. Fall back to go on PATH, the same default the Makefile uses.
+    return os.environ.get("GO", "go")
+
+
+def build_beta_kit(public_key: Path, created: str) -> Path:
+    # make beta-payload is the one beta kit packer. KEY_PUB overrides the
+    # committed CI test anchor with this run's ephemeral public key, and KEY_ID
+    # is derived from it, so install.sh installs the ephemeral anchor.
+    result = run_command(
+        [
+            "make",
+            "beta-payload",
+            f"KEY_PUB={public_key}",
+            f"GO={go_tool()}",
+            "GENERATION=1",
+            f"PAYLOAD_CREATED={created}",
+        ],
+        cwd=ROOT,
+        timeout=900,
+    )
+    archive = ROOT / "build" / "payload" / "bittern-beta-kit.tar.gz"
+    if result.returncode != 0 or not archive.exists():
+        raise HarnessError(
+            "make beta-payload failed; the update scenario installs from the beta kit:\n"
+            f"{result.stdout}{result.stderr}"
+        )
+    return archive
+
+
+def build_go_binary(command: str, destination: Path, version: str = "") -> None:
+    environment = os.environ.copy()
+    environment.update({"CGO_ENABLED": "0", "GOPROXY": "off", "GOFLAGS": "-mod=vendor"})
+    flags = "-s -w"
+    if version:
+        flags += f" -X main.version={version}"
+    result = run_command(
+        [
+            go_tool(),
+            "build",
+            "-trimpath",
+            "-buildvcs=false",
+            f"-ldflags={flags}",
+            "-o",
+            str(destination),
+            f"./cmd/{command}",
+        ],
+        cwd=ROOT / "agent",
+        env=environment,
+        timeout=300,
+    )
+    if result.returncode != 0:
+        raise HarnessError(
+            f"go build {command} failed: {result.stdout}{result.stderr}".strip()
+        )
+    destination.chmod(0o755)
+
+
+def build_update_bundle(
+    tool: Path,
+    work: Path,
+    generation: int,
+    version: str,
+    commit: str,
+    key_id: str,
+    key: Path,
+    created: str,
+) -> Path:
+    tree = work / f"tree-g{generation}"
+    binaries = tree / "usr" / "bin"
+    binaries.mkdir(parents=True)
+    build_go_binary("bittern", binaries / "bittern")
+    build_go_binary("bitternd", binaries / "bitternd", version)
+    if generation == 3:
+        # Generation 3 fails the post-activation bundle-integrity probe by
+        # writing a file into its own verified tree before execing the real
+        # agent. The manifest lists both files, so the bundle is valid until the
+        # running process adds the marker; the health gate then sees file.extra
+        # and the transaction rolls back to generation 2. The padding files are
+        # walked and hashed before usr/bin, which keeps the integrity walk open
+        # long enough for the just-started agent to create the marker instead of
+        # racing the walk.
+        padding = tree / "aaa"
+        padding.mkdir()
+        for name, size in (("padding-1.bin", 60 << 20), ("padding-2.bin", 30 << 20)):
+            with (padding / name).open("wb") as handle:
+                handle.truncate(size)
+        real = binaries / "bitternd.real"
+        (binaries / "bitternd").rename(real)
+        wrapper = binaries / "bitternd"
+        wrapper.write_text(
+            "#!/bin/sh\n"
+            "# QEMU update scenario only: fail the generation 3 health gate.\n"
+            'marker="$(dirname "$0")/post-activation-marker"\n'
+            ': > "$marker" || exit 1\n'
+            'exec "$(dirname "$0")/bitternd.real" "$@"\n',
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+    out = work / "bundles" / f"g{generation}"
+    out.mkdir(parents=True)
+    packed = run_command(
+        [
+            str(tool),
+            "pack",
+            "--tree",
+            str(tree),
+            "--out",
+            str(out),
+            "--version",
+            version,
+            "--generation",
+            str(generation),
+            "--channel",
+            "beta",
+            "--source-commit",
+            commit,
+            "--key-id",
+            key_id,
+            "--os-generation-min",
+            "1",
+            "--os-generation-max",
+            "1",
+            "--schema-min",
+            "1",
+            "--schema-max",
+            "2",
+            "--updater-min",
+            "1",
+            "--created",
+            created,
+            "--epoch",
+            "0",
+        ],
+        timeout=300,
+    )
+    if packed.returncode != 0:
+        raise HarnessError(
+            f"bittern-release pack g{generation} failed:\n{packed.stdout}{packed.stderr}"
+        )
+    signed = run_command(
+        [
+            str(tool),
+            "sign",
+            str(out / "manifest.json"),
+            "--key",
+            str(key),
+            "--yes",
+        ],
+        timeout=120,
+    )
+    if signed.returncode != 0:
+        raise HarnessError(
+            f"bittern-release sign g{generation} failed:\n{signed.stdout}{signed.stderr}"
+        )
+    signature = out / "manifest.json.sig"
+    if not signature.exists() or len(signature.read_bytes()) != 64:
+        raise HarnessError(f"the generation {generation} signature is not 64 bytes")
+    return out
+
+
+class UpdateScenario(FirstbootScenario):
+    def __init__(
+        self,
+        appliance: Vm,
+        camera: Vm,
+        config: dict[str, Any],
+        accelerator: str,
+    ) -> None:
+        super().__init__(appliance, camera, config, accelerator, scenario_name="update")
+        self.work = BUILD / "update"
+        self.key_id = ""
+        self.commit = ""
+        self.versions: dict[int, str] = {}
+        self.kit_archive: Path | None = None
+        self.public_key_path: Path | None = None
+        self.staged: dict[str, Path] = {}
+
+    def run(self) -> int:
+        self.run_phase("update-assets", self.prepare_update_assets)
+        self.run_phase("guests", self.ensure_guests)
+        self.run_phase("install", self.install_components)
+        self.run_phase("platform", self.assert_platform_and_anchor)
+        self.run_phase("first-boot", self.run_first_boot)
+        self.run_phase("device-channel", self.set_device_channel)
+        self.run_phase("agent-baseline", self.assert_baseline_agent)
+        self.run_phase("install-generation-1", self.install_generation_1)
+        self.run_phase("update-generation-2", self.update_generation_2)
+        self.run_phase("rollback-generation-3", self.rollback_generation_3)
+        self.run_phase("rejections", self.reject_invalid_bundles)
+        self.run_phase("assertions", self.assert_update_state)
+        self.run_phase("logs", self.assert_logs_clean)
+        self.write_summary("pass", "")
+        self.note(f"update scenario passed; logs: {self.log_dir}")
+        return 0
+
+    def prepare_update_assets(self) -> str:
+        toolchain = go_tool()
+        if shutil.which(toolchain) is None:
+            raise HarnessError(
+                "the update scenario builds the beta kit and signed bundles; set GO to the "
+                "Go binary or put it on PATH"
+            )
+        if shutil.which("make") is None:
+            raise HarnessError("the update scenario needs make to build the beta kit")
+        if self.work.exists():
+            shutil.rmtree(self.work)
+        self.work.mkdir(parents=True)
+        tool = build_release_tool()
+        key, public, key_id = generate_ephemeral_key(tool, self.work / "keys")
+        self.key_id = key_id
+        self.public_key_path = public
+        commit = run_command(["git", "rev-parse", "HEAD"], cwd=ROOT, timeout=30)
+        self.commit = commit.stdout.strip()
+        if commit.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", self.commit):
+            raise HarnessError(
+                f"cannot read the source commit for the bundle manifests: {self.commit!r}"
+            )
+        created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self.kit_archive = build_beta_kit(public, created)
+        for generation in (1, 2, 3, 4):
+            version = f"0.0.0-beta.{generation}-{self.commit[:12]}"
+            self.versions[generation] = version
+            build_update_bundle(
+                tool,
+                self.work,
+                generation,
+                version,
+                self.commit,
+                self.key_id,
+                key,
+                created,
+            )
+        g4 = self.work / "bundles" / "g4"
+        tampered = self.work / "bundles" / "tampered-payload"
+        shutil.copytree(g4, tampered)
+        # Flip one archive byte and keep the size, so the manifest signature
+        # stays valid and the transaction must reject the payload digest at
+        # verify-payload rather than stopping at the size bound.
+        archive = tampered / "bittern-app.tar.gz"
+        payload = bytearray(archive.read_bytes())
+        payload[0] ^= 0xFF
+        archive.write_bytes(bytes(payload))
+        bad = self.work / "bundles" / "bad-signature"
+        shutil.copytree(g4, bad)
+        signature = bytearray((bad / "manifest.json.sig").read_bytes())
+        signature[0] ^= 0xFF
+        (bad / "manifest.json.sig").write_bytes(bytes(signature))
+        sources = {
+            "g1": self.work / "bundles" / "g1",
+            "g2": self.work / "bundles" / "g2",
+            "g3": self.work / "bundles" / "g3",
+            "tampered-payload": tampered,
+            "bad-signature": bad,
+        }
+        staged = self.work / "staged"
+        staged.mkdir()
+        for name, directory in sources.items():
+            archive = staged / f"{name}.tar.gz"
+            with tarfile.open(archive, "w:gz") as handle:
+                handle.add(str(directory), arcname=name)
+            self.staged[name] = archive
+        # The private seed is not needed after every bundle is signed. Delete it
+        # before anything runs in the guest so a failed run cannot leave it in
+        # a log or a copied tree.
+        key.unlink()
+        self.capture(
+            "update-assets.txt",
+            f"key id {self.key_id}\ncommit {self.commit}\n"
+            f"versions {json.dumps(self.versions, sort_keys=True)}\n"
+            f"kit {self.kit_archive.name}\n",
+        )
+        return (
+            f"ephemeral key {self.key_id[:16]}..., generation 1 to 4 bundles signed, "
+            "tampered and bad-signature copies built, kit from the beta packer"
+        )
+
+    def stage_installer(self) -> None:
+        if self.kit_archive is None:
+            raise HarnessError("the beta kit archive was not built")
+        remote = "/tmp/bittern-beta-kit.tar.gz"
+        self.appliance.scp_to(self.kit_archive, remote, timeout=180)
+        self.appliance.ssh(
+            "set -eu; "
+            "sudo -n rm -rf /tmp/bittern-beta-kit; sudo -n mkdir -p /tmp/bittern-beta-kit; "
+            f"sudo -n tar -xzf {remote} -C /tmp/bittern-beta-kit",
+            timeout=180,
+        )
+        self.installer_path = "/tmp/bittern-beta-kit/bittern-beta-kit"
+        self.installer_archive = remote
+
+    def assert_platform_and_anchor(self) -> str:
+        platform = self.appliance.ssh(f"sudo -n cat {UPDATE_PLATFORM}", timeout=30).stdout
+        try:
+            parsed = json.loads(platform)
+        except json.JSONDecodeError as exc:
+            raise HarnessError(f"platform metadata is not JSON: {platform!r}") from exc
+        if parsed != {"schema_version": 1, "generation": 1}:
+            raise HarnessError(f"unexpected platform metadata: {platform!r}")
+        platform_stat = self.appliance.ssh(
+            f"sudo -n stat -c '%a %U' {UPDATE_PLATFORM}", timeout=30
+        ).stdout.strip()
+        if platform_stat != "644 root":
+            raise HarnessError(
+                f"platform metadata ownership or mode is {platform_stat!r}, expected 644 root"
+            )
+        rotation = f"{UPDATE_TRUST_DIR}/{self.key_id}.pub"
+        rotation_digest = self.appliance.ssh(
+            f"sudo -n sha256sum {rotation}", timeout=30
+        ).stdout.split()[0]
+        if rotation_digest != self.key_id:
+            raise HarnessError(
+                f"the rotation anchor digest {rotation_digest} does not equal the key id"
+            )
+        # The update helper requires the image trust store from ADR 0029 to
+        # exist; the beta kit installs only the rotation anchor. The scenario
+        # places the same ephemeral public key at the image path so a signed
+        # bundle can be verified. This is a kit gap recorded in the scenario
+        # note, not a product weakening: the anchor is still a trust input.
+        if self.public_key_path is None:
+            raise HarnessError("the ephemeral public key was not recorded")
+        remote_key = f"/tmp/{self.public_key_path.name}"
+        self.appliance.scp_to(self.public_key_path, remote_key, timeout=60)
+        self.appliance.ssh(
+            f"sudo -n install -d -o root -g root -m 0755 {UPDATE_IMAGE_TRUST_DIR}; "
+            f"sudo -n install -o root -g root -m 0644 {remote_key} "
+            f"{UPDATE_IMAGE_TRUST_DIR}/{self.key_id}.pub; "
+            f"sudo -n rm -f {remote_key}",
+            timeout=60,
+        )
+        image_anchor = f"{UPDATE_IMAGE_TRUST_DIR}/{self.key_id}.pub"
+        image_digest = self.appliance.ssh(
+            f"sudo -n sha256sum {image_anchor}", timeout=30
+        ).stdout.split()[0]
+        if image_digest != self.key_id:
+            raise HarnessError(
+                f"the image anchor digest {image_digest} does not equal the key id"
+            )
+        anchor_stat = self.appliance.ssh(
+            f"sudo -n stat -c '%a %U' {image_anchor}", timeout=30
+        ).stdout.strip()
+        if anchor_stat != "644 root":
+            raise HarnessError(
+                f"the image anchor ownership or mode is {anchor_stat!r}, expected 644 root"
+            )
+        real_ci = hashlib.sha256(
+            (ROOT / "packaging" / "trust" / "beta-ci.pub").read_bytes()
+        ).hexdigest()
+        if real_ci == self.key_id:
+            raise HarnessError("the ephemeral key equals the committed CI test key")
+        self.appliance.ssh(f"test ! -e {UPDATE_TRUST_DIR}/{real_ci}.pub", timeout=30)
+        self.appliance.ssh(f"test ! -e {UPDATE_IMAGE_TRUST_DIR}/{real_ci}.pub", timeout=30)
+        self.appliance.ssh("test -x /usr/libexec/bittern/bitternd", timeout=30)
+        enabled = self.appliance.ssh(
+            "systemctl is-enabled bittern-update.service", timeout=30
+        ).stdout.strip()
+        if enabled != "enabled":
+            raise HarnessError(f"bittern-update.service is {enabled!r}, expected enabled")
+        evidence = (
+            f"$ cat {UPDATE_PLATFORM}\n{platform}\n"
+            f"$ stat -c '%a %U' {UPDATE_PLATFORM}\n{platform_stat}\n"
+            f"$ sha256sum {image_anchor}\n{image_digest}  {image_anchor}\n"
+            f"$ stat -c '%a %U' {image_anchor}\n{anchor_stat}\n"
+            f"$ sha256sum {rotation}\n{rotation_digest}  {rotation}\n"
+        )
+        self.capture("update-platform.txt", evidence)
+        return (
+            "platform metadata is schema 1 generation 1, mode 0644 root; the ephemeral "
+            "anchor is installed in the image and rotation stores, and the committed CI "
+            "test anchor is absent from both"
+        )
+
+    def wait_version(self) -> str:
+        result = self.appliance.ssh(
+            "for _ in $(seq 1 60); do "
+            "curl -fsS --max-time 3 http://127.0.0.1:8080/api/version && exit 0; "
+            "sleep 1; done; exit 1",
+            timeout=90,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise HarnessError(
+                "bitternd did not answer /api/version:\n" + result.stdout + result.stderr
+            )
+        try:
+            return str(json.loads(result.stdout.strip().splitlines()[-1])["version"])
+        except (ValueError, KeyError) as exc:
+            raise HarnessError(f"cannot parse /api/version: {result.stdout!r}") from exc
+
+    def set_device_channel(self) -> str:
+        # First boot writes the schema default channel, stable. The beta kit is
+        # for the beta channel, and the signed bundles claim beta, so the
+        # scenario records the device channel the way an owner would before the
+        # update. The channel is not a rendered input.
+        path = "/etc/bittern/appliance.yaml"
+        before = self.appliance.ssh(f"sudo -n cat {path}", timeout=30).stdout
+        if "channel: stable" not in before:
+            raise HarnessError(f"first boot did not write the default channel:\n{before}")
+        self.appliance.ssh(
+            f"sudo -n sed -i 's/^    channel: stable$/    channel: beta/' {path}", timeout=30
+        )
+        after = self.appliance.ssh(f"sudo -n cat {path}", timeout=30).stdout
+        if "channel: beta" not in after:
+            raise HarnessError(f"the device channel was not changed to beta:\n{after}")
+        self.capture("appliance-channel.txt", after)
+        return "the device channel is beta before any bundle is offered"
+
+    def assert_baseline_agent(self) -> str:
+        self.appliance.ssh("sudo -n systemctl restart bitternd.service", timeout=90)
+        version = self.wait_version()
+        # The kit packer stamps its own bitternd with the generation 1 version,
+        # so the installed baseline and the generation 1 bundle carry the same
+        # string. The generation 2 assertion below is the version change.
+        if version != self.versions[1]:
+            raise HarnessError(
+                f"the installed baseline agent reports {version!r}, expected the kit build "
+                f"{self.versions[1]!r}"
+            )
+        if self.appliance.ssh(f"test ! -e {UPDATE_POINTER}", timeout=30).returncode != 0:
+            raise HarnessError("the activation pointer exists before the first bundle install")
+        status = self.appliance.ssh("sudo -n bittern update status", timeout=30).stdout
+        if "committed: no update state" not in status:
+            raise HarnessError(f"update status is not empty before the first install:\n{status}")
+        return (
+            f"baseline agent reports {self.versions[1]}; no activation pointer and no "
+            "committed update state"
+        )
+
+    def stage_update_sources(self) -> None:
+        self.appliance.ssh(
+            f"sudo -n install -d -m 0755 -o root -g root {UPDATE_INCOMING}", timeout=30
+        )
+        for name, archive in self.staged.items():
+            remote = f"/tmp/{name}.tar.gz"
+            self.appliance.scp_to(archive, remote, timeout=180)
+            self.appliance.ssh(
+                "set -eu; "
+                f"sudo -n rm -rf {UPDATE_INCOMING}/{name}; "
+                f"sudo -n tar -xzf {remote} -C {UPDATE_INCOMING}; "
+                f"sudo -n chown -R root:root {UPDATE_INCOMING}/{name}; "
+                f"sudo -n test -f {UPDATE_INCOMING}/{name}/manifest.json; "
+                f"sudo -n rm -f {remote}",
+                timeout=180,
+            )
+
+    def run_update(self, name: str, timeout: float = 900) -> subprocess.CompletedProcess[str]:
+        source = f"{UPDATE_INCOMING}/{name}"
+        result = self.appliance.ssh(
+            f"sudo -n bittern update install {shlex.quote(source)}",
+            timeout=timeout,
+            check=False,
+        )
+        output = result.stdout + result.stderr
+        self.capture(f"update-{name}.txt", output)
+        return result
+
+    def latest_history(self) -> dict[str, Any]:
+        path = self.appliance.ssh(
+            f"sudo -n sh -c 'ls -t {UPDATE_STATE_DIR}/history/*.json | head -1'", timeout=30
+        ).stdout.strip()
+        if not path:
+            raise HarnessError("the update history directory has no record")
+        raw = self.appliance.ssh(f"sudo -n cat {shlex.quote(path)}", timeout=30).stdout
+        try:
+            record = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise HarnessError(f"cannot parse the history record {path}: {raw!r}") from exc
+        self.capture(f"history-{Path(path).name}", raw)
+        return record
+
+    def update_status(self) -> str:
+        return self.appliance.ssh("sudo -n bittern update status", timeout=30).stdout
+
+    def agent_start_log(self) -> str:
+        return self.appliance.ssh(
+            "sudo -n journalctl -u bitternd.service -b --no-pager -o cat "
+            "| grep -F daemon.start | tail -1",
+            timeout=30,
+            check=False,
+        ).stdout.strip()
+
+    def assert_running_generation(self, generation: int) -> dict[str, Any]:
+        pointer = self.appliance.ssh(f"sudo -n cat {UPDATE_POINTER}", timeout=30).stdout.strip()
+        if pointer != str(generation):
+            raise HarnessError(
+                f"the activation pointer is {pointer!r}, expected generation {generation}"
+            )
+        expected = self.versions[generation]
+        version = self.wait_version()
+        if version != expected:
+            raise HarnessError(
+                f"the running agent reports {version!r}, expected {expected!r}"
+            )
+        pid = self.appliance.ssh(
+            "systemctl show -p MainPID --value bitternd.service", timeout=30
+        ).stdout.strip()
+        executable = self.appliance.ssh(
+            f"sudo -n readlink /proc/{pid}/exe", timeout=30
+        ).stdout.strip()
+        expected_path = f"/var/lib/bittern/app/bundles/{generation}/files/usr/bin/bitternd"
+        if executable != expected_path:
+            raise HarnessError(
+                f"the running agent executable is {executable!r}, expected {expected_path!r}"
+            )
+        status = self.update_status()
+        if f"committed: generation {generation} ({expected})" not in status:
+            raise HarnessError(f"update status does not name generation {generation}:\n{status}")
+        if "operation: none" not in status:
+            raise HarnessError(f"an update journal is still active:\n{status}")
+        record = self.latest_history()
+        if record.get("to", {}).get("generation") != generation:
+            raise HarnessError(f"the newest history record names the wrong candidate: {record}")
+        if record.get("result") != "committed":
+            raise HarnessError(
+                f"the newest history result is {record.get('result')!r}, expected committed"
+            )
+        start_log = self.agent_start_log()
+        evidence = (
+            f"$ cat {UPDATE_POINTER}\n{pointer}\n"
+            f"$ GET /api/version\n{version}\n"
+            f"$ readlink /proc/{pid}/exe\n{executable}\n"
+            f"$ journalctl -u bitternd.service (daemon.start)\n{start_log}\n"
+            f"$ bittern update status\n{status}\n"
+        )
+        self.capture(f"running-generation-{generation}.txt", evidence)
+        return record
+
+    def install_generation_1(self) -> str:
+        self.stage_update_sources()
+        result = self.run_update("g1")
+        output = result.stdout + result.stderr
+        if result.returncode != 0 or "update: committed" not in output:
+            raise HarnessError(
+                "the generation 1 install did not commit:\n" + output
+            )
+        if "from: no previous bundle" not in output:
+            raise HarnessError("the generation 1 record does not name a first install:\n" + output)
+        record = self.assert_running_generation(1)
+        if record.get("from") is not None:
+            raise HarnessError("the generation 1 history record has a previous bundle")
+        return (
+            f"generation 1 {self.versions[1]} committed from no previous bundle; "
+            "the daemon execs the bundle binary"
+        )
+
+    def update_generation_2(self) -> str:
+        result = self.run_update("g2")
+        output = result.stdout + result.stderr
+        if result.returncode != 0 or "update: committed" not in output:
+            raise HarnessError("the generation 2 update did not commit:\n" + output)
+        if "from: generation 1" not in output or "to: generation 2" not in output:
+            raise HarnessError("the generation 2 record does not name 1 -> 2:\n" + output)
+        record = self.assert_running_generation(2)
+        if record.get("from", {}).get("generation") != 1:
+            raise HarnessError("the generation 2 history record does not name generation 1")
+        health = {
+            item.get("name"): item.get("state") for item in record.get("health", [])
+        }
+        if health.get("bundle-integrity") != "passed":
+            raise HarnessError(f"the generation 2 integrity gate did not pass: {health}")
+        return (
+            f"generation 2 {self.versions[2]} committed; the running version changed from "
+            f"{self.versions[1]} to {self.versions[2]}"
+        )
+
+    def rollback_generation_3(self) -> str:
+        result = self.run_update("g3")
+        output = result.stdout + result.stderr
+        if result.returncode == 0 or "update: rolled-back" not in output:
+            raise HarnessError("the generation 3 health failure did not roll back:\n" + output)
+        if "failed step: health" not in output:
+            raise HarnessError("the generation 3 failure is not the health gate:\n" + output)
+        if "rollback: rolled-back, restored generation 2" not in output:
+            raise HarnessError("the rollback record does not restore generation 2:\n" + output)
+        pointer = self.appliance.ssh(f"sudo -n cat {UPDATE_POINTER}", timeout=30).stdout.strip()
+        if pointer != "2":
+            raise HarnessError(f"the activation pointer is {pointer!r} after rollback, expected 2")
+        version = self.wait_version()
+        if version != self.versions[2]:
+            raise HarnessError(
+                f"the running agent reports {version!r} after rollback, expected "
+                f"{self.versions[2]!r}"
+            )
+        status = self.update_status()
+        if f"committed: generation 2 ({self.versions[2]})" not in status:
+            raise HarnessError(f"update status does not restore generation 2:\n{status}")
+        record = self.latest_history()
+        if record.get("result") != "rolled-back":
+            raise HarnessError(f"the newest history result is {record.get('result')!r}")
+        if record.get("failed_step") != "health":
+            raise HarnessError(f"the newest history failed step is {record.get('failed_step')!r}")
+        if record.get("rollback", {}).get("restored_generation") != 2:
+            raise HarnessError(f"the rollback record does not restore generation 2: {record}")
+        failed_candidate = self.appliance.ssh(
+            "sudo -n test -f /var/lib/bittern/app/bundles/3/files/usr/bin/"
+            "post-activation-marker && echo retained || echo missing",
+            timeout=30,
+        ).stdout.strip()
+        if failed_candidate != "retained":
+            raise HarnessError("the failed generation 3 candidate was not kept for support")
+        evidence = (
+            f"$ bittern update install {UPDATE_INCOMING}/g3\n{output}\n"
+            f"$ cat {UPDATE_POINTER}\n{pointer}\n"
+            f"$ GET /api/version\n{version}\n"
+            f"$ journalctl -u bitternd.service (daemon.start)\n{self.agent_start_log()}\n"
+            f"$ bittern update status\n{status}\n"
+        )
+        self.capture("update-rollback.txt", evidence)
+        return (
+            "generation 3 activation failed the bundle-integrity health gate; the pointer "
+            f"and the running version returned to generation 2 {self.versions[2]}"
+        )
+
+    def assert_rejection(
+        self,
+        name: str,
+        expected_step: str,
+        expected_reason: str,
+        invocation: str,
+    ) -> str:
+        result = self.run_update(name)
+        output = result.stdout + result.stderr
+        if result.returncode == 0:
+            raise HarnessError(
+                f"the {name} bundle was accepted; it must be rejected:\n{output}"
+            )
+        if "update: rejected" not in output:
+            raise HarnessError(f"the {name} bundle did not report a rejection:\n{output}")
+        if f"failed step: {expected_step}" not in output:
+            raise HarnessError(
+                f"the {name} rejection is not at {expected_step}:\n{output}"
+            )
+        if expected_reason not in output:
+            raise HarnessError(
+                f"the {name} rejection does not name {expected_reason}:\n{output}"
+            )
+        pointer = self.appliance.ssh(f"sudo -n cat {UPDATE_POINTER}", timeout=30).stdout.strip()
+        if pointer != "2":
+            raise HarnessError(
+                f"the {name} rejection moved the activation pointer to {pointer!r}"
+            )
+        version = self.wait_version()
+        if version != self.versions[2]:
+            raise HarnessError(
+                f"the {name} rejection changed the running version to {version!r}"
+            )
+        after = self.service_invocations(("bitternd.service",))
+        if after.get("bitternd.service") != invocation:
+            raise HarnessError(
+                f"the {name} rejection restarted bitternd.service: "
+                f"{invocation!r} -> {after.get('bitternd.service')!r}"
+            )
+        self.appliance.ssh(f"sudo -n test ! -e {UPDATE_STATE_DIR}/journal.json", timeout=30)
+        self.appliance.ssh(f"sudo -n test ! -e {UPDATE_STATE_DIR}/request.json", timeout=30)
+        status = self.update_status()
+        if f"committed: generation 2 ({self.versions[2]})" not in status:
+            raise HarnessError(f"the {name} rejection changed the committed state:\n{status}")
+        record = self.latest_history()
+        if record.get("result") != "rejected":
+            raise HarnessError(
+                f"the {name} newest history result is {record.get('result')!r}, expected rejected"
+            )
+        if record.get("failed_step") != expected_step:
+            raise HarnessError(
+                f"the {name} history failed step is {record.get('failed_step')!r}"
+            )
+        return (
+            f"{name}: rejected at {expected_step} ({expected_reason}) with the pointer, "
+            "committed state and running unit unchanged"
+        )
+
+    def reject_invalid_bundles(self) -> str:
+        invocation = self.service_invocations(("bitternd.service",)).get("bitternd.service", "")
+        if not invocation:
+            raise HarnessError("cannot read the bitternd.service InvocationID before rejection")
+        evidence = [
+            self.assert_rejection(
+                "tampered-payload",
+                "verify-payload",
+                "payload.digest",
+                invocation,
+            ),
+            self.assert_rejection(
+                "bad-signature", "verify-manifest", "signature.invalid", invocation
+            ),
+            self.assert_rejection(
+                "g1", "verify-manifest", "generation.rollback", invocation
+            ),
+        ]
+        self.capture("update-rejections.txt", "\n".join(evidence) + "\n")
+        return "; ".join(evidence)
+
+    def assert_update_state(self) -> str:
+        status = self.update_status()
+        journal = self.appliance.ssh(
+            f"sudo -n test -e {UPDATE_STATE_DIR}/journal.json && echo present || echo absent",
+            timeout=30,
+        ).stdout.strip()
+        if journal != "absent":
+            raise HarnessError("an update journal remains after the scenario")
+        paths = self.appliance.ssh(
+            f"sudo -n sh -c 'ls {UPDATE_STATE_DIR}/history/*.json'", timeout=30
+        ).stdout.split()
+        results = []
+        for path in paths:
+            raw = self.appliance.ssh(f"sudo -n cat {shlex.quote(path)}", timeout=30).stdout
+            try:
+                results.append(json.loads(raw).get("result"))
+            except json.JSONDecodeError as exc:
+                raise HarnessError(f"cannot parse the history record {path}: {raw!r}") from exc
+        counts = {name: results.count(name) for name in ("committed", "rolled-back", "rejected")}
+        if counts != {"committed": 2, "rolled-back": 1, "rejected": 3}:
+            raise HarnessError(f"unexpected update history results: {counts} ({results})")
+        pointer = self.appliance.ssh(f"sudo -n cat {UPDATE_POINTER}", timeout=30).stdout.strip()
+        evidence = (
+            f"$ cat {UPDATE_POINTER}\n{pointer}\n"
+            f"$ bittern update status\n{status}\n"
+            f"history results: {json.dumps(counts, sort_keys=True)}\n"
+        )
+        self.capture("update-final.txt", evidence)
+        return (
+            "two commits, one rollback and three rejections recorded; the pointer is on "
+            f"generation {pointer} with no journal"
+        )
+
+
+def update(args: argparse.Namespace) -> int:
+    config = load_config()
+    require_tools()
+    ensure_directories()
+    appliance = Vm("appliance", config)
+    camera = Vm("camera", config)
+    with guest_lifecycle(args, appliance, camera, config):
+        return run_update_scenario(config, appliance, camera)
+
+
+def run_update_scenario(
+    config: dict[str, Any],
+    appliance: Vm,
+    camera: Vm,
+) -> int:
+    accelerator, reason = choose_accelerator(config)
+    log(f"accelerator: {accelerator} ({reason})")
+    scenario = UpdateScenario(appliance, camera, config, accelerator)
+    try:
+        return scenario.run()
+    except Exception as exc:
+        if not scenario.failed_phase:
+            scenario.failed_phase = "setup"
+            scenario.write_summary("fail", scenario.redact(str(exc)))
+        scenario.capture_failure()
+        if isinstance(exc, HarnessError):
+            raise
+        raise HarnessError(
+            f"{type(exc).__name__}: {scenario.redact(str(exc))}; "
+            f"logs: {scenario.log_dir}"
+        ) from exc
+
+
 def adoption(args: argparse.Namespace) -> int:
     config = load_config()
     require_tools()
@@ -5779,6 +6581,18 @@ def main() -> int:
         ),
     )
     firstboot_parser.set_defaults(function=firstboot)
+
+    update_parser = subparsers.add_parser(
+        "update",
+        help=(
+            "install the beta kit, commit two signed bundles, roll back a failing "
+            "health gate, and reject a tampered payload, a bad signature and a downgrade"
+        ),
+    )
+    update_parser.add_argument(
+        "--keep", action="store_true", help="leave the guests running for inspection"
+    )
+    update_parser.set_defaults(function=update)
 
     adoption_parser = subparsers.add_parser(
         "adoption",

@@ -23,8 +23,11 @@ BETA_KIT_SUMS = $(PAYLOAD_DIR)/SHA256SUMS
 PAYLOAD_EPOCH ?= 0
 PAYLOAD_CREATED ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 # The CI test anchor is public. Its SHA-256 is the signing key id the manifest
-# must name; the private seed is only in the protected beta environment.
-KEY_ID ?= $(shell sha256sum packaging/trust/beta-ci.pub | cut -d' ' -f1)
+# must name; the private seed is only in the protected beta environment. A QEMU
+# run overrides KEY_PUB with a per-run ephemeral key so the kit carries that
+# anchor instead of the real CI test key.
+KEY_PUB ?= packaging/trust/beta-ci.pub
+KEY_ID ?= $(shell sha256sum $(KEY_PUB) | cut -d' ' -f1)
 # The beta compatibility rule. The provisional platform provider defines OS
 # generation 1 as the Debian 13 amd64 base, so a beta test bundle claims that one
 # generation and no wider range. See defaults/release.yaml and the phase two note.
@@ -34,7 +37,7 @@ SCHEMA_MIN ?= 1
 SCHEMA_MAX ?= 2
 UPDATER_MIN ?= 1
 
-.PHONY: help check schema link-check style-check design-check bundle-check cleanup-test storage-test unit-enablement-check qemu-test qemu-firstboot qemu-firstboot-stock qemu-firstboot-clean qemu-firstboot-late-camera qemu-adoption qemu-stop assets test render detect render-poc status ui-test ui-browser-check bitternd bittern-release apply-test first-boot-poc beta-payload
+.PHONY: help check schema link-check style-check design-check bundle-check cleanup-test storage-test unit-enablement-check qemu-test qemu-firstboot qemu-firstboot-stock qemu-firstboot-clean qemu-firstboot-late-camera qemu-adoption qemu-update qemu-stop assets test render detect render-poc status ui-test ui-browser-check bitternd bittern-release apply-test first-boot-poc beta-payload
 
 help:
 	@printf '%s\n' \
@@ -55,6 +58,7 @@ help:
 		'  make qemu-firstboot-clean  Run install and first boot from no network or DNS in QEMU' \
 		'  make qemu-firstboot-late-camera  Reboot with cam0 absent and assert first boot commits' \
 		'  make qemu-adoption  Adopt a DHCP camera through discovery in QEMU' \
+		'  make qemu-update  Install, update, roll back and reject bundles in QEMU' \
 		'  make qemu-stop   Stop the QEMU guests, including ones with missing pidfiles' \
 		'  make test        Run the Go tests offline (go test ./...)' \
 		'  make render      Run the golden render suite' \
@@ -133,6 +137,9 @@ qemu-firstboot-late-camera:
 qemu-adoption:
 	@$(PYTHON) tests/qemu/run.py adoption
 
+qemu-update:
+	@$(PYTHON) tests/qemu/run.py update
+
 qemu-stop:
 	@$(PYTHON) tests/qemu/run.py stop
 
@@ -184,7 +191,7 @@ beta-payload: assets bittern-release
 	install -m 0755 packaging/install.sh "$$kit/install.sh"; \
 	install -m 0755 packaging/cleanup.sh "$$kit/cleanup.sh"; \
 	install -m 0755 packaging/storage-setup.sh "$$kit/storage-setup.sh"; \
-	install -m 0644 packaging/trust/beta-ci.pub "$$kit/trust/release-keys/$(KEY_ID).pub"; \
+	install -m 0644 "$(KEY_PUB)" "$$kit/trust/release-keys/$(KEY_ID).pub"; \
 	(cd templates && find . -type f ! -name README.md -print | while IFS= read -r file; do \
 		install -d -m 0755 "$$kit/templates/$$(dirname "$$file")"; \
 		install -m 0644 "$$file" "$$kit/templates/$$file"; \

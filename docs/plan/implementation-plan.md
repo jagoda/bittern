@@ -2057,8 +2057,13 @@ status `updates` section, and the shared `internal/oplock`. Its evidence and lim
 client and the UI update card remain open in slice two. The canonical manifest, verifier and offline
 `bittern-release` tool exist. Slice one was step 3 in the
 [release work order](#release-work-order-2026-11-22), after CI phase one, and the QEMU update
-scenario is slice three and step 5. The release path still waits for ADR 0029 acceptance and the key
-ceremony.
+scenario is slice three and step 5. The QEMU update scenario landed on 2026-11-22: generation 1
+installs, generation 2 commits with a running version change, a generation 3 health failure rolls the
+pointer and the running version back to generation 2, and a tampered payload, a bad signature and a
+lower generation are rejected before any unit stops. The Frigate database restore, camera and
+recording evidence, the published camera-variant bundle, and TCG timing remain open. Evidence and the
+two beta-kit workarounds are in [the QEMU update scenario note](../notes/2026-11-22-qemu-update-scenario.md).
+The release path still waits for ADR 0029 acceptance and the key ceremony.
 
 **Goal.** Updates that cannot leave the appliance half-configured. **Scope.**
 - Signed manifest with digest, generation and channel.

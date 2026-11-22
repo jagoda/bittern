@@ -14,7 +14,9 @@ scenario also passes with the camera link down through first boot and apply: gen
 healthy, one camera, and a JPEG snapshot. The same scenario reads `bittern setup-token --qr`,
 decodes the terminal QR to the exact `https://<lan0-address>/ui/setup#token=<token>` payload, checks
 the grouped token and short code, completes setup from the fragment, and scans the journal and
-status for either value.
+status for either value. The BIT-009 update scenario passed on 2026-11-22 under KVM; its scope and
+the two beta-kit gaps it works around are in
+[the update scenario note](../../docs/notes/2026-11-22-qemu-update-scenario.md).
 
 The carrierless run and measured phase times are in
 [the first-boot note](../../docs/notes/2026-11-14-qemu-firstboot.md).
@@ -57,7 +59,10 @@ disk belongs to BIT-038. Debian 13 splits the Docker CLI (`/usr/bin/docker`) int
 which `docker.io` only recommends. Those installs happen inside the guests on first boot and need
 outbound access through QEMU user networking. The host does not need Docker. The `firstboot`
 scenario also needs a Go toolchain on the host to build the two static binaries and `zbarimg` from
-`zbar-tools` to decode the terminal setup QR without writing the token or its image to disk.
+`zbar-tools` to decode the terminal setup QR without writing the token or its image to disk. The
+`update` scenario needs Go and `make` on the host because it builds the beta preparation kit and the
+signed bundles; it signs them offline with `agent/bin/bittern-release`. Set `GO` to the toolchain
+(`make qemu-update GO=/usr/local/go/bin/go`) or put `go` on `PATH`.
 
 ## Usage
 
@@ -75,6 +80,7 @@ python3 tests/qemu/run.py firstboot # first boot, TLS wizard, apply, one camera,
 python3 tests/qemu/run.py firstboot --stock-names  # first boot from udev stock NIC names
 python3 tests/qemu/run.py firstboot --clean-network  # no network files, empty resolver, external DNS black-holed
 python3 tests/qemu/run.py adoption # adopt a DHCP camera through discovery, credentials and a reservation
+python3 tests/qemu/run.py update  # beta kit, two signed generations, rollback and three rejections
 ```
 
 Add `--keep` to `boot`, `test`, or `firstboot` to leave the guests running after the command.
@@ -363,6 +369,50 @@ The harness adds one management-only nftables rule on `lan0`, for SSH, through a
 `/etc/nftables.conf` stays untouched and is asserted not to contain the harness SSH rule. The drop-in
 exists only inside the QEMU guest.
 
+## Update scenario
+
+`run.py update` proves the BIT-009 app bundle transaction on the same two guests. It restores the
+firstboot baseline, installs the beta preparation kit from `make beta-payload` with a per-run
+ephemeral Ed25519 anchor, asserts the installed platform metadata, runs first boot, records the beta
+channel, and starts the installed agent. It then offers four signed bundle generations through the
+real `bittern update install` path:
+
+| Generation | Purpose | Expected result |
+| --- | --- | --- |
+| 1 | First install from no previous bundle | committed; pointer and running version 1 |
+| 2 | Ordinary update | committed; pointer and running version 2 |
+| 3 | Agent adds a file to its own verified tree after activation | rolled back at `health`; pointer and running version 2 |
+| 4 and copies | Valid generation 4, a payload byte flip, a signature byte flip, and generation 1 again | rejected at `verify-payload` (`payload.digest`), `verify-manifest` (`signature.invalid`) and `verify-manifest` (`generation.rollback`) before any unit stops |
+
+On every commit the scenario requires `app/current`, `bittern update status`, `/api/version`,
+`readlink /proc/<pid>/exe` and the history record to agree on the generation and version. On the
+rollback it requires the journal to be gone, the pointer and running version back on generation 2,
+the failed candidate retained, and the history to name `health` with a `bundle-integrity` failure. On
+every rejection it requires the pointer, committed state, `bitternd.service` InvocationID and running
+version to be unchanged, with no journal or request left and a `rejected` history result.
+
+The private seed is written under `build/qemu/update`, used only on the host, and deleted after the
+last signature; only the public anchor reaches the guest. The committed CI test anchor is asserted
+absent.
+
+The scenario starts from the QEMU firstboot baseline row in
+[the field-parity table](../../docs/engineering/field-parity.md#environments) and has these declared
+differences:
+
+- It places the ephemeral anchor in the image trust store as well as the rotation store the kit
+  writes, because the update helper requires the image store to exist. It is evidence for the
+  transaction, not for the kit's trust-store installation.
+- It sets `updates.channel` from the first-boot default `stable` to `beta`, because the beta kit
+  carries beta bundles and first boot does not record the kit's channel. It is evidence for the
+  transaction, not for the kit's channel selection.
+- It configures no camera. `frigateConfigured` is false, so the plan has no Frigate stop, image or
+  start step, `backup-data` records `not-configured`, and the Frigate health probe is not run. The
+  Frigate database snapshot and restore are not covered.
+
+The scenario is opt-in and not part of `make check`. On 2026-11-22 it passed in the development
+container with KVM in 80.2 s wall time; the phases and the guest evidence are in
+[the update scenario note](../../docs/notes/2026-11-22-qemu-update-scenario.md).
+
 ## Tests
 
 | Test | Assertion |
@@ -417,6 +467,8 @@ and snapshot reset without a vendor appliance.
   host container still cannot initialize netlink.
 - The baseline snapshot is taken before the image prewarm, so each `loadvm` discards the pulled
   image and the next run downloads it again during first boot.
+- The update scenario configures no camera, so it does not exercise the Frigate database snapshot or
+  restore, the image step, or the Frigate health probe. Those remain BIT-009 slice three work.
 - The TCG fallback has never completed a boot.
 
 Related: [tests README](../README.md), [QEMU harness note](../../docs/notes/2026-11-14-qemu-harness.md),
