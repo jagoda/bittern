@@ -91,6 +91,15 @@ The manifest lists `usr/bin/bittern` and `usr/bin/bitternd`, mode 0755, with the
 The kit verifies with `sha256sum -c SHA256SUMS`, and its internal checksums verify every member. The
 kit contains no manifest, no signature, and no release anchor.
 
+## CI registration and check run
+
+The change was committed as `b4a2411`, fast-forwarded onto `main`, and pushed. The check workflow
+run [45050966145](https://github.com/jagoda/bittern/actions/runs/45050966145) is green: `make check`
+passed in 1m19s and the unsigned test build completed in 34s. `gh workflow list` shows `publish`
+active, and `gh workflow view publish.yml --ref main --yaml` returns the workflow instead of a 404,
+so GitHub accepted the workflow file. No tag was pushed, so the tag job, the environment approval,
+the signature step, the draft upload, and the draft-to-published flip did not run.
+
 ## Tests
 
 | Area | Cases |
@@ -131,7 +140,9 @@ generation zero, the stable namespace, and a trailing separator.
 
 ## Verification
 
-`make check`, `go vet ./...`, and `gofmt` pass in this container. The workflow files parse as YAML.
-The local assets above were produced by `make beta-payload`, and the kit was extracted and checked
-with `sha256sum -c SHA256SUMS`. No tag was created on the real repository and no release was
+`make check`, `go vet ./...`, and `gofmt` pass in this container. The main check run above is
+green. `gh workflow view publish.yml --ref main --yaml` accepts the workflow. The local assets above
+were produced by `make beta-payload`, and the kit was extracted and checked with
+`sha256sum -c SHA256SUMS`. A manual pack, sign, and verify with a generated test key also passed; the
+real CI test key was not used locally. No tag was created on the real repository and no release was
 published.
