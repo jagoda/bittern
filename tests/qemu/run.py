@@ -5804,8 +5804,15 @@ class UpdateScenario(FirstbootScenario):
         if self.appliance.ssh(f"test ! -e {UPDATE_POINTER}", timeout=30).returncode != 0:
             raise HarnessError("the activation pointer exists before the first bundle install")
         status = self.appliance.ssh("sudo -n bittern update status", timeout=30).stdout
-        if "committed: no update state" not in status:
-            raise HarnessError(f"update status is not empty before the first install:\n{status}")
+        for expected in (
+            "committed: generation 0 (kit baseline, no active bundle)",
+            "running: baseline (no active bundle)",
+        ):
+            if expected not in status:
+                raise HarnessError(
+                    f"update status does not report the factory baseline before the first "
+                    f"install, expected {expected!r}:\n{status}"
+                )
         evidence = (
             f"$ GET /api/version\n{json.dumps(payload, sort_keys=True)}\n"
             f"$ bittern update status\n{status}\n"
