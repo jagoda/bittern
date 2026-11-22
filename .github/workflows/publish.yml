@@ -80,6 +80,14 @@ on:
         required: false
         type: boolean
         default: false
+    # A reusable workflow does not receive the caller's secrets implicitly.
+    # The caller passes this name so the draft job's beta-draft environment can
+    # resolve it. The publish job does not use this environment and never reads
+    # the key.
+    secrets:
+      BITTERN_CI_SIGNING_KEY:
+        description: Base64-encoded CI test signing seed from beta-draft
+        required: true
 
 # One run per tag, and never cancel a run that may be waiting for approval.
 concurrency:

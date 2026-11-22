@@ -99,6 +99,10 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/publish.yml
+    # A called workflow receives no secrets implicitly. The draft job's
+    # beta-draft environment resolves the CI test key from this name; the
+    # publish job does not use that environment and never reads it.
+    secrets: inherit
     with:
       tag: ${{ needs.preflight.outputs.tag }}
       generation: ${{ needs.preflight.outputs.generation }}
