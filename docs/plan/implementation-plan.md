@@ -17,9 +17,10 @@ over TLS ([ADR 0019](../adr/0019-ui-stack.md)). Live video remains open
   for CPU, POC, Hailo plus QSV, and no-camera cases. The QEMU fixture config and compose files are
   still hand-written; its firewall is the renderer golden plus the harness-only SSH rule, so the guest
   loads the renderer's nftables golden rather than a hand-written fixture, and 8971 is loopback-only.
-  There is still no image build, update or reset path, or product container bundle. CI phase one is
-  planned in [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md) and no workflow
-  exists yet.
+  There is still no image build, update or reset path, or product container bundle. CI phase one
+  runs in [`.github/workflows/check.yml`](../../.github/workflows/check.yml) under
+  [ADR 0032](../adr/0032-continuous-integration-and-build-pipeline.md): `make check` on push to
+  `main` and on every pull request, then an unsigned POC payload test artifact.
 - The release manifest canonical form, verifier and offline `bittern-release` tool exist in
   `agent/internal/release` and `agent/cmd/bittern-release`; the release key ceremony, channel
   publication and update transaction do not. The repository is public at github.com/jagoda/bittern

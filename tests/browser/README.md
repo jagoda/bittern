@@ -172,5 +172,5 @@ The `-update` flag is shared with the generated route table in `ui/README.md`.
 This is Chromium only, at fixed viewports. It does not test Firefox or WebKit, real touch input,
 device pixel ratio, dynamic viewport units, browser zoom, the self-signed TLS interstitial, or
 whether a physical camera can scan the setup QR. It is not a pixel-diff tool; a green run is
-geometry evidence, not a substitute for looking at the full-page screenshots. There is no CI and no
-release gate here.
+geometry evidence, not a substitute for looking at the full-page screenshots. The browser check does
+not run in CI and is not a release gate.
