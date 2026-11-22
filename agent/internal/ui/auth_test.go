@@ -66,6 +66,7 @@ func newAuthTestServer(t *testing.T, token string, policy auth.RateLimitPolicy) 
 		Status:                 MockStatusProvider{Now: func() time.Time { return testNow }},
 		Checks:                 MockChecks{},
 		Applier:                &fakeApplier{},
+		Updates:                &MockUpdateService{},
 		Auth:                   store,
 		CertificateFingerprint: "AA:BB:CC:DD",
 	})

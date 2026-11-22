@@ -185,6 +185,23 @@ var uiRoutes = []route{
 		Auth: true, Responsive: true, Status: http.StatusOK, Handler: routeHandler((*handler).showStatus),
 	},
 	{
+		Name: "updates-check", Method: http.MethodPost, Pattern: "/ui/status/updates/check",
+		Auth: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).checkForUpdate),
+	},
+	{
+		Name: "updates-install", Method: http.MethodPost, Pattern: "/ui/status/updates/install",
+		Auth: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).startUpdateInstall),
+	},
+	{
+		Name: "update-rollback", Method: http.MethodGet, Pattern: "/ui/status/updates/rollback",
+		Template: "update-rollback", Auth: true, Responsive: true, Status: http.StatusOK,
+		Handler: routeHandler((*handler).showUpdateRollback),
+	},
+	{
+		Name: "update-rollback-submit", Method: http.MethodPost, Pattern: "/ui/status/updates/rollback",
+		Auth: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).startUpdateRollback),
+	},
+	{
 		Name: "status-fragment", Method: http.MethodGet, Pattern: "/ui/status/fragment", Template: "status-panel",
 		Auth: true, Status: http.StatusOK, Handler: routeHandler((*handler).showStatusFragment),
 	},

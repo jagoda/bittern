@@ -172,12 +172,21 @@ func run() error {
 			cameraDiscovery = bitternui.MockDiscovery{}
 			cameraSnapshot = bitternui.MockSnapshotChecker{}
 		}
+		updateService := bitternui.UpdateService(&bitternui.AgentUpdateService{
+			StateRoot:  filepath.Dir(*uiAuthState),
+			ConfigPath: *configPath,
+			Now:        time.Now,
+		})
+		if *uiMock {
+			updateService = &bitternui.MockUpdateService{}
+		}
 		handler, err := bitternui.NewHandler(bitternui.Options{
 			Status:                 statusProvider,
 			Checks:                 checksProvider,
 			Applier:                applier,
 			Discovery:              cameraDiscovery,
 			Snapshot:               cameraSnapshot,
+			Updates:                updateService,
 			ConfigPath:             *configPath,
 			StateRoot:              filepath.Dir(*uiAuthState),
 			Now:                    time.Now,

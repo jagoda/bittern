@@ -105,6 +105,10 @@ The BIT-020 column is the route's responsive flag. Regenerate the table from `ag
 | GET | `/ui/cameras/{id}/remove` | `camera-remove` | Yes | Yes |
 | POST | `/ui/cameras/{id}/remove` | `camera-remove` | Yes | No |
 | GET | `/ui/status` | `status` | Yes | Yes |
+| POST | `/ui/status/updates/check` | - | Yes | No |
+| POST | `/ui/status/updates/install` | - | Yes | No |
+| GET | `/ui/status/updates/rollback` | `update-rollback` | Yes | Yes |
+| POST | `/ui/status/updates/rollback` | - | Yes | No |
 | GET | `/ui/status/fragment` | `status-panel` | Yes | No |
 | GET | `/ui/static/` | - | No | No |
 | * | `/ui/` | `error` | Yes | Yes |
@@ -118,7 +122,24 @@ read the same builder through `ui.AgentChecks`. `--ui-mock` keeps the sample `ui
 The status page is one column at phone width and a two-column card grid from 60rem. The overall
 state, configuration, render checks, network interfaces and hardware cards span both columns; the
 remaining cards pair up. The fragment carries the same grid wrapper, so the HTMX refresh keeps the
-layout. A preview build names the review configuration as a preview instead of showing the temporary
+layout. The status fragment polls every 15 seconds, or every 2 seconds while an update or rollback
+is running, so the update card's current step is refreshed without a second progress surface.
+
+The Updates card is the browser update surface. It names the running version, the factory version
+on a kit baseline, the last check time and result, the verified offered version and update number,
+the current install or rollback step, a failed step and its plain reason, or the rolled-back
+running and last installed versions with the next-update rule. A failed, offline, or rate-limited
+check is never shown as up to date. Check, install, and rollback are POST forms with the
+administrator session and CSRF token. Install is absent without a verified newer version, rollback
+is absent without a saved previous version, and every action is absent while an operation runs.
+Manual rollback has its own confirmation page and states that configuration and recordings are not
+reverted. `AgentUpdateService` calls the same `internal/update` functions as the CLI; the verified
+download runs in the background, then the fixed `bittern-update.service` owns the transaction and
+the status document exposes its journal as `current_operation`. `--ui-mock` previews the card with
+`?update=baseline`, `available`, `up-to-date`, `installing`, `failed`, `rolled-back`, `offline`,
+`rate-limited`, or `check-failed`.
+
+A preview build names the review configuration as a preview instead of showing the temporary
 preview path; a real appliance shows the configured path. The apply boundary is an `Applier`
 interface: `AgentApplier` writes the validated config and calls the apply transaction, `StubApplier`
 returns `apply is not implemented`, and tests use a fake. `AgentApplier` also implements

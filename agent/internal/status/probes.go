@@ -197,6 +197,7 @@ type UpdateObservation struct {
 	AvailableGeneration *int64
 	Rollback            UpdateRollbackSection
 	LastOperation       *UpdateOperationSection
+	CurrentOperation    *UpdateOperationProgress
 	Base                *UpdatesBase
 	LastError           string
 }
@@ -818,8 +819,66 @@ func (p *UpdateStateProbe) Probe(ctx context.Context) UpdateObservation {
 	} else if record != nil {
 		observation.LastOperation = updateOperationSection(record)
 	}
+	if journal, journalErr := update.ActiveJournal(p.StateRoot); journalErr != nil {
+		observation.LastError = journalErr.Error()
+	} else if journal != nil && journal.State == update.StateRunning {
+		observation.CurrentOperation = updateOperationProgress(journal)
+	}
 	observation.Base = updateBase(state.Base)
 	return observation
+}
+
+// updateOperationProgress maps the running journal to the stable status fields.
+// The UI owns the owner-facing step words; the status contract carries the
+// stable step key and the measured counts.
+func updateOperationProgress(journal *update.Journal) *UpdateOperationProgress {
+	if journal == nil {
+		return nil
+	}
+	kind := "app-bundle-update"
+	if journal.Phase == update.PhaseManualRollback || journal.Phase == update.PhaseRollback {
+		kind = "app-bundle-rollback"
+	}
+	step := journal.NextStep
+	completed := 0
+	for index, planned := range journal.Steps {
+		if planned.Key == step {
+			completed = index
+			break
+		}
+	}
+	if step == "" {
+		step = journal.LastCompletedStep
+		for index, planned := range journal.Steps {
+			if planned.Key == step {
+				completed = index + 1
+				break
+			}
+		}
+	}
+	from := journal.PreviousGeneration
+	to := journal.CandidateGeneration
+	if kind == "app-bundle-rollback" {
+		from = journal.CandidateGeneration
+		to = journal.PreviousGeneration
+	}
+	progress := &UpdateOperationProgress{
+		OperationID:    journal.OperationID,
+		Kind:           kind,
+		Phase:          journal.Phase,
+		Step:           step,
+		StepsCompleted: completed,
+		StepsTotal:     len(journal.Steps),
+		StartedAt:      journal.CreatedAt,
+		Baseline:       journal.Baseline,
+	}
+	if from != 0 {
+		progress.FromGeneration = int64ValuePointer(from)
+	}
+	if to != 0 {
+		progress.ToGeneration = int64ValuePointer(to)
+	}
+	return progress
 }
 
 func int64Pointer(value int64) *int64 {

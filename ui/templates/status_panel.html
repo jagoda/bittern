@@ -211,18 +211,7 @@
   {{end}}
 </section>
 
-<section class="card" aria-labelledby="status-updates">
-  <div class="section-heading">
-    <h2 id="status-updates">Updates</h2>
-    <span class="state-badge state-{{.Status.Sections.Updates.State}}">{{sectionLabel .Status.Sections.Updates.State}}</span>
-  </div>
-  <dl class="facts">
-    <dt>Installed version</dt>
-    <dd>{{if .Status.Sections.Updates.CurrentSlot}}{{ptrString .Status.Sections.Updates.CurrentSlot}}{{else}}Not reported{{end}}</dd>
-    <dt>Update</dt>
-    <dd>{{if .Status.Sections.Updates.CurrentGeneration}}Installed{{else}}Not checked{{end}}</dd>
-  </dl>
-</section>
+{{template "update-card" .}}
 
 <section class="card" aria-labelledby="status-reset">
   <div class="section-heading">
@@ -302,10 +291,20 @@
     <dd><code>cam0</code>: {{cableLabel .Status.Sections.Network.CAM0}}{{if .Status.Sections.Network.CAM0.LastError}}; {{.Status.Sections.Network.CAM0.LastError}}{{end}}</dd>
     <dt>Updates state</dt>
     <dd><code>{{.Status.Sections.Updates.State}}</code></dd>
-    <dt>Installed version slot</dt>
-    <dd>{{ptrString .Status.Sections.Updates.CurrentSlot}}</dd>
-    <dt>Update generation</dt>
+    <dt>Installed update number</dt>
     <dd>{{ptrInt64 .Status.Sections.Updates.CurrentGeneration}}</dd>
+    <dt>Last installed update number</dt>
+    <dd>{{ptrInt64 .Status.Sections.Updates.CommittedGeneration}}</dd>
+    <dt>Offered update number</dt>
+    <dd>{{ptrInt64 .Status.Sections.Updates.AvailableGeneration}}</dd>
+    <dt>Last update check result</dt>
+    <dd><code>{{.UpdateCard.TechnicalCheck}}</code></dd>
+    {{if .UpdateCard.TechnicalOperation}}<dt>Last update operation result</dt>
+    <dd><code>{{.UpdateCard.TechnicalOperation}}</code></dd>{{end}}
+    {{if .UpdateCard.TechnicalStep}}<dt>Last update failing step</dt>
+    <dd><code>{{.UpdateCard.TechnicalStep}}</code></dd>{{end}}
+    {{if .UpdateCard.TechnicalReason}}<dt>Last update reported reason</dt>
+    <dd>{{.UpdateCard.TechnicalReason}}</dd>{{end}}
     <dt>Reset state</dt>
     <dd><code>{{.Status.Sections.Reset.State}}</code></dd>
     <dt>Reset level</dt>

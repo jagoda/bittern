@@ -91,7 +91,7 @@ only when the probe fails.
 | `cameras` | `items[]` with `id`, `name`, `address`, `mac`, `vendor`, `model`, `enabled`, `stream`, `snapshot`, `recording`, `last_seen`, `detail`, `snapshot_at`, `snapshot_bytes` | The list comes from `appliance.yaml` and the camera health cache, not a live camera call. `snapshot` and `stream` are `unknown` until the wizard or an explicit test has run; `last_seen` is null until a check records it; `recording` follows the Frigate section |
 | `storage` | `path`, `present`, `detail_state`, `free_bytes`, `reserve_bytes`, `member_count`, `missing_members[]` | `present` is evidence that a recording drive for the path is attached, not that the directory exists; `detail_state` is `ready`, `not-attached`, `not-mounted`, or `write-test-failed`, and is empty only when the section is `unknown` or the probe cannot read the mount table; `free_bytes` is null unless the path is mounted, so the OS filesystem is never measured as recording storage; `member_count` reports the single media path known to this build, so a configured multi-drive pool is not enumerated until the pool mount work lands |
 | `network` | `lan0` and `cam0`, each with `address`, `carrier`, `last_error` | `address` and `carrier` are null when the interface or sysfs evidence is unavailable |
-| `updates` | `state`, `current_slot`, `current_version`, `current_generation`, `running_generation`, `committed_generation`, `committed_version`, `channel`, `last_check`, `available_version`, `available_generation`, `rollback`, `last_operation`, `base` | `current_slot` is always null until the OS A/B work claims it; `current_version` and `current_generation` are the running bundle and are null on a kit baseline; `committed_generation` is 0 on a kit baseline; `base` is null until the first update commits; `last_check.result` is `never` before the first check |
+| `updates` | `state`, `current_slot`, `current_version`, `current_generation`, `running_generation`, `committed_generation`, `committed_version`, `channel`, `last_check`, `available_version`, `available_generation`, `rollback`, `last_operation`, `current_operation`, `base` | `current_slot` is always null until the OS A/B work claims it; `current_version` and `current_generation` are the running bundle and are null on a kit baseline; `committed_generation` is 0 on a kit baseline; `base` is null until the first update commits; `last_check.result` is `never` before the first check; `current_operation` is absent unless an update or rollback journal is running |
 | `reset` | `level`, `completed_at` | Both are null until BIT-010 implements a reset record |
 | `hardware` | `cpu.model`, `cpu.cores`, `memory_bytes`, `accelerators[]` | The whole section is omitted only when the hardware probe fails; missing files inside the detection roots produce empty fields and an empty accelerator list instead |
 
@@ -126,7 +126,9 @@ knowledge of OS slots. The platform generation is supplied by a provider that
 reads `/usr/lib/bittern/platform.json`, so image metadata can supply it now and
 an installer fingerprint can supply it later without changing the process. The
 daemon does not host the update worker, so it does not set the overall `updating`
-state; the separate `bittern-update.service` owns the account and the journal.
+state; the separate `bittern-update.service` owns the transaction and the journal. The status
+probe reads the active journal read-only so the browser can show the current step; it never starts,
+resumes, or changes the operation.
 See [the architecture update flow](architecture.md#update-flow) and
 [BIT-009](plan/implementation-plan.md#bit-009-app-bundle-update-transaction-with-rollback).
 
@@ -174,6 +176,16 @@ generation 0 to generation 1.
 | `last_operation.to_generation` | Candidate or restored generation |
 | `last_operation.restored_generation` | Generation restored by a rollback, 0 for a baseline revert |
 | `last_operation.baseline` | True when the rollback target was the baseline |
+| `current_operation.operation_id` | Operation id from the running journal |
+| `current_operation.kind` | `app-bundle-update` or `app-bundle-rollback` |
+| `current_operation.phase` | `install`, `rollback`, or `manual-rollback` |
+| `current_operation.step` | The journal's next step key, or the last completed step when the next step is empty |
+| `current_operation.steps_completed` | Steps before the named step, measured from the fixed plan |
+| `current_operation.steps_total` | Number of steps in the fixed plan |
+| `current_operation.started_at` | Journal creation time in UTC RFC 3339 |
+| `current_operation.from_generation` | Generation before the operation |
+| `current_operation.to_generation` | Candidate generation for an update, or restored generation for a rollback |
+| `current_operation.baseline` | True when the rollback target is the baseline |
 
 After a manual rollback, `current_generation` and `running_generation` name the
 retained previous bundle, while `committed_generation` and `committed_version`

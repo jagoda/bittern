@@ -58,9 +58,13 @@ type Options struct {
 	ConfigPath string
 	// SecretsPath is secrets.yaml. The default is beside ConfigPath.
 	SecretsPath string
-	// StateRoot holds the apply generations and the camera health cache. The
-	// default is /var/lib/bittern.
+	// StateRoot holds the apply generations, the update state, and the camera
+	// health cache. The default is /var/lib/bittern.
 	StateRoot string
+	// Updates is the authenticated update action boundary. Nil uses the mock
+	// implementation in a preview build and a refusing service otherwise. The
+	// product daemon passes AgentUpdateService.
+	Updates UpdateService
 }
 
 // CameraDiscovery is the camera list shown by the wizard. The production
@@ -101,6 +105,13 @@ func newHandler(options Options) (*handler, *routeMux, error) {
 	if options.Picture == nil && options.MockPreview {
 		options.Picture = MockSnapshotChecker{}
 	}
+	if options.Updates == nil {
+		if options.MockPreview {
+			options.Updates = &MockUpdateService{}
+		} else {
+			options.Updates = UnavailableUpdateService{}
+		}
+	}
 
 	templates, err := parseTemplates()
 	if err != nil {
@@ -130,6 +141,7 @@ func newHandler(options Options) (*handler, *routeMux, error) {
 		configFile:  options.ConfigPath,
 		secretsFile: options.SecretsPath,
 		stateRoot:   options.StateRoot,
+		updates:     options.Updates,
 	}
 
 	mux := newRouteMux()
@@ -155,6 +167,7 @@ type handler struct {
 	configFile  string
 	secretsFile string
 	stateRoot   string
+	updates     UpdateService
 }
 
 type pageData struct {
@@ -201,6 +214,8 @@ type pageData struct {
 	Status                 status.Document
 	StatusFragmentURL      string
 	StatusQuery            string
+	StatusRefresh          string
+	UpdateCard             updateView
 	MockPreview            bool
 	StateOptions           []stateOption
 	CSRFToken              string
@@ -282,12 +297,14 @@ func (h *handler) notFound(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) showStatus(w http.ResponseWriter, r *http.Request) {
 	document := h.buildStatus(r)
-	query := h.statusQuery(document.State)
+	query := h.statusQuery(r, document.State)
 	h.render(w, r, http.StatusOK, "status", pageData{
 		Title:             "Status",
 		Status:            document,
 		StatusFragmentURL: BasePath + "/status/fragment" + query,
 		StatusQuery:       query,
+		StatusRefresh:     h.statusRefresh(document),
+		UpdateCard:        h.updateCard(document),
 		MockPreview:       h.preview,
 		StateOptions:      mockStateOptions(document.State),
 	})
@@ -297,6 +314,7 @@ func (h *handler) showStatusFragment(w http.ResponseWriter, r *http.Request) {
 	document := h.buildStatus(r)
 	h.render(w, r, http.StatusOK, "status-panel", pageData{
 		Status:       document,
+		UpdateCard:   h.updateCard(document),
 		MockPreview:  h.preview,
 		StateOptions: mockStateOptions(document.State),
 	})
@@ -305,14 +323,41 @@ func (h *handler) showStatusFragment(w http.ResponseWriter, r *http.Request) {
 func (h *handler) buildStatus(r *http.Request) status.Document {
 	ctx, cancel := context.WithTimeout(r.Context(), statusTimeout)
 	defer cancel()
-	return h.status.Status(ctx, r.URL.Query().Get("state"))
+	hint := r.URL.Query().Get("state")
+	if h.preview {
+		if updateHint := r.URL.Query().Get("update"); updateHint != "" {
+			hint += "|" + updateHint
+		}
+	}
+	return h.status.Status(ctx, hint)
 }
 
-func (h *handler) statusQuery(state status.State) string {
+func (h *handler) statusQuery(r *http.Request, state status.State) string {
 	if !h.preview {
 		return ""
 	}
-	return "?state=" + url.QueryEscape(string(state))
+	values := url.Values{}
+	if state != "" {
+		values.Set("state", string(state))
+	}
+	if updateHint := r.URL.Query().Get("update"); updateHint != "" {
+		values.Set("update", updateHint)
+	}
+	if len(values) == 0 {
+		return ""
+	}
+	return "?" + values.Encode()
+}
+
+func (h *handler) statusURL(r *http.Request) string {
+	return BasePath + "/status" + h.statusQuery(r, "")
+}
+
+func (h *handler) statusRefresh(document status.Document) string {
+	if document.Sections.Updates.CurrentOperation != nil || h.updates.Progress().Active {
+		return "every 2s"
+	}
+	return "every 15s"
 }
 
 func securityHeaders(next http.Handler) http.Handler {

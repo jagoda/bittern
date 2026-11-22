@@ -551,6 +551,7 @@ func buildUpdates(observation UpdateObservation) UpdatesSection {
 		AvailableGeneration: observation.AvailableGeneration,
 		Rollback:            observation.Rollback,
 		LastOperation:       observation.LastOperation,
+		CurrentOperation:    observation.CurrentOperation,
 		Base:                observation.Base,
 	}
 	if section.LastCheck.Result == "" {

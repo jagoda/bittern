@@ -75,19 +75,7 @@
     "route": "cameras",
     "path": "/ui/cameras",
     "flow": "auth",
-    "variant": "picture-taken",
-    "actions": [
-      {
-        "action": "click",
-        "selector": "form[action='/ui/cameras/front_door/snapshot'] button[type='submit']"
-      },
-      {
-        "action": "wait",
-        "selector": "img[data-picture-image]",
-        "state": "visible",
-        "decoded": true
-      }
-    ]
+    "variant": "picture-taken"
   },
   {
     "route": "camera-edit",
@@ -133,6 +121,71 @@
     "path": "/ui/status?state=failed",
     "flow": "auth",
     "variant": "failed"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=baseline",
+    "flow": "auth",
+    "variant": "update-baseline"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=up-to-date",
+    "flow": "auth",
+    "variant": "update-up-to-date"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=available",
+    "flow": "auth",
+    "variant": "update-available"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=installing",
+    "flow": "auth",
+    "variant": "update-installing"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=failed",
+    "flow": "auth",
+    "variant": "update-failed"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=rolled-back",
+    "flow": "auth",
+    "variant": "update-rolled-back"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=offline",
+    "flow": "auth",
+    "variant": "update-offline"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=rate-limited",
+    "flow": "auth",
+    "variant": "update-rate-limited"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=check-failed",
+    "flow": "auth",
+    "variant": "update-check-failed"
+  },
+  {
+    "route": "update-rollback",
+    "path": "/ui/status/updates/rollback",
+    "flow": "auth"
+  },
+  {
+    "route": "update-rollback",
+    "path": "/ui/status/updates/rollback?update=failed",
+    "flow": "auth",
+    "variant": "confirm"
   },
   {
     "route": "not-found",

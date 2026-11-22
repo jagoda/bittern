@@ -1,0 +1,33 @@
+{{define "update-rollback"}}{{template "head" .}}
+<h1>Roll back update</h1>
+<p class="lede">Bittern can run the previous version again. This does not revert the configuration or the recordings.</p>
+{{template "preview-notice" .}}
+{{if .UpdateCard.CanRollback}}
+<div class="card">
+  <h2>What changes</h2>
+  <p>Bittern will switch to {{.UpdateCard.RollbackTarget}} and restart the recording service. The configuration, the cameras, and the recordings stay as they are.</p>
+  <dl class="facts">
+    <dt>Running version</dt>
+    <dd>{{.UpdateCard.CurrentVersion}}</dd>
+    <dt>Last installed version</dt>
+    <dd>{{.UpdateCard.LastInstalled}}</dd>
+    {{if .UpdateCard.LastInstalled}}<dt>Next update</dt>
+    <dd>{{.UpdateCard.NextUpdateRule}}</dd>{{end}}
+  </dl>
+  <p>Configuration is not reverted. If the last installed version changed the configuration or the recording database, the older version may not be able to read it.</p>
+  <form method="post" action="/ui/status/updates/rollback{{.StatusQuery}}" data-busy="true" data-busy-label="Starting the rollback">
+    {{template "csrf" .}}
+    <div class="form-actions">
+      <button type="submit" class="button destructive">Roll back update</button>
+      <a href="/ui/status{{.StatusQuery}}">Cancel</a>
+    </div>
+  </form>
+</div>
+{{else}}
+<div class="card">
+  <h2>No previous version is available</h2>
+  <p>Bittern has no saved version to roll back to. Nothing has changed.</p>
+  <p class="action-links"><a href="/ui/status{{.StatusQuery}}">Open status</a></p>
+</div>
+{{end}}
+{{template "foot" .}}{{end}}

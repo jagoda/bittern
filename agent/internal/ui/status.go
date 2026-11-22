@@ -2,10 +2,12 @@ package ui
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"bittern.invalid/agent/internal/render"
 	"bittern.invalid/agent/internal/status"
+	"bittern.invalid/agent/internal/update"
 )
 
 // StatusProvider returns the status document for one page render. The state
@@ -61,17 +63,148 @@ func (p MockStatusProvider) Status(_ context.Context, state string) status.Docum
 // MockStatusDocument builds a status document for every documented overall
 // state. Unknown fields stay nil so the page cannot present invented values.
 func MockStatusDocument(state string, now time.Time) status.Document {
-	switch status.State(state) {
+	hint, updateHint, _ := strings.Cut(state, "|")
+	var document status.Document
+	switch status.State(hint) {
 	case status.StateBooting:
-		return mockBooting(now)
+		document = mockBooting(now)
 	case status.StateDegraded:
-		return mockDegraded(now)
+		document = mockDegraded(now)
 	case status.StateUpdating:
-		return mockUpdating(now)
+		document = mockUpdating(now)
 	case status.StateFailed:
-		return mockFailed(now)
+		document = mockFailed(now)
 	default:
-		return mockReady(now)
+		document = mockReady(now)
+	}
+	applyMockUpdate(&document, updateHint, now)
+	return document
+}
+
+// applyMockUpdate previews the update card states without inventing a real
+// appliance record. It is selected only by the preview query in a mock build.
+func applyMockUpdate(document *status.Document, hint string, now time.Time) {
+	if hint == "" {
+		return
+	}
+	checked := now.Add(-5 * time.Minute).UTC().Format(time.RFC3339)
+	currentVersion := "0.1.1"
+	currentGeneration := int64(1)
+	committedVersion := "0.1.1"
+	committedGeneration := int64(1)
+	document.Sections.Updates = status.UpdatesSection{
+		State:               status.SectionOK,
+		CurrentVersion:      &currentVersion,
+		CurrentGeneration:   &currentGeneration,
+		RunningGeneration:   &currentGeneration,
+		CommittedVersion:    &committedVersion,
+		CommittedGeneration: &committedGeneration,
+		LastCheck: status.UpdateCheckSection{
+			CheckedAt: &checked,
+			Result:    update.CheckUpToDate,
+		},
+	}
+	switch hint {
+	case "baseline":
+		baselineVersion := "0.1.0-beta.0"
+		committed := int64(0)
+		availableVersion := "0.1.1"
+		availableGeneration := int64(1)
+		document.Sections.Updates = status.UpdatesSection{
+			State:               status.SectionOK,
+			CurrentVersion:      &baselineVersion,
+			CommittedGeneration: &committed,
+			LastCheck: status.UpdateCheckSection{
+				CheckedAt: &checked,
+				Result:    update.CheckUpdateAvailable,
+			},
+			AvailableVersion:    &availableVersion,
+			AvailableGeneration: &availableGeneration,
+		}
+	case "available":
+		availableVersion := "0.1.2"
+		availableGeneration := int64(2)
+		document.Sections.Updates.AvailableVersion = &availableVersion
+		document.Sections.Updates.AvailableGeneration = &availableGeneration
+		document.Sections.Updates.LastCheck.Result = update.CheckUpdateAvailable
+	case "installing":
+		availableVersion := "0.1.2"
+		availableGeneration := int64(2)
+		document.Sections.Updates.AvailableVersion = &availableVersion
+		document.Sections.Updates.AvailableGeneration = &availableGeneration
+		document.Sections.Updates.LastCheck.Result = update.CheckUpdateAvailable
+		document.State = status.StateUpdating
+		document.Reason = "An update is running. Checks resume when it finishes."
+		document.Sections.Updates.CurrentOperation = &status.UpdateOperationProgress{
+			OperationID:    "20261122T120000Z-1234abcd",
+			Kind:           "app-bundle-update",
+			Phase:          update.PhaseInstall,
+			Step:           update.StepStartFrigate,
+			StepsCompleted: 17,
+			StepsTotal:     22,
+			StartedAt:      now.Add(-2 * time.Minute).UTC().Format(time.RFC3339),
+			FromGeneration: &currentGeneration,
+			ToGeneration:   &availableGeneration,
+		}
+	case "failed":
+		availableVersion := "0.1.2"
+		availableGeneration := int64(2)
+		failedStep := update.StepHealth
+		finished := now.Add(-10 * time.Minute).UTC().Format(time.RFC3339)
+		document.Sections.Updates.AvailableVersion = &availableVersion
+		document.Sections.Updates.AvailableGeneration = &availableGeneration
+		document.Sections.Updates.LastCheck.Result = update.CheckUpdateAvailable
+		document.Sections.Updates.Rollback = status.UpdateRollbackSection{Available: true, Generation: int64Pointer(0)}
+		document.Sections.Updates.LastOperation = &status.UpdateOperationSection{
+			OperationID:    "20261122T115000Z-1234abcd",
+			Kind:           "app-bundle-update",
+			Result:         update.ResultFailed,
+			FailedStep:     failedStep,
+			Reason:         "health: the house network address did not pass",
+			FinishedAt:     &finished,
+			FromGeneration: &currentGeneration,
+			ToGeneration:   &availableGeneration,
+		}
+	case "rolled-back":
+		committedVersion = "0.1.2"
+		committedGeneration = 2
+		availableVersion := "0.1.2"
+		availableGeneration := int64(2)
+		restored := int64(1)
+		finished := now.Add(-8 * time.Minute).UTC().Format(time.RFC3339)
+		document.Sections.Updates.CommittedVersion = &committedVersion
+		document.Sections.Updates.CommittedGeneration = &committedGeneration
+		document.Sections.Updates.AvailableVersion = &availableVersion
+		document.Sections.Updates.AvailableGeneration = &availableGeneration
+		document.Sections.Updates.LastCheck.Result = update.CheckUpdateAvailable
+		document.Sections.Updates.LastOperation = &status.UpdateOperationSection{
+			OperationID:        "20261122T120500Z-1234abcd",
+			Kind:               "app-bundle-rollback",
+			Result:             update.ResultRolledBack,
+			Reason:             updateRollbackReason,
+			FinishedAt:         &finished,
+			FromGeneration:     &committedGeneration,
+			ToGeneration:       &currentGeneration,
+			RestoredGeneration: &restored,
+		}
+	case "offline":
+		document.Sections.Updates.LastCheck = status.UpdateCheckSection{
+			CheckedAt: &checked,
+			Result:    update.CheckOffline,
+			Reason:    "channel.read: dial tcp: network is unreachable",
+		}
+	case "rate-limited":
+		document.Sections.Updates.LastCheck = status.UpdateCheckSection{
+			CheckedAt: &checked,
+			Result:    update.CheckRateLimited,
+			Reason:    "channel.rate-limit: retry after 600 seconds",
+		}
+	case "check-failed":
+		document.Sections.Updates.LastCheck = status.UpdateCheckSection{
+			CheckedAt: &checked,
+			Result:    update.CheckFailed,
+			Reason:    "channel.read: malformed response",
+		}
 	}
 }
 
@@ -183,6 +316,24 @@ func mockFailed(now time.Time) status.Document {
 	return document
 }
 
+func mockReadyUpdates(now time.Time) status.UpdatesSection {
+	checked := now.Add(-5 * time.Minute).UTC().Format(time.RFC3339)
+	version := "0.18.2"
+	generation := int64(3)
+	return status.UpdatesSection{
+		State:               status.SectionOK,
+		CurrentVersion:      &version,
+		CurrentGeneration:   &generation,
+		RunningGeneration:   &generation,
+		CommittedVersion:    &version,
+		CommittedGeneration: &generation,
+		LastCheck: status.UpdateCheckSection{
+			CheckedAt: &checked,
+			Result:    update.CheckUpToDate,
+		},
+	}
+}
+
 func mockBase(now time.Time) status.Document {
 	schemaVersion := 1
 	lastRender := now
@@ -248,7 +399,7 @@ func mockBase(now time.Time) status.Document {
 					Carrier: &carrier,
 				},
 			},
-			Updates: status.UpdatesSection{State: status.SectionUnknown},
+			Updates: mockReadyUpdates(now),
 			Reset:   status.ResetSection{State: status.SectionUnknown},
 			Cameras: status.CamerasSection{
 				State: status.SectionOK,

@@ -207,20 +207,21 @@ type InterfaceSection struct {
 // channel check, the rollback target, and the newest operation. The OS slot
 // stays null until the image work claims it.
 type UpdatesSection struct {
-	State               SectionState            `json:"state"`
-	CurrentSlot         *string                 `json:"current_slot"`
-	CurrentVersion      *string                 `json:"current_version"`
-	CurrentGeneration   *int64                  `json:"current_generation"`
-	RunningGeneration   *int64                  `json:"running_generation"`
-	CommittedGeneration *int64                  `json:"committed_generation"`
-	CommittedVersion    *string                 `json:"committed_version"`
-	Channel             *string                 `json:"channel"`
-	LastCheck           UpdateCheckSection      `json:"last_check"`
-	AvailableVersion    *string                 `json:"available_version"`
-	AvailableGeneration *int64                  `json:"available_generation"`
-	Rollback            UpdateRollbackSection   `json:"rollback"`
-	LastOperation       *UpdateOperationSection `json:"last_operation"`
-	Base                *UpdatesBase            `json:"base"`
+	State               SectionState             `json:"state"`
+	CurrentSlot         *string                  `json:"current_slot"`
+	CurrentVersion      *string                  `json:"current_version"`
+	CurrentGeneration   *int64                   `json:"current_generation"`
+	RunningGeneration   *int64                   `json:"running_generation"`
+	CommittedGeneration *int64                   `json:"committed_generation"`
+	CommittedVersion    *string                  `json:"committed_version"`
+	Channel             *string                  `json:"channel"`
+	LastCheck           UpdateCheckSection       `json:"last_check"`
+	AvailableVersion    *string                  `json:"available_version"`
+	AvailableGeneration *int64                   `json:"available_generation"`
+	Rollback            UpdateRollbackSection    `json:"rollback"`
+	LastOperation       *UpdateOperationSection  `json:"last_operation"`
+	CurrentOperation    *UpdateOperationProgress `json:"current_operation,omitempty"`
+	Base                *UpdatesBase             `json:"base"`
 }
 
 // UpdateCheckSection is the last on-demand channel check result.
@@ -237,6 +238,22 @@ type UpdateRollbackSection struct {
 	Available  bool    `json:"available"`
 	Generation *int64  `json:"generation"`
 	Version    *string `json:"version"`
+}
+
+// UpdateOperationProgress is the running update or rollback transaction from
+// the update journal. It is read-only and disappears when the journal is
+// removed at the end of the operation.
+type UpdateOperationProgress struct {
+	OperationID    string `json:"operation_id"`
+	Kind           string `json:"kind"`
+	Phase          string `json:"phase"`
+	Step           string `json:"step"`
+	StepsCompleted int    `json:"steps_completed"`
+	StepsTotal     int    `json:"steps_total"`
+	StartedAt      string `json:"started_at"`
+	FromGeneration *int64 `json:"from_generation"`
+	ToGeneration   *int64 `json:"to_generation"`
+	Baseline       bool   `json:"baseline"`
 }
 
 // UpdateOperationSection is the newest update or rollback history record.

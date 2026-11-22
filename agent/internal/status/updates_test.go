@@ -346,3 +346,112 @@ func TestStatusDocumentReportsCheckRollbackAndLastOperation(t *testing.T) {
 		t.Fatalf("last operation from = %v, want 1", section.LastOperation.FromGeneration)
 	}
 }
+
+func writeUpdateJournal(t *testing.T, stateRoot string, journal update.Journal) {
+	t.Helper()
+	dir := filepath.Join(stateRoot, "update")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.MarshalIndent(journal, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(filepath.Join(dir, "journal.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdateStatusProbeReportsTheRunningOperation(t *testing.T) {
+	stateRoot := t.TempDir()
+	writeUpdateState(t, stateRoot, update.State{
+		SchemaVersion:       1,
+		Channel:             "beta",
+		CommittedGeneration: 1,
+		CommittedVersion:    "0.1.1",
+	})
+	writeRunningBundle(t, stateRoot, 1, "0.1.1")
+	writeUpdateJournal(t, stateRoot, update.Journal{
+		SchemaVersion:       update.SchemaVersion,
+		OperationID:         "20261122T120000Z-1234abcd",
+		Phase:               update.PhaseInstall,
+		State:               update.StateRunning,
+		Channel:             "beta",
+		CandidateGeneration: 2,
+		CandidateVersion:    "0.1.2",
+		PreviousGeneration:  1,
+		NextStep:            update.StepStartFrigate,
+		LastCompletedStep:   update.StepStartAgent,
+		CreatedAt:           "2026-11-22T12:00:00Z",
+		UpdatedAt:           "2026-11-22T12:01:00Z",
+		Steps: []update.Step{
+			{Key: update.StepPreflight},
+			{Key: update.StepStartAgent},
+			{Key: update.StepStartFrigate},
+			{Key: update.StepHealth},
+		},
+	})
+	probe := &UpdateStateProbe{StateRoot: stateRoot}
+	observation := probe.Probe(context.Background())
+	if observation.CurrentOperation == nil {
+		t.Fatal("current operation is nil")
+	}
+	progress := observation.CurrentOperation
+	if progress.Kind != "app-bundle-update" || progress.Step != update.StepStartFrigate {
+		t.Fatalf("progress = %+v", progress)
+	}
+	if progress.StepsCompleted != 2 || progress.StepsTotal != 4 {
+		t.Fatalf("steps = %d of %d, want 2 of 4", progress.StepsCompleted, progress.StepsTotal)
+	}
+	if progress.FromGeneration == nil || *progress.FromGeneration != 1 {
+		t.Fatalf("from generation = %v, want 1", progress.FromGeneration)
+	}
+	if progress.ToGeneration == nil || *progress.ToGeneration != 2 {
+		t.Fatalf("to generation = %v, want 2", progress.ToGeneration)
+	}
+}
+
+func TestUpdateStatusProbeReportsAManualRollbackOperation(t *testing.T) {
+	stateRoot := t.TempDir()
+	writeUpdateState(t, stateRoot, update.State{
+		SchemaVersion:       1,
+		Channel:             "beta",
+		CommittedGeneration: 2,
+		CommittedVersion:    "0.1.2",
+	})
+	writeRunningBundle(t, stateRoot, 2, "0.1.2")
+	writeUpdateJournal(t, stateRoot, update.Journal{
+		SchemaVersion:       update.SchemaVersion,
+		OperationID:         "20261122T120500Z-1234abcd",
+		Phase:               update.PhaseManualRollback,
+		State:               update.StateRunning,
+		Channel:             "beta",
+		CandidateGeneration: 2,
+		CandidateVersion:    "0.1.2",
+		PreviousGeneration:  1,
+		NextStep:            update.StepManualPointer,
+		CreatedAt:           "2026-11-22T12:05:00Z",
+		Steps: []update.Step{
+			{Key: update.StepManualPreflight},
+			{Key: update.StepManualVerify},
+			{Key: update.StepManualPointer},
+			{Key: update.StepManualFinish},
+		},
+	})
+	probe := &UpdateStateProbe{StateRoot: stateRoot}
+	observation := probe.Probe(context.Background())
+	if observation.CurrentOperation == nil {
+		t.Fatal("current operation is nil")
+	}
+	progress := observation.CurrentOperation
+	if progress.Kind != "app-bundle-rollback" || progress.Step != update.StepManualPointer {
+		t.Fatalf("progress = %+v", progress)
+	}
+	if progress.FromGeneration == nil || *progress.FromGeneration != 2 {
+		t.Fatalf("from generation = %v, want 2", progress.FromGeneration)
+	}
+	if progress.ToGeneration == nil || *progress.ToGeneration != 1 {
+		t.Fatalf("to generation = %v, want 1", progress.ToGeneration)
+	}
+}

@@ -1,0 +1,73 @@
+{{define "update-card"}}
+<section class="card" aria-labelledby="status-updates" data-update-state="{{.UpdateCard.StateName}}">
+  <div class="section-heading">
+    <h2 id="status-updates">Updates</h2>
+    <span class="state-badge state-{{.UpdateCard.StateClass}}">{{.UpdateCard.StateLabel}}</span>
+  </div>
+  <p><strong>{{.UpdateCard.Headline}}</strong></p>
+  {{if .UpdateCard.Summary}}<p>{{.UpdateCard.Summary}}</p>{{end}}
+  {{if .UpdateCard.Running}}
+  <p>{{.UpdateCard.CurrentStep}}</p>
+  {{if .UpdateCard.StepsTotal}}
+  <progress class="operation-progress" value="{{.UpdateCard.StepsDone}}" max="{{.UpdateCard.StepsTotal}}" aria-label="Update steps completed">{{.UpdateCard.StepsDone}} of {{.UpdateCard.StepsTotal}} steps completed</progress>
+  <p class="meta">{{.UpdateCard.StepsDone}} of {{.UpdateCard.StepsTotal}} steps completed.</p>
+  {{end}}
+  {{end}}
+  <dl class="facts">
+    {{if .UpdateCard.ShowCurrent}}
+    <dt>{{.UpdateCard.CurrentLabel}}</dt>
+    <dd>{{.UpdateCard.CurrentVersion}}</dd>
+    {{end}}
+    {{if .UpdateCard.ShowAvailable}}
+    <dt>Available version</dt>
+    <dd>{{.UpdateCard.AvailableVersion}}</dd>
+    {{end}}
+    {{if .UpdateCard.ShowUpdateNumber}}
+    <dt>Update number</dt>
+    <dd>{{.UpdateCard.AvailableNumber}}</dd>
+    {{end}}
+    {{if .UpdateCard.ShowLastInstalled}}
+    <dt>Last installed version</dt>
+    <dd>{{.UpdateCard.LastInstalled}}</dd>
+    {{end}}
+    {{if .UpdateCard.ShowLastCheck}}
+    <dt>Last checked</dt>
+    <dd>{{if .UpdateCard.LastCheckAt}}{{.UpdateCard.LastCheckAt}} UTC{{else}}Not recorded{{end}}</dd>
+    <dt>Check result</dt>
+    <dd>{{.UpdateCard.LastCheckResult}}{{if .UpdateCard.LastCheckDetail}}. {{.UpdateCard.LastCheckDetail}}{{end}}</dd>
+    {{end}}
+    {{if .UpdateCard.FailedStep}}
+    <dt>Stopped while</dt>
+    <dd>{{.UpdateCard.FailedStep}}</dd>
+    {{end}}
+  </dl>
+  {{if .UpdateCard.FailureReason}}
+  <div class="alert" role="alert">
+    <h3>{{.UpdateCard.FailureHeading}}</h3>
+    <p>{{.UpdateCard.FailureReason}}</p>
+  </div>
+  {{end}}
+  {{if .UpdateCard.RolledBack}}
+  <p>{{.UpdateCard.NextUpdateRule}}</p>
+  {{end}}
+  {{if or .UpdateCard.CanCheck .UpdateCard.CanInstall .UpdateCard.CanRollback}}
+  <div class="action-links update-actions">
+    {{if .UpdateCard.CanInstall}}
+    <form method="post" action="/ui/status/updates/install{{.StatusQuery}}" data-busy="true" data-busy-label="Starting the update">
+      {{template "csrf" .}}
+      <button type="submit">{{.UpdateCard.InstallLabel}}</button>
+    </form>
+    {{end}}
+    {{if .UpdateCard.CanCheck}}
+    <form method="post" action="/ui/status/updates/check{{.StatusQuery}}" data-busy="true" data-busy-label="Checking for updates">
+      {{template "csrf" .}}
+      <button type="submit" class="button secondary">Check for updates</button>
+    </form>
+    {{end}}
+    {{if .UpdateCard.CanRollback}}
+    <a href="/ui/status/updates/rollback{{.StatusQuery}}">{{.UpdateCard.RollbackLabel}}</a>
+    {{end}}
+  </div>
+  {{end}}
+</section>
+{{end}}

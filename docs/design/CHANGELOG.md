@@ -1,7 +1,7 @@
 # Design system changelog
 
 - Date: 2026-11-21
-- Status: Accepted; v0.16 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
+- Status: Accepted; v0.17 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
   implemented in `ui/static/bittern.css` and the templates; the v0.3 flow layer is binding from v0.6,
   when [ADR 0027](../adr/0027-flow-layer-above-patterns.md) was accepted with amendments P1 and P3.
 - Applies to: every change to a token, a component, a pattern, a flow, or a rule in
@@ -18,6 +18,27 @@ like at vN, and why is it different now".
 Versions are internal to the design documents. Bittern does not publish a package and has no
 second consumer, so there is no SemVer promise, no changeset tooling, and no codemod. A version is
 a date-stamped batch of class changes; the date is how it maps to an app release.
+
+## v0.17: 2026-11-22
+
+- Class: pattern
+- What changed: the status page's Updates card is now the update state and action surface. It names
+  the running version, the factory baseline, the last check result, the offered version and update
+  number, the current install or rollback step, a failed step and its plain reason, or a rollback and
+  the next-update rule. It adds check, install, and guarded rollback actions, the last as a dedicated
+  confirmation destination. [patterns.md](patterns.md#status-page) records rules S9 to S12 and
+  [the update card note](../notes/2026-11-22-update-card-ui.md) records the states, action guards,
+  and the manual-rollback limitation.
+- Why: the previous card printed a slot that is always null and a single "Installed" or "Not
+  checked" word, so an owner could not see a verified update, a failed check, or a rollback without
+  a shell. A failed check could be mistaken for a healthy update state, and there was no browser
+  path to install or roll back.
+- Evidence: [the update card note](../notes/2026-11-22-update-card-ui.md); the update-card state and
+  action tests in `agent/internal/ui/update_test.go`; the status probe tests in
+  `agent/internal/status/updates_test.go`; the four-width screenshots
+  `status-update-baseline-360x800.png` to `status-update-check-failed-1920x1080.png` and
+  `update-rollback-confirm-360x800.png` to `update-rollback-confirm-1920x1080.png`; the browser
+  check with 0 failures and 0 warnings.
 
 ## v0.16: 2026-11-21
 

@@ -1,6 +1,6 @@
 # Patterns
 
-- Date: 2026-11-18; updated 2026-11-21
+- Date: 2026-11-18; updated 2026-11-22
 - Status: Accepted. The token and component layer underneath these patterns is implemented in
   `ui/static/bittern.css` and the templates. The pattern rules remain the review target where the
   current screens do not yet meet them, and the v0.3 flow layer in [flows.md](flows.md) remains
@@ -165,7 +165,8 @@ the ranked issue list.
 fact list, table and table wrapper, inline alert, disclosure, empty state, page links.
 
 **States.** Booting, ready, degraded, updating, failed, unknown section, not applicable section,
-stale status, partial data, no data yet, unavailable API, expired session.
+stale status, partial data, no data yet, unavailable API, expired session, factory version, update
+available, up to date, update check failed, update installing, update failed, update rolled back.
 
 **Rules.**
 
@@ -176,13 +177,27 @@ stale status, partial data, no data yet, unavailable API, expired session.
 | S3 | Unknown is not zero. Not applicable is not "has not reported yet". Stale data says when it was built. | Q5 and the status tests named in [UX-2](../principles.md#ux-2-a-failure-names-the-step-the-effect-and-the-next-action). |
 | S4 | Every failing section names the failing step, the effect, and the next action. | Q7 and the state matrix. |
 | S5 | Evidence, raw paths, and per-check detail sit behind a disclosure, not in the primary sentence. | Q10 and template read. |
-| S6 | The 15 second refresh does not move focus, steal scroll, or announce every unchanged section. | Q6 and a keyboard pass with the fragment refresh. |
+| S6 | The status refresh, 15 seconds normally and 2 seconds while an update or rollback runs, does not move focus, steal scroll, or announce every unchanged section. | Q6 and a keyboard pass with the fragment refresh. |
 | S7 | Tables are comparison only, inside a named focusable scroll region; rows that are records stack as a description list below 44rem. | Q4 and Q6; keyboard pass and 360 screenshot. |
 | S8 | A healthy page may have no filled button. A degraded page has exactly one repair action. | Q1 and the state matrix. |
+| S9 | The update card always names the running version and the last check result. A failed, offline, or rate-limited check never reads as up to date. The factory baseline is named as the factory version. | Q5 and Q7; the update card state tests and the four-width screenshots. |
+| S10 | Update actions are POST forms with the administrator session and a CSRF token. Install is absent without a verified newer version; roll back is absent without a saved previous version; every action is absent while an update or rollback runs. | Q5, Q8, and Q14; the action guard, session, and CSRF tests. |
+| S11 | Install and rollback show the current step and the measured progress, and the status fragment polls every two seconds while either runs. A failure names the step and the effect, and offers the next action. | Q5, Q7, and Q14; the operation fragment and state tests. |
+| S12 | A manual rollback asks for confirmation on its own destination and states that configuration and recordings are not reverted. It is a secondary, destructive-variant action, not the page's filled action. | Q1, Q9, and Q13; the rollback confirmation test and 360 screenshot. |
 
 The current status page has an overall badge and reason, but then nine cards of equal weight. It
 also says "This section has not reported yet" for sections that may be not applicable. S1 and S3
 are the first fixes.
+
+The update card is one independent card in the status grid. It composes the existing section
+heading, status badge, fact list, inline alert, button, link, and page links; it adds no variant and
+no token. Its job is to say what version is running, whether a verified update is offered, what the
+last check found, and the one update action the owner can take. The card is persistent: an unknown
+section, a failed check, and a running operation each render a named state instead of an empty card.
+The actions go to the authenticated POST routes under `/ui/status/updates/`, and a manual rollback
+has a dedicated confirmation destination at `/ui/status/updates/rollback`. The states and the
+limitation are recorded in
+[the update card note](../notes/2026-11-22-update-card-ui.md).
 
 ## Managed-device list and detail
 

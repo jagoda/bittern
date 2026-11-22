@@ -101,8 +101,11 @@ The viewport list is provisional under [OQ-26](../../docs/open-questions.md) and
 | desktop | 1280 by 800 |
 | desktop-wide | 1920 by 1080 |
 
-The manifest has 23 screens from 17 routes, so each run checks 92 route-width screens and writes 92
-default full-page screenshots, plus an `-expanded` copy for each screen with a closed disclosure.
+The manifest has 34 screens from 18 routes, so each run checks 136 route-width screens and writes
+136 default full-page screenshots, plus an `-expanded` copy for each screen with a closed
+disclosure. Nine status variants preview the update card: factory baseline with an offered update,
+up to date, update available, installing, failed, rolled back, offline, rate limited, and a failed
+check. The rollback confirmation has a target and a no-target variant.
 Each form factor has two sizes so a layout that only breaks at one end of
 its range is caught: two phone widths for the narrow end and two desktop widths for the wide end.
 The 360 width is the BIT-020 scope floor and the 390 width is the current acceptance width.
@@ -147,7 +150,7 @@ the floor, so a control that matches both a 44 role and the floor gets 44. The s
 A failure names the role and the measured size, for example `a "Refresh now" is 99x32, below the
 44x44 navigation target`. A control in the floor role between 24 and 43 warns instead, so an inline
 prose link stays visible as advisory without failing the run. The current templates have no inline
-prose links, so a clean run reports 0 failures and 0 warnings across the 92 route-width screens; the
+prose links, so a clean run reports 0 failures and 0 warnings across the 136 route-width screens; the
 state links and every back link are in a 44 role.
 
 `routes.json` covers every `Responsive` row in `agent/internal/ui/routes.go`, plus all five status
