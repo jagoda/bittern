@@ -28,8 +28,8 @@
 | Kit target | `make beta-payload` supersedes `make poc-payload`. It builds the two static binaries, packs the application payload and manifest, builds `bittern-beta-kit.tar.gz`, and writes the published `SHA256SUMS` for the kit. Every caller, runbook, and help line now uses `make beta-payload`. |
 | Kit contents | The kit carries the packaging install, cleanup, and storage scripts, the four units including `bittern-update.service`, all templates, `trust/release-keys/<key_id>.pub` for `/etc/bittern/trust/release-keys`, a README, a VERSION stamp naming the generation and source commit, and an internal `SHA256SUMS`. It is unsigned, digest only, and is not an update payload. |
 | Installer | `packaging/install.sh` installs the CI test anchor when `trust/release-keys` is present. It never installs a release anchor. The README and runbooks verify the kit with `sha256sum -c SHA256SUMS` before extracting or running it. |
-| Publish workflow | `.github/workflows/publish.yml` runs on `app-beta-*`, validates the exact tag rule first, calls the phase one check workflow as a reusable check, and then uses two release jobs. The draft job has `contents: write` and no environment: it downloads the unsigned assets, checks the tag generation and source commit against the manifest, signs with the CI test key, verifies the signature, creates a draft with exactly the five release assets, and records their digests. The publish job requires the `beta` environment, takes no build action, re-verifies the draft's five asset names and recorded digests, and publishes the existing draft. |
-| Permissions and pins | The workflow has `contents: read` at workflow level. The draft and publish jobs each have `contents: write`; only the publish job has the `beta` environment. Every action is GitHub-owned and pinned by full commit SHA. |
+| Publish workflow | `.github/workflows/publish.yml` runs on `app-beta-*`, validates the exact tag rule first, calls the phase one check workflow as a reusable check, and then uses two release jobs. The draft job has `contents: write` and the `beta-draft` environment, which holds the CI test key and has no required reviewer: it downloads the unsigned assets, checks the tag generation and source commit against the manifest, signs with the CI test key, verifies the signature, creates a draft with exactly the five release assets, and records their digests. The publish job requires the `beta` environment, takes no build action, re-verifies the draft's five asset names and recorded digests, and publishes the existing draft. |
+| Permissions and pins | The workflow has `contents: read` at workflow level. The draft and publish jobs each have `contents: write`; the draft job uses `beta-draft` for key scope and the publish job uses `beta` for approval. Every action is GitHub-owned and pinned by full commit SHA. |
 | Checks | `check.yml` is now reusable, and its build job produces the unsigned beta payload, manifest, kit, and checksums as `bittern-beta-unsigned-test-build`. |
 
 The five release assets are `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`,
@@ -70,20 +70,22 @@ constant, one installed file, and one test when that decision lands.
 
 ## Workflow behavior
 
-The draft job has `contents: write` and no environment. It builds, signs, creates the draft, and
-uploads the five assets before any approval. An unapproved, rejected, or cancelled run therefore
-leaves a draft that a maintainer can inspect, which is the ADR 0032 point 7 behaviour. The publish
-job needs the `beta` environment, takes no build action, and publishes only after it has checked
-the draft's five asset names and the digests recorded by the draft job. It downloads the draft
-assets and runs `sha256sum -c` against that record, so a replaced or incomplete asset cannot be
-published under the approved run.
+The draft job has `contents: write` and the `beta-draft` environment. It builds, signs, creates the
+draft, and uploads the five assets before any approval. `beta-draft` has no required reviewer and
+the same `app-beta-*` tag policy as `beta`, so it scopes the key to tag-triggered runs without
+gating the draft. An unapproved, rejected, or cancelled run therefore leaves a draft that a
+maintainer can inspect, which is the ADR 0032 point 7 behaviour. The publish job needs the `beta`
+environment, takes no build action, and publishes only after it has checked the draft's five asset
+names and the digests recorded by the draft job. It downloads the draft assets and runs
+`sha256sum -c` against that record, so a replaced or incomplete asset cannot be published under the
+approved run.
 
-The CI test key is held only by the draft job. Because a job without an environment cannot read an
-environment secret, `BITTERN_CI_SIGNING_KEY` must be a repository secret for this workflow. The
-`beta` environment still gates the visible publication, and the key is decoded to a 0600 file in
-the runner's temporary directory, removed by a trap, and removed again by an `always()` step. The
-ADR 0032 follow-up records this scope and the two-job split. The key is still the CI test key: it is
-never the release key, and a field device never trusts it.
+The CI test key is held only by the draft job in `beta-draft`. `beta` still gates the visible
+publication, and the key is decoded to a 0600 file in the runner's temporary directory, removed by a
+trap, and removed again by an `always()` step. The ADR 0032 follow-up and the
+[beta draft environment note](2026-11-22-beta-draft-environment.md) record this scope and the
+two-job split. The key is still the CI test key: it is never the release key, and a field device
+never trusts it.
 
 The environment's tag policy is the documented `app-beta-*` glob, which is broader than the exact
 six-hex rule. The workflow's first job applies the exact rule with the Go parser before any check,

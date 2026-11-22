@@ -5,8 +5,10 @@
 # asset names and recorded digests and then publishes the existing draft.
 #
 # No release private key is present. The CI test key is held by the draft job
-# and its public half is packaging/trust/beta-ci.pub. The draft job has no
-# environment, so an unapproved run leaves the draft visible to maintainers.
+# through the beta-draft environment, and its public half is
+# packaging/trust/beta-ci.pub. The approval gate is the separate beta
+# environment. beta-draft has no required reviewer because it publishes
+# nothing; it scopes the key to tag-triggered runs on this repository.
 # QEMU and hardware tests stay outside CI.
 name: publish
 
@@ -23,7 +25,8 @@ concurrency:
   cancel-in-progress: false
 
 # Least privilege. The phase one checks are read-only. Only the two release
-# jobs get contents: write, and only the publish job gets the environment.
+# jobs get contents: write. The draft job uses beta-draft for key scope and the
+# publish job uses beta for the approval gate.
 permissions:
   contents: read
 
@@ -71,9 +74,11 @@ jobs:
     name: sign and stage draft
     needs: [tag, checks]
     runs-on: ubuntu-24.04
-    # No environment: the draft exists before the beta environment approval, so
-    # an unapproved, rejected, or cancelled run leaves a draft to inspect. The
-    # CI test key is therefore a repository secret, not an environment secret.
+    # beta-draft holds the CI test key and has no required reviewer, so the
+    # draft exists before the beta approval. It uses the same app-beta-* tag
+    # policy as beta. The approval gate is beta on the publish job.
+    environment:
+      name: beta-draft
     permissions:
       contents: write
     outputs:
@@ -134,9 +139,9 @@ jobs:
 
       # The secret is base64-encoded raw seed bytes. It is decoded into the
       # runner's temporary directory with mode 0600, used once, and removed by
-      # the trap. The always() step below covers a job-level failure as well.
-      # The draft job has no environment, so this secret must be stored at
-      # repository scope; the beta environment still gates publication.
+      # the trap. The secret is stored in beta-draft, not at repository scope
+      # and not in the approving beta environment. The always() step below
+      # covers a job-level failure as well.
       - name: Sign the manifest with the CI test key
         env:
           BITTERN_CI_SIGNING_KEY: ${{ secrets.BITTERN_CI_SIGNING_KEY }}

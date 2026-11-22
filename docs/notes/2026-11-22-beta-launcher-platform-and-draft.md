@@ -64,7 +64,7 @@ installer line, and the provider test.
 | --- | --- | --- | --- |
 | `tag` | none | `contents: read` | Validates the exact `app-beta-<6 hex>` rule with the Go parser |
 | `checks` | none | `contents: read` | Reusable phase one workflow, unsigned build |
-| `draft` | none | `contents: write` | Checks generation and source commit, signs with the CI test key, verifies, creates the draft, uploads five assets, records their SHA-256 |
+| `draft` | `beta-draft`, no required reviewer | `contents: write` | Checks generation and source commit, signs with the CI test key, verifies, creates the draft, uploads five assets, records their SHA-256 |
 | `publish` | `beta`, required reviewer | `contents: write` | Takes no build action, verifies the draft is still a draft with exactly five assets and the recorded digests, then flips it to published |
 
 An unapproved, rejected, or cancelled run leaves the draft and publishes nothing. The publish job
@@ -73,11 +73,11 @@ replaced or incomplete asset cannot be published under the approved run. Every a
 by full commit SHA.
 
 The CI test key is decoded to a 0600 file in the runner's temporary directory, removed by a trap,
-and removed again by an `always()` step. The draft job has no environment, and a job without an
-environment cannot read an environment secret. `BITTERN_CI_SIGNING_KEY` must therefore be a
-repository secret. The `beta` environment still gates publication. This is recorded in the ADR 0032
-follow-up line and refines point 3's "only to the publish job" wording without widening write access
-to the phase one checks.
+and removed again by an `always()` step. `BITTERN_CI_SIGNING_KEY` is stored in `beta-draft`, which
+has no required reviewer and the same `app-beta-*` tag policy as `beta`. The approval gate is the
+separate `beta` environment, so a job gated by an approving environment never has to create the
+draft the approver needs to inspect. This is recorded in the ADR 0032 follow-up line and in the
+[beta draft environment note](2026-11-22-beta-draft-environment.md).
 
 ## Tests
 
@@ -102,5 +102,5 @@ and a rollback restores the previous one in the fake. They are not live systemd 
 - No tag was created and no release was published. The publish workflow was not run end to end.
   `gh workflow view` is syntax acceptance, not evidence that the approval, digest check, or visible
   flip works on a real run.
-- The CI test key was not used locally. The repository secret scope is an operational change on
-  GitHub that this change cannot perform.
+- The CI test key was not used locally. The `beta-draft` environment secret is an operational
+  change on GitHub that this change cannot populate because secret values are write-only.
