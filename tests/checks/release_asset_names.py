@@ -5,10 +5,12 @@ The publish workflow, ADR 0031, the device channel client, the packer and the
 Makefile each name the release assets. They must agree on the same five names,
 and the kit and its checksum file must never become update assets.
 
-The check compares five sources:
+The check compares six sources:
 
 - `.github/workflows/publish.yml`: the `gh release create` asset arguments, the
   two expected-set literals, and the release notes list.
+- `packaging/verify_release_draft.py`: the `ASSET_NAMES` tuple the publish job
+  verifies before it publishes a draft.
 - `docs/adr/0031-update-channel-on-github-releases.md`: the two asset tables.
 - `agent/internal/update/channel.go`: the names the device fetches, plus
   `manifest.Payload.Filename` for the payload.
@@ -34,6 +36,7 @@ ADR = ROOT / "docs" / "adr" / "0031-update-channel-on-github-releases.md"
 CHANNEL = ROOT / "agent" / "internal" / "update" / "channel.go"
 PACKER = ROOT / "agent" / "cmd" / "bittern-release" / "pack.go"
 MAKEFILE = ROOT / "Makefile"
+VERIFIER = ROOT / "packaging" / "verify_release_draft.py"
 
 # The five names ADR 0031 defines. The check derives the set from the sources
 # rather than using this constant as a source, but the exact count and the two
@@ -204,6 +207,19 @@ def makefile_assets(text: str) -> set[str]:
     return names
 
 
+def verifier_assets(text: str) -> set[str]:
+    match = re.search(r"ASSET_NAMES = \((.*?)\)", text, re.DOTALL)
+    if match is None:
+        raise CheckError("verify_release_draft.py has no ASSET_NAMES tuple")
+    names = set(re.findall(r'"([^"]+)"', match.group(1)))
+    if len(names) != RELEASE_ASSET_COUNT:
+        raise CheckError(
+            "verify_release_draft.py names "
+            f"{len(names)} assets ({sorted(names)}), not {RELEASE_ASSET_COUNT}"
+        )
+    return names
+
+
 def require_equal(source: str, actual: set[str], expected: set[str]) -> None:
     if actual != expected:
         missing = sorted(expected - actual)
@@ -221,6 +237,7 @@ def main() -> int:
         channel = read(CHANNEL)
         packer = read(PACKER)
         makefile = read(MAKEFILE)
+        verifier = read(VERIFIER)
 
         release = workflow_release_assets(workflow)
         if release != UPDATE_ASSETS | KIT_ASSETS:
@@ -232,6 +249,7 @@ def main() -> int:
         for index, expected in enumerate(workflow_expected_sets(workflow), start=1):
             require_equal(f"publish.yml expected set {index}", expected, release)
         require_equal("publish.yml release notes", workflow_notes_assets(workflow), release)
+        require_equal("packaging/verify_release_draft.py", verifier_assets(verifier), release)
         require_equal("ADR 0031 asset tables", adr_assets(adr), release)
 
         payload_name, manifest_name = packer_names(packer)
@@ -274,8 +292,8 @@ def main() -> int:
             "device update assets: " + ", ".join(sorted(device))
         )
         print(
-            "ADR 0031, the publish workflow, the device client, the packer and the "
-            "Makefile agree; the kit and SHA256SUMS are not update assets"
+            "ADR 0031, the publish workflow, the draft verifier, the device client, "
+            "the packer and the Makefile agree; the kit and SHA256SUMS are not update assets"
         )
         return 0
     except CheckError as error:

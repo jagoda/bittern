@@ -1,12 +1,14 @@
 # Beta bench rollout
 
-- Date: 2026-11-22
+- Date: 2026-11-22; revised 2026-11-23 after the first publish run failed in the publish job
 - Status: maintainer checklist for the first two published beta generations. The release workflow
   dispatch is the normal path and the tag push is the fallback. The release workflow defaults to a
   dry-run call that exercises the called publish workflow and the signing step without creating a
-  tag, draft, or release. Both `beta-draft` and `beta` admit the `main` branch and the
-  `app-beta-*` tag, so the dispatch preflight passes. Neither publish path has been run against a
-  published release. The `beta` approval remains unproven until the first release is approved
+  tag, draft, or release. A dispatch that names an existing draft is the recovery path and completes
+  that draft instead of creating a new generation. Both `beta-draft` and `beta` admit the `main`
+  branch and the `app-beta-*` tag, so the dispatch preflight passes. Neither publish path has been
+  run against a published release. The `beta` approval remains unproven until the first release is
+  approved
 - Bench: Debian 13 (trixie) amd64, minimal, one management NIC on the house LAN, camera NIC
   unplugged, local console attached
 - Payload: the published `bittern-beta-kit.tar.gz` and the `app-beta-000001` and `app-beta-000002`
@@ -22,6 +24,7 @@
   [dry run and bench rollout note](../notes/2026-11-22-beta-dry-run-and-bench-rollout.md),
   [dispatch release trigger note](../notes/2026-11-22-dispatch-release-trigger.md),
   [release call path note](../notes/2026-11-22-release-call-path.md),
+  [publish recovery note](../notes/2026-11-23-publish-recovery.md),
   [update channel and manual rollback note](../notes/2026-11-22-update-channel-check-and-manual-rollback.md),
   [beta kit README](../../packaging/README-beta-kit.md),
   [BIT-009](../plan/implementation-plan.md#bit-009-app-bundle-update-transaction-with-rollback),
@@ -416,7 +419,41 @@ reads as up to date.
 ## If something fails
 
 Stop at the failed check and collect the evidence before changing anything. Do not retry the update,
-re-tag a generation, or edit the device state to make the card look clean.
+re-tag a generation, or edit the device state to make the card look clean. A tag plus draft with no
+public release is an unfinished release: complete it with the recovery dispatch below. Do not delete
+the tag or the draft, and do not create a new tag to work around a failure at the publish job.
+
+### Complete an existing draft after a publish failure
+
+The recovery dispatch names the existing tag and runs only the publish job. It skips the release
+preflight, the checks and build, the signing job, and tag creation. The publish job waits at the
+`beta` environment, then downloads the draft and verifies the five assets against
+`packaging/trust/beta-ci.pub`, the tag generation, the payload digest, and `SHA256SUMS`. A missing
+draft, a missing tag, a tag outside the `app-beta-` plus six lowercase hexadecimal form, or any
+failed verification stops the job with the named problem and publishes nothing.
+
+```sh
+gh workflow run release.yml --ref main -f publish_draft=app-beta-000001
+sleep 5
+run_id="$(gh run list --workflow release.yml --event workflow_dispatch --limit 1 \
+  --json databaseId --jq '.[0].databaseId')"
+test -n "$run_id"
+gh run view "$run_id" --json url --jq .url
+```
+
+Expected: the `release preflight`, `validate tag`, `checks and unsigned test build`, and
+`sign and stage draft` jobs are skipped. The `publish the verified draft` job waits at `beta`.
+Approve `beta` only after confirming that the run names the existing tag and draft. The verification
+step prints the digests of `manifest.json`, `manifest.json.sig`, `bittern-app.tar.gz`,
+`bittern-beta-kit.tar.gz`, and `SHA256SUMS`; the manifest and its signature verify against the
+shipped anchor, the channel is `beta`, the generation matches the tag, the payload digest matches the
+app archive, and every `SHA256SUMS` entry matches the downloaded bytes. The same job then flips the
+draft to published.
+
+If the run reports a missing draft or tag, or a verification failure, do not delete the tag or draft
+and do not create a new tag. Fix the named cause and dispatch the recovery again with the same tag.
+The [publish recovery note](../notes/2026-11-23-publish-recovery.md) records the first proof and the
+verification messages.
 
 Publish-side evidence:
 

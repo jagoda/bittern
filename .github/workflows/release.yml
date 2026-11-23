@@ -15,6 +15,14 @@
 # A mismatched confirmation fails the preflight, and an empty one skips the
 # release job. A dry-run dispatch does not need it.
 #
+# The optional publish_draft input names an existing verified draft to complete.
+# It is the recovery path after a failure at the publish job. A recovery
+# dispatch skips the preflight, the checks and build, the signing job, and tag
+# creation, and runs only the publish job under the beta approval. That job
+# refuses a missing draft, a missing tag, a malformed tag, or any failed
+# verification. A draft plus tag with no public release is completed, not
+# deleted and not replaced by a new generation.
+#
 # The tag push path remains in publish.yml as the fallback. It is not started by
 # this workflow, and a tag created here is never pushed through the tag path.
 #
@@ -39,6 +47,11 @@ on:
         required: true
         type: boolean
         default: true
+      publish_draft:
+        description: Existing app-beta-* draft tag to verify and publish; skips preflight and build
+        required: false
+        type: string
+        default: ""
 
 # One release at a time. Two runs must not compute the same generation, and a
 # run waiting for the beta approval must not be cancelled.
@@ -56,6 +69,7 @@ permissions:
 jobs:
   preflight:
     name: release preflight
+    if: inputs.publish_draft == ''
     runs-on: ubuntu-24.04
     # No environment declaration: the preflight reads public metadata with the
     # workflow token and needs no environment secret. It therefore has no ref
@@ -92,21 +106,30 @@ jobs:
     # The default dry_run=true dispatch calls the reusable publish workflow so
     # the called path, its conditions, and the signing step run with no tag or
     # release. A publish dispatch must also confirm the tag the preflight
-    # printed; the preflight already failed a mismatched confirmation.
+    # printed; the preflight already failed a mismatched confirmation. A
+    # recovery dispatch skips the preflight and calls the same publish job with
+    # publish_only=true; always() lets the skipped preflight pass.
     if: >-
-      needs.preflight.result == 'success' &&
-      (inputs.dry_run || inputs.confirm == needs.preflight.outputs.tag)
+      always() &&
+      (
+        (inputs.publish_draft != '') ||
+        (needs.preflight.result == 'success' &&
+         (inputs.dry_run || inputs.confirm == needs.preflight.outputs.tag))
+      )
     permissions:
       contents: write
     uses: ./.github/workflows/publish.yml
     # A called workflow receives no secrets implicitly. Pass the CI test key
     # name so the draft job's beta-draft environment can resolve it; the publish
-    # job does not use that environment and never reads it.
+    # job does not use that environment and never reads it. The recovery path
+    # passes the same name because the reusable workflow declares it, but no job
+    # that uses it runs.
     secrets:
       BITTERN_CI_SIGNING_KEY: ${{ secrets.BITTERN_CI_SIGNING_KEY }}
     with:
-      tag: ${{ needs.preflight.outputs.tag }}
+      tag: ${{ inputs.publish_draft || needs.preflight.outputs.tag }}
       generation: ${{ needs.preflight.outputs.generation }}
       commit: ${{ needs.preflight.outputs.commit }}
-      create_tag: ${{ inputs.dry_run == false }}
-      dry_run: ${{ inputs.dry_run }}
+      create_tag: ${{ inputs.publish_draft == '' && inputs.dry_run == false }}
+      dry_run: ${{ inputs.publish_draft == '' && inputs.dry_run }}
+      publish_only: ${{ inputs.publish_draft != '' }}

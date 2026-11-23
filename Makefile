@@ -115,6 +115,7 @@ check:
 	$(PYTHON) tests/checks/release_asset_names.py || status=1; \
 	$(PYTHON) tests/checks/tag_corpus.py || status=1; \
 	$(PYTHON) tests/release/test_release_preflight.py || status=1; \
+	$(PYTHON) tests/release/test_verify_release_draft.py || status=1; \
 	$(SUBMAKE) version-check || status=1; \
 	$(SUBMAKE) test || status=1; \
 	exit $$status

@@ -1,6 +1,6 @@
 # Principles
 
-- Last reviewed: 2026-11-22
+- Last reviewed: 2026-11-23
 - Process: [Findings and principles process](notes/2026-11-15-findings-and-principles-process.md),
   [engineering quality](engineering/README.md)
 - Applies to: every finding and every change, as recorded in [AGENTS.md](../AGENTS.md) and the
@@ -38,6 +38,7 @@ tracker.
 | EN-4 | The second occurrence of a defect class triggers an audit of the class | Network path notes, reboot failures |
 | EN-5 | A planned-case matrix proves the plan runs; adversarial state proves the invariants | Update engine audit |
 | OP-1 | A repeated manual bridge becomes an idempotent script whose dry run covers the real path | GK41 manual bridges, BIT-016, release call path |
+| OP-2 | An irreversible step has a verifiable completion path that does not need a new generation | Publish recovery note |
 | SEC-1 | A secret has one storage location and a redaction test | ADR 0010, camera credential tests |
 | RES-1 | External facts are dated and sourced before they are relied on | Frigate assessment, AGENTS rule |
 
@@ -486,6 +487,26 @@ does not apply gets a one-line reason in the review.
   before the publish dispatch, and
   [tests/cleanup/test_cleanup.py](../tests/cleanup/test_cleanup.py) runs in `make check`. The QEMU
   firstboot and clean-network scenarios verify the install path.
+
+### OP-2 An irreversible step has a verifiable completion path that does not need a new generation
+
+- Date: 2026-11-23
+- Rule: A step that cannot be undone, including a publication, has a repeatable path that verifies
+  the durable state and completes it from where it stopped. A failure after the tag and draft exist
+  must not force a new tag, a new generation, or a manual edit of the draft.
+- Evidence: The first real `release.yml` publish dispatch failed at the last job because the publish
+  job had no git checkout and `gh` could not infer the repository. The tag and the five-asset draft
+  were intact. The publish job now verifies the downloaded draft against the shipped anchor, and
+  `release.yml` has a `publish_draft` recovery input that runs the same job with no preflight, build,
+  signing, or tag creation. [The publish recovery note](notes/2026-11-23-publish-recovery.md)
+  records the failure, the exact messages, and the proof against the real draft.
+- Do: On a tag plus draft with no public release, dispatch `release.yml` with
+  `publish_draft=<tag>`, verify the five assets, approve `beta`, and publish the same draft.
+- Don't: Delete the tag or draft, re-tag the generation, or publish a new generation to recover from
+  a failure at the last step.
+- Check: [packaging/verify_release_draft.py](../packaging/verify_release_draft.py) and
+  [tests/release/test_verify_release_draft.py](../tests/release/test_verify_release_draft.py) in
+  `make check`, plus the runbook recovery procedure and the proof note.
 
 ## Security
 

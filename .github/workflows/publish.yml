@@ -6,6 +6,11 @@
 #   tag, draft, or release. The dry_run=false call creates the tag at the
 #   checked commit and uploads exactly the five release assets to a draft. The
 #   tag is created only after the build and signature succeed.
+# - A recovery dispatch of release.yml names an existing draft and calls this
+#   workflow with publish_only=true. It skips the tag, checks, and draft jobs,
+#   verifies the downloaded draft against the shipped anchor, and publishes the
+#   same draft after the beta approval. It creates no tag and builds no release
+#   assets.
 # - A push of an app-beta-* tag is the fallback path. The tag exists before the
 #   run, so this workflow validates it, builds, signs, and creates the draft
 #   against the existing tag. It does not compute the generation.
@@ -17,9 +22,11 @@
 #
 # The draft job runs in beta-draft, which scopes the CI test key to the ref and
 # holds no required reviewer. The publish job runs in the protected beta
-# environment, verifies the draft's asset names and recorded digests, and flips
-# the existing draft to published after the maintainer approves. The tag push
-# fallback runs the workflow file at the tagged commit, not the copy on main.
+# environment, verifies the downloaded assets against packaging/trust/beta-ci.pub,
+# and flips the existing draft to published after the maintainer approves. It
+# never trusts a digest string from an earlier job, so the same job can complete
+# a draft in a recovery run that has no earlier job. The tag push fallback runs
+# the workflow file at the tagged commit, not the copy on main.
 #
 # No release private key is present. The CI test key is held by the draft job
 # through the beta-draft environment, and its public half is
@@ -55,7 +62,8 @@ on:
   # The release workflow calls this workflow with the tag, generation, and
   # commit the preflight computed. create_tag is true only on its publish path;
   # its dry-run call sets dry_run true and create_tag false. The tag push
-  # fallback already has its tag, and a dry run never creates one.
+  # fallback already has its tag, and a dry run never creates one. A recovery
+  # call sets publish_only true and supplies only the existing draft tag.
   workflow_call:
     inputs:
       tag:
@@ -64,12 +72,14 @@ on:
         type: string
       generation:
         description: Generation the preflight computed for the tag
-        required: true
+        required: false
         type: string
+        default: ""
       commit:
         description: Commit the preflight checked and the tag must point at
-        required: true
+        required: false
         type: string
+        default: ""
       create_tag:
         description: Create the tag after the build and signature succeed
         required: false
@@ -77,6 +87,11 @@ on:
         default: false
       dry_run:
         description: Run every step except creating a tag or a release
+        required: false
+        type: boolean
+        default: false
+      publish_only:
+        description: Verify and publish an existing draft; skip tag, checks, and draft jobs
         required: false
         type: boolean
         default: false
@@ -103,6 +118,7 @@ permissions:
 jobs:
   tag:
     name: validate tag
+    if: inputs.publish_only != true
     runs-on: ubuntu-24.04
     outputs:
       generation: ${{ steps.parse.outputs.generation }}
@@ -236,6 +252,7 @@ jobs:
   checks:
     name: checks and unsigned test build
     needs: tag
+    if: inputs.publish_only != true
     # The reusable phase one workflow is the single definition of green. It
     # runs make check and builds the unsigned payload, manifest, kit, and
     # checksums in the same run, so there is no second copy of the check logic.
@@ -246,6 +263,7 @@ jobs:
   draft:
     name: sign and stage draft
     needs: [tag, checks]
+    if: inputs.publish_only != true
     runs-on: ubuntu-24.04
     # beta-draft holds the CI test key and has no required reviewer, so the
     # draft exists before the beta approval. The approval gate is beta on the
@@ -256,8 +274,6 @@ jobs:
       name: beta-draft
     permissions:
       contents: write
-    outputs:
-      digests: ${{ steps.record.outputs.digests }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -502,84 +518,75 @@ jobs:
           fi
           printf 'confirmed: no tag and no release named %s\n' "$TAG"
 
-      # The publish job has no build action. Record the uploaded asset digests
-      # here so that job can prove the draft still carries exactly these bytes
-      # before the visible flip. Base64 keeps the job output on one line.
-      - name: Record the signed asset digests
-        id: record
-        run: |
-          set -eu
-          digests="$(cd build/assets && sha256sum \
-            manifest.json \
-            manifest.json.sig \
-            bittern-app.tar.gz \
-            bittern-beta-kit.tar.gz \
-            SHA256SUMS | base64 -w0)"
-          printf 'digests=%s\n' "$digests" >> "$GITHUB_OUTPUT"
-
   publish:
     name: publish the verified draft
     # A dry run never reaches the approval gate. The tag push fallback and the
-    # dispatch release both do, because both set dry_run to false. The branch
-    # policy on beta decides whether the dispatch ref, main, is admitted; the
-    # explicit condition keeps the dry run from waiting on it.
+    # dispatch release both do, because both set dry_run to false. A recovery
+    # call sets publish_only, skips the earlier jobs, and reaches this same job
+    # with no dependency outputs. always() lets the skipped dependencies pass;
+    # the normal branch still requires both of them to have succeeded.
     needs: [tag, draft]
-    if: needs.tag.outputs.dry_run == 'false'
+    if: |
+      always() && (
+        inputs.publish_only == true ||
+        (needs.tag.result == 'success' &&
+         needs.draft.result == 'success' &&
+         needs.tag.outputs.dry_run == 'false')
+      )
     runs-on: ubuntu-24.04
     # The beta environment carries the required reviewer and the app-beta-*
     # tag and main branch policies. The draft already exists, so an unapproved
-    # run leaves it in place and publishes nothing. This job takes no build
-    # action and never receives the CI test key.
+    # run leaves it in place and publishes nothing. This job builds no release
+    # asset and never receives the CI test key.
     environment:
       name: beta
-      url: https://github.com/${{ github.repository }}/releases/tag/${{ needs.tag.outputs.tag }}
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ needs.tag.outputs.tag || inputs.tag }}
     permissions:
       contents: write
     steps:
-      # Verify the asset names and the recorded digests from the draft itself,
-      # not from a rebuilt tree. The signature and manifest uploaded by the
-      # draft job are the bytes that become visible.
-      - name: Verify the draft asset set and recorded digests
+      # The verifier and the anchor are repository files, so this job checks out
+      # the repository. Every gh call below still names the repository with -R
+      # or an explicit repos/<owner>/<repo> path: gh must never infer it from a
+      # git checkout, which is what failed the first real publish run.
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from agent/go.mod
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+
+      # This is the repository's verifier, not a release build. It verifies the
+      # bytes already in the draft against the shipped anchor.
+      - name: Build the release verifier
+        run: make bittern-release
+
+      # Verify the downloaded draft itself. The manifest signature covers
+      # manifest.json and manifest.json.sig, payload.sha256 covers the app
+      # archive, and SHA256SUMS covers the kit. No digest string from the draft
+      # job is trusted or required. The step prints every asset digest and
+      # writes the same table to the run summary.
+      - name: Verify the downloaded draft against the shipped anchor
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_DIGESTS: ${{ needs.draft.outputs.digests }}
-          TAG: ${{ needs.tag.outputs.tag }}
+          TAG: ${{ needs.tag.outputs.tag || inputs.tag }}
         run: |
           set -eu
-          if [ -z "$EXPECTED_DIGESTS" ]; then
-            printf 'the draft job recorded no asset digests\n' >&2
-            exit 1
-          fi
-          is_draft="$(gh release view "$TAG" --json isDraft --jq '.isDraft')"
-          if [ "$is_draft" != "true" ]; then
-            printf 'release %s is not a draft\n' "$TAG" >&2
-            exit 1
-          fi
-          actual="$(gh release view "$TAG" --json assets --jq '.assets[].name' | LC_ALL=C sort)"
-          expected="$(printf '%s\n' \
-            manifest.json \
-            manifest.json.sig \
-            bittern-app.tar.gz \
-            bittern-beta-kit.tar.gz \
-            SHA256SUMS | LC_ALL=C sort)"
-          if [ "$actual" != "$expected" ]; then
-            printf 'the draft asset set is wrong\nexpected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
-            exit 1
-          fi
-          printf '%s' "$EXPECTED_DIGESTS" | base64 --decode > "$RUNNER_TEMP/expected.sha256"
-          mkdir -p "$RUNNER_TEMP/draft-assets"
-          gh release download "$TAG" --dir "$RUNNER_TEMP/draft-assets"
-          count="$(find "$RUNNER_TEMP/draft-assets" -maxdepth 1 -type f | wc -l)"
-          if [ "$count" -ne 5 ]; then
-            printf 'the draft download has %s files, not 5\n' "$count" >&2
-            exit 1
-          fi
-          (cd "$RUNNER_TEMP/draft-assets" && sha256sum -c "$RUNNER_TEMP/expected.sha256")
+          python3 packaging/verify_release_draft.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --tag "$TAG" \
+            --anchor packaging/trust/beta-ci.pub \
+            --release-tool agent/bin/bittern-release \
+            --work-dir "$RUNNER_TEMP/release-draft"
 
-      # The asset set and every digest match the draft job's record. This is the
-      # single visible flip from draft to published release.
+      # Every asset name and anchored digest has been verified from the
+      # downloaded bytes. This is the single visible flip from draft to
+      # published release.
       - name: Publish the draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.tag.outputs.tag }}
-        run: gh release edit "$TAG" --draft=false
+          TAG: ${{ needs.tag.outputs.tag || inputs.tag }}
+        run: gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --draft=false
