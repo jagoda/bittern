@@ -4,7 +4,8 @@
 - Status: fixed. The publish job now verifies the downloaded draft against the shipped
   `packaging/trust/beta-ci.pub` anchor, and `release.yml` has a recovery input that completes an
   existing draft without a preflight, build, signature, or tag creation. The real
-  `app-beta-000001` draft verified locally; no release was published, and the tag and draft were
+  `app-beta-000001` draft verified locally, and a recovery dispatch waited at the `beta` approval
+  and was cancelled without running a step. No release was published, and the tag and draft were
   left in place.
 - Type: bug fix, recovery path, and verification note.
 - Related: [release workflow](../../.github/workflows/release.yml),
@@ -137,22 +138,56 @@ asset digests:
   SHA256SUMS  48a4e433502ed6a266170cc9e3935592c72dfdcbbf77bc0e7ee8791f187b0e3e
 ```
 
-A malformed tag is refused before any GitHub call:
+A malformed tag is refused before any GitHub call, and a valid form with no tag is refused after
+the tag lookup:
 
 ```text
 $ python3 packaging/verify_release_draft.py --tag app-beta-00001 --repo jagoda/bittern
-verify-draft: fail: [tag-form] tag 'app-beta-00001' is not the expected app-beta-* form: tag "app-beta-00001" has a 5-character suffix; "app-beta-" needs exactly 6 lowercase hexadecimal characters
+verify-draft: fail: [tag-form] tag 'app-beta-00001' is not the expected app-beta-* form: tag 'app-beta-00001' has a 5-character suffix; 'app-beta-' needs exactly 6 lowercase hexadecimal characters
+$ python3 packaging/verify_release_draft.py --tag app-beta-000002 --repo jagoda/bittern
+verify-draft: fail: [tag-missing] tag app-beta-000002 does not exist in jagoda/bittern: gh: Not Found (HTTP 404)
 ```
+
+## Recovery workflow proof
+
+The recovery input was dispatched against `main` at `77aee8a` with no approval:
+
+```sh
+gh workflow run release.yml --ref main -f publish_draft=app-beta-000001
+```
+
+Run [45091675861](https://github.com/jagoda/bittern/actions/runs/45091675861) had status `waiting`
+and these jobs:
+
+| Job | Status | Conclusion |
+| --- | --- | --- |
+| `release preflight` | completed | skipped |
+| `validate tag` | completed | skipped |
+| `checks and unsigned test build` | completed | skipped |
+| `sign and stage draft` | completed | skipped |
+| `publish the verified draft` | waiting | none |
+
+The run stopped before any publish job step ran because the `beta` environment requires approval.
+The local verifier above is the same script and anchor that the waiting job would run after
+approval, so the downloaded draft was proven without approving the deployment. `gh run cancel`
+submitted a cancellation, but GitHub left the run waiting on the deployment. The pending `beta`
+deployment was then rejected, not approved, with this comment: `Proof run cancelled without
+approving; do not publish.` The run concluded `cancelled`, the publish job concluded `failure` at the
+rejected environment gate, and no step in it ran. `gh run view 45091675861 --log` reported `log not
+found` because no step had started.
 
 ## State confirmation
 
-The verification only downloads. It does not edit or publish the release:
+The verification and the cancelled recovery run only read the release. The final check after the
+run:
 
 ```text
 $ gh release view app-beta-000001 --json isDraft,assets --jq '{isDraft, assets: [.assets[].name]}'
 {"isDraft":true,"assets":["manifest.json","manifest.json.sig","bittern-app.tar.gz","bittern-beta-kit.tar.gz","SHA256SUMS"]}
 $ gh api repos/jagoda/bittern/git/ref/tags/app-beta-000001 --jq '.object.sha'
 b0e7eebf79cf7ff04a80e73a4a8de00d009e0d95
+$ gh release view app-beta-000001 --json isDraft,publishedAt,tagName --jq '{isDraft,publishedAt,tagName}'
+{"isDraft":true,"publishedAt":null,"tagName":"app-beta-000001"}
 ```
 
 ## Finding
@@ -166,5 +201,6 @@ The recovery runbook procedure is in
 
 ## Next step
 
-Approve the `beta` environment for the existing `app-beta-000001` recovery run when the maintainer
-is ready to publish generation 1. Do not delete the tag or the draft, and do not create a new tag.
+When the maintainer is ready to publish generation 1, dispatch the recovery input again for
+`app-beta-000001` and approve the `beta` environment on that new run. Do not approve a cancelled
+proof run, delete the tag or draft, or create a new tag.
