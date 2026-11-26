@@ -127,19 +127,18 @@ Record the run as you go:
 | Frigate image | 0.18.2 | 0.18.3, which fixes CVE-2026-123007 |
 | Renderer | No `go2rtc` block | `go2rtc.streams` and `cameras.<name>.live.streams` for every camera |
 | Device ceilings | None | 1 on a phone, 4 on a tablet, 9 on a desktop, 9 hard media sessions |
+| Update transaction | Bundle files only; an apply after the update | Candidate renderer, generated configuration and pin applied inside the transaction before commit; the saved-settings migration persisted after commit |
 
 Generation 2 introduced the live view, the `go2rtc` renderer and the 0.18.3 pin. Generation 3 adds
-the sizing fix, the full-width shell and the state-aware landing. A device on generation 1 receives
-all of it in one update.
+the sizing fix, the full-width shell and the state-aware landing. It also lands the update
+transaction's configuration apply and migration persist from
+[ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md). A device on generation 1
+receives all of it in one update.
 
-The update transaction installs the bundle and restarts the daemon and the recording service. The
-generated Frigate configuration and compose file are written by an apply, not by the update.
-Generation 3 therefore has two parts: the card install, then one apply from the new bundle. The
-bundle carries the 0.18.3 pin; the apply writes it to the compose file, adds the `go2rtc` block and
-pulls the image. Until the apply runs, the container keeps 0.18.2 even though the card reports
-generation 3. This is a known gap in the update path, recorded in
-[the update apply gap note](../notes/2026-11-26-live-view-beta-update-gap.md). One camera apply below
-is a temporary bridge, not a product procedure.
+The card install now runs the candidate renderer, native checks, atomic configuration write and
+image pull before it commits. The manual camera-save bridge after the update is gone. The manual
+rollback still moves only the bundle pointer and does not restore the generated configuration, so
+one camera apply after the rollback returns the compose file and image to 0.18.2.
 
 ## Install generation 3
 
@@ -161,16 +160,16 @@ different generation means the channel or the device is not in the state this ru
 Select Install update.
 
 Expected: "Installing update `0.0.0-beta.3-<short>`", the current step, "N of M steps completed", and
-a two-second refresh. The steps read in this order: checking the appliance, checking the update,
-preparing the update, saving the current settings, stopping the recording service, switching to the
-new version, preparing the recording software, starting the appliance, starting the recording
-service, checking the appliance, finishing the update.
+a two-second refresh. The existing steps keep their order. The configuration apply runs after
+"preparing the recording software", and the saved-settings persist runs after "checking the
+appliance". The card labels both new steps "updating the appliance" because they do not have
+separate labels yet.
 
-The image step is "preparing the recording software". It checks the pinned image and starts a pull
-when the image is absent. On this bench the 0.18.2 image is already present, so this step is usually
-quick. The 0.18.3 pull happens in the apply below, and that is where the longer wait is. The step
-budget is 60 minutes. Leave the page open. Do not start a second install, do not reboot, and do not
-run an apply at the same time.
+The image step is "preparing the recording software". It checks the helper baseline image and starts
+a pull when it is absent. On this bench the 0.18.2 image is already present, so this step is usually
+quick. The candidate apply pulls 0.18.3 before its Frigate check, so the longer wait is after this
+step. The step budget is 60 minutes. Leave the page open. Do not start a second install, do not
+reboot, and do not run a camera apply during the update.
 
 The update restarts `bitternd`. The card can show "Bittern is restarting. Reconnecting when it is
 ready.", then the sign-in page. Sign in again. The session ending is expected and not a failed
@@ -192,29 +191,14 @@ Expected: `committed: generation 3 (0.0.0-beta.3-<short>)` and
 reports `baseline: false` and the generation 3 version. The update journal is absent and the newest
 history record is `committed`.
 
-On the status page, open Technical details. "Recording software digest" now names the 0.18.3 digest
-from the new bundle. That is the pin the daemon expects, not the image the container is running.
+On the status page, open Technical details. "Recording software digest" names the 0.18.3 digest
+from the new bundle. Because the update applied the configuration, this is also the image the
+container should be running, not only the pin the daemon expects.
 
-### Apply the new bundle
+### Verify the applied configuration
 
-Open Cameras, open any camera, and select Apply camera change without changing a value. This runs
-an apply with the generation 3 daemon. It renders the new `go2rtc` block, writes the compose file
-with the 0.18.3 image, pulls the image, and restarts the recording service.
-
-The page can take minutes and has no step list. Leave it open. Do not select Apply again and do not
-start another apply. The apply keeps running if the browser gives up; reload the status page and
-check Technical details. To follow the pull, run `sudo journalctl -u bitternd -f` in a terminal
-before selecting Apply; the apply logs the image step and any download failure.
-
-The apply's image step has a 60 minute budget and may take noticeably longer than the previous
-update. If it is slow, leave it. If it fails, the apply stops at that step and writes nothing live:
-the old configuration and the old container keep running, and the live view will not start until the
-image is present. The camera page says the configuration was not applied, and the status page's
-Technical details names the recording software download error. Check `getent hosts ghcr.io`, the
-free space on the appliance drive, and `sudo journalctl -u bitternd -n 100 --no-pager`, then apply
-again. Do not edit the compose file by hand.
-
-Verify the running image:
+The update applies the candidate configuration before it commits. Do not run a camera apply after
+the update. Verify the running image:
 
 ```sh
 sudo docker inspect --format '{{.Config.Image}}' frigate
@@ -223,7 +207,16 @@ sudo docker inspect --format '{{.Config.Image}}' frigate
 Expected: `ghcr.io/blakeblackshear/frigate:0.18.3@sha256:d1a3e0008557bb3f3314d442ecd4ba68e9b16ab7872d64612649f7a6e5156635`.
 
 On the status page, Technical details should show the 0.18.3 recording software digest, a recent
-"Last written", a non-zero file count, and a healthy recording service state.
+"Last written", a non-zero file count, and a healthy recording service state. The update history
+should record the configuration apply as applied and the migration as none when the schema did not
+change.
+
+If the update failed at the configuration apply, the transaction rolls back the bundle and the
+configuration together. The card says the update did not finish, and the status page names the
+apply failure. Collect `sudo journalctl -u bittern-update.service -n 100 --no-pager` and
+`sudo bittern update status`, fix the named cause, then check and install again. Do not edit the
+compose file by hand. If a committed update still runs 0.18.2, stop and record it as a regression of
+the apply-on-update step instead of applying by hand.
 
 ## Live view checks
 
@@ -448,7 +441,9 @@ reconnect count beyond 3, or a "Live" badge over a frozen picture.
 ## Roll back
 
 The rollback is a manual rollback of the running bundle, not a failed-update rollback. The card
-offers it only while the running and committed generations match.
+offers it only while the running and committed generations match. It moves the bundle pointer and
+leaves the generated configuration and the recordings as they are, so the update history should show
+a manual rollback with no new configuration apply.
 
 On the Updates card, select "Roll back to version `0.0.0-beta.1-<short>`". Read the confirmation page:
 it names the target and says the configuration, the cameras, and the recordings stay as they are.
@@ -478,10 +473,10 @@ later.
 
 ### Return the image to 0.18.2
 
-The rollback restarts the recording service with the compose file the generation 3 apply wrote, so
-the container is still on 0.18.3 until the rolled-back bundle applies. Select Apply camera change on
-a camera again, as in the apply step. The image step returns the compose file and the running
-container to 0.18.2. Verify:
+The rollback restarts the recording service with the compose file the generation 3 update applied,
+so the container is still on 0.18.3 until an apply from the rolled-back bundle runs. Select Apply
+camera change on a camera without changing a value. This is the one remaining manual bridge in this
+run: the image step returns the compose file and the running container to 0.18.2. Verify:
 
 ```sh
 sudo docker inspect --format '{{.Config.Image}}' frigate
@@ -555,7 +550,8 @@ bundle. Read the daemon log before sharing it.
 | Frigate UI proxy | No embedded or proxied Frigate UI; the support path remains loopback. | OQ-38 |
 | Account-level layout | The layout is a per-device cookie. It is lost in private browsing, after a cookie clear, or on a new device. | ADR 0034 |
 | A real 4K camera | The browser check stubs 3840x2160 and the QEMU fixture serves 1920x1080. If the bench has no 4K camera, the 4K fit and full-screen case is not covered in the field. | BIT-023 |
-| An apply after update | The update installs the bundle but does not write the generated configuration. This runbook uses one camera apply as a temporary bridge. Generation 3's UI changes need no apply; the apply is what writes the 0.18.3 pin and the `go2rtc` block introduced in generation 2. | [update apply gap](../notes/2026-11-26-live-view-beta-update-gap.md) |
+| Manual rollback configuration | A manual rollback moves the bundle pointer but does not restore the generated configuration, so the container stays on the newer image until an apply from the rolled-back bundle. This runbook uses one camera apply as a temporary bridge. | BIT-009, ADR 0036 |
+| Update step labels | The new configuration apply and saved-settings persist show the generic "updating the appliance" label. | BIT-009 |
 
 ## What this runbook does not cover
 
