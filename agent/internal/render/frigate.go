@@ -11,6 +11,7 @@ import (
 
 	"bittern.invalid/agent/internal/assets"
 	"bittern.invalid/agent/internal/config"
+	"bittern.invalid/agent/internal/livestream"
 )
 
 // FrigateCameraEnvPath is the generated env file interface for camera RTSP
@@ -382,7 +383,12 @@ type frigateConfigFile struct {
 	Snapshots  frigateSnapshotsConfig           `yaml:"snapshots"`
 	Record     frigateRecordConfig              `yaml:"record"`
 	Objects    frigateObjectsConfig             `yaml:"objects"`
+	Go2RTC     frigateGo2RTCConfig              `yaml:"go2rtc"`
 	Cameras    map[string]frigateCameraConfig   `yaml:"cameras"`
+}
+
+type frigateGo2RTCConfig struct {
+	Streams map[string]string `yaml:"streams"`
 }
 
 type frigateMQTTConfig struct {
@@ -458,9 +464,14 @@ type frigateObjectsConfig struct {
 }
 
 type frigateCameraConfig struct {
-	Enabled bool                `yaml:"enabled"`
-	FFmpeg  frigateCameraFFmpeg `yaml:"ffmpeg"`
-	Detect  frigateCameraDetect `yaml:"detect"`
+	Enabled bool                    `yaml:"enabled"`
+	Live    frigateCameraLiveConfig `yaml:"live"`
+	FFmpeg  frigateCameraFFmpeg     `yaml:"ffmpeg"`
+	Detect  frigateCameraDetect     `yaml:"detect"`
+}
+
+type frigateCameraLiveConfig struct {
+	Streams map[string]string `yaml:"streams"`
 }
 
 type frigateCameraFFmpeg struct {
@@ -523,18 +534,26 @@ func frigateConfigDocument(cfg *config.Config, defaults *frigateDefaults, detect
 			Detections: frigateReviewRetainConfig{Retain: frigateRecordRetainConfig{Days: retentionDays}},
 		},
 		Objects: frigateObjectsConfig{Track: append([]string(nil), defaults.Config.Objects...)},
+		Go2RTC:  frigateGo2RTCConfig{Streams: make(map[string]string, len(cfg.Cameras)*len(livestream.Profiles()))},
 		Cameras: make(map[string]frigateCameraConfig, len(cfg.Cameras)),
 	}
 	if decode.HwaccelArgs != "" {
 		document.FFmpeg = &frigateFFmpegConfig{HwaccelArgs: decode.HwaccelArgs}
 	}
 	for _, camera := range cfg.Cameras {
-		path := directRTSPURL(camera)
-		if camera.CredentialsRef != nil && strings.TrimSpace(*camera.CredentialsRef) != "" {
-			path = "{" + FrigateRTSPEnvName(camera.ID) + "}"
+		path := cameraRTSPPath(camera)
+		liveStreams := make(map[string]string, len(livestream.Profiles()))
+		for _, profile := range livestream.Profiles() {
+			key := livestream.StreamName(camera.ID, profile)
+			// The renderer owns the go2rtc stream names. Until the camera
+			// profile work lands, both profiles point at the one configured
+			// RTSP path (ADR 0034 section 5).
+			document.Go2RTC.Streams[key] = path
+			liveStreams[livestream.ProfileLabel(profile)] = key
 		}
 		document.Cameras[camera.ID] = frigateCameraConfig{
 			Enabled: camera.IsEnabled(),
+			Live:    frigateCameraLiveConfig{Streams: liveStreams},
 			FFmpeg: frigateCameraFFmpeg{Inputs: []frigateCameraInput{{
 				Path:  path,
 				Roles: []string{"detect", "record"},
@@ -543,6 +562,13 @@ func frigateConfigDocument(cfg *config.Config, defaults *frigateDefaults, detect
 		}
 	}
 	return document, nil
+}
+
+func cameraRTSPPath(camera config.Camera) string {
+	if camera.CredentialsRef != nil && strings.TrimSpace(*camera.CredentialsRef) != "" {
+		return "{" + FrigateRTSPEnvName(camera.ID) + "}"
+	}
+	return directRTSPURL(camera)
 }
 
 func frigateDetectorDevice(defaults frigateDetectorDefaults, hardwareDevice string) string {

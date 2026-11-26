@@ -93,6 +93,16 @@
     "flow": "auth"
   },
   {
+    "route": "live",
+    "path": "/ui/live",
+    "flow": "auth"
+  },
+  {
+    "route": "live-camera",
+    "path": "/ui/live/front_door",
+    "flow": "auth"
+  },
+  {
     "route": "status",
     "path": "/ui/status",
     "flow": "auth",

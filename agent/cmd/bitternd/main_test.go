@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -376,5 +379,41 @@ func TestAuthFlowLogsNoSecret(t *testing.T) {
 		if strings.Contains(logs.String(), secret) {
 			t.Fatalf("captured log line contains a secret: %s", secret)
 		}
+	}
+}
+
+func TestResponseRecorderForwardsHijackForTheLiveSocket(t *testing.T) {
+	server := httptest.NewServer(withLogging(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("logger recorder hid the hijacker interface")
+			return
+		}
+		conn, buffer, err := hijacker.Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		_, _ = buffer.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+		_ = buffer.Flush()
+	}), nil))
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.Dial("tcp", parsed.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_, _ = fmt.Fprintf(conn, "GET /ui/live/media/front_door/main/ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", parsed.Host)
+	response, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("hijacked response status = %d, want 101", response.StatusCode)
 	}
 }

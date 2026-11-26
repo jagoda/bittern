@@ -41,9 +41,17 @@ record:
 objects:
     track:
         - person
+go2rtc:
+    streams:
+        front_door_main: '{FRIGATE_CAMERA_FRONT_DOOR_RTSP_URL}'
+        front_door_sub: '{FRIGATE_CAMERA_FRONT_DOOR_RTSP_URL}'
 cameras:
     front_door:
         enabled: true
+        live:
+            streams:
+                Main stream: front_door_main
+                Sub stream: front_door_sub
         ffmpeg:
             inputs:
                 - path: '{FRIGATE_CAMERA_FRONT_DOOR_RTSP_URL}'

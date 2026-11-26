@@ -7,7 +7,8 @@ harness needs no TAP device, bridge, root network setup, or Docker socket on the
 
 Status: executed on a KVM-enabled container on 2026-11-14 and repeated on 2026-11-15. All four
 harness tests, the Frigate fixture smoke test, the firewall probe, the firstboot scenarios, and the
-BIT-008 adoption scenario pass on 2026-11-15. The firstboot and adoption scenarios with the
+BIT-008 adoption scenario pass on 2026-11-15. The firstboot live-view phase passed on 2026-11-26:
+the authenticated MSE player reached playing at 640x360 against the virtual camera. The firstboot and adoption scenarios with the
 setup-token QR phase passed again on 2026-11-17. The measured cold-boot, snapshot, and restore
 times are in [the harness note](../../docs/notes/2026-11-14-qemu-harness.md). The `firstboot`
 scenario also passes with the camera link down through first boot and apply: generation 2, Frigate
@@ -40,7 +41,8 @@ host
 ```
 
 The appliance has one DHCP NIC (`lan0`) with the default route and one static NIC (`cam0`) with no
-gateway. The camera guest has a management NIC for package installation and a host-side test forward,
+gateway. It also has a dedicated 64G recording qcow2, labelled `bittern-media` before install when
+it is blank, so the non-interactive storage setup can mount it. The camera guest has a management NIC for package installation and a host-side test forward,
 plus the isolated `cam0` NIC. The RTSP fixture binds on the camera's `cam0` address and on its
 management NIC; the host-side test forward is bound to `127.0.0.1` only.
 
@@ -110,6 +112,9 @@ that names the field and contains the value. The visible copy is free to change.
 | `data-camera-sources`, `data-discovery-layer`, `data-discovery-layer-state`, `data-discovery-detail`, `data-discovery-state` | discovery evidence and page state | camera step |
 | `data-network-lan-address`, `data-network-lan-carrier`, `data-network-cam-address`, `data-network-cam-carrier` | live network values | network step |
 | `data-storage-path`, `data-storage-present`, `data-storage-free`, `data-storage-reserve` | live storage values | storage step |
+| `data-live-player` | `true` | live page player island |
+| `data-camera-id` | camera ID | live page player island |
+| `data-player-state` | `connecting`, `playing`, `stalled`, `reconnecting`, `offline`, `unsupported`, `session` | live player state |
 
 `data_values(page, "data-camera-address")` in [run.py](run.py) returns every value for one hook.
 `require_data(page, attribute, expected, context)` fails with the missing selector and the values it

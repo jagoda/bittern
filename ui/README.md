@@ -5,8 +5,9 @@ Go `html/template` with HTMX for partial updates, and every page works without J
 ([ADR 0019](../docs/adr/0019-ui-stack.md)). It covers the first-run wizard, camera onboarding,
 status and health, update controls, logs, support bundle download, and reset. It talks to `bitternd`
 over a local API and never writes rendered system files itself; mutations go through the agent apply
-transaction. Live view is specified by [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md)
-and is not implemented yet; the Frigate UI is not a product surface.
+transaction. Live view follows [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md); the
+single-camera slice is implemented and the grid remains later work. The Frigate UI is not a
+product surface.
 
 The product serves the UI over TLS on `0.0.0.0:443` with a self-signed certificate generated at
 first boot. The wizard and every page show its SHA-256 fingerprint; the browser warning is explained
@@ -105,6 +106,10 @@ The BIT-020 column is the route's responsive flag. Regenerate the table from `ag
 | GET | `/ui/cameras/{id}/picture` | - | Yes | Yes |
 | GET | `/ui/cameras/{id}/remove` | `camera-remove` | Yes | Yes |
 | POST | `/ui/cameras/{id}/remove` | `camera-remove` | Yes | No |
+| GET | `/ui/live` | `live` | Yes | Yes |
+| GET | `/ui/live/{camera}` | `live` | Yes | Yes |
+| GET | `/ui/live/{camera}/status` | `live-status` | Yes | No |
+| GET | `/ui/live/media/{camera}/{profile}/{kind...}` | - | Yes | No |
 | GET | `/ui/status` | `status` | Yes | Yes |
 | POST | `/ui/status/updates/check` | - | Yes | No |
 | POST | `/ui/status/updates/install` | - | Yes | No |
@@ -212,7 +217,8 @@ sentence and the retry action when the fetch fails.
 The TLS certificate is loaded from `/etc/bittern/tls/server.crt` and the private key from
 `tls.private_key_pem` in `/etc/bittern/secrets.yaml`. A missing certificate or key stops the daemon
 instead of falling back to HTTP. The `--ui-certificate`, `--ui-secrets`, and `--ui-auth-state` flags
-override the paths for tests. Security headers are a self-only CSP, `nosniff`,
+override the paths for tests. Security headers are a self-only CSP with `media-src 'self' blob:` for
+the same-origin MSE object URL, `nosniff`,
 `X-Frame-Options: DENY`, `frame-ancestors 'none'`, and `Referrer-Policy: no-referrer`. HSTS is not
 set because the certificate is self-signed. HTMX injects an indicator `<style>` element that
 `style-src 'self'` blocks, which logs a console error on every HTMX page. The defect and the two
@@ -301,13 +307,47 @@ Related: [UI skeleton note](../docs/notes/2026-11-14-ui-skeleton.md),
 
 ## Live view
 
-Live view is specified by [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md). It is not
-implemented and its routes are not in the generated table above. BIT-023 adds `/ui/live` and
-`/ui/live/{camera}`, the MSE player with an HLS fallback, the authenticated media proxy, the
-per-device layout cookie, the 1/4/9 device ceiling and the player isolation guard. The stream is
-served through the existing 443 listener; 8555, 1984, 5000, 8554 and 8971 stay closed. The player
-is never inside an HTMX swap region, because a poll would destroy it and lose playback, fullscreen
-and focus ([UX-14](../docs/principles.md#ux-14-live-updates-must-not-disturb-state-the-user-owns)).
+Live view follows [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md). Slice 1a implements
+`/ui/live` and `/ui/live/{camera}` as a single-camera view: the page reads the enabled cameras from
+`appliance.yaml`, shows a simple picker when more than one exists, and keeps the player in a stable
+node outside every HTMX swap region. A sibling line polls the camera's configuration state every 15
+seconds. The player is never inside that poll, because a swap would destroy playback, fullscreen and
+focus ([UX-14](../docs/principles.md#ux-14-live-updates-must-not-disturb-state-the-user-owns)).
+
+The browser never receives an upstream URL, host, port, go2rtc stream name or camera address. It
+asks for one of Bittern's own media routes:
+
+| Route | Upstream |
+| --- | --- |
+| `/ui/live/media/{camera}/{profile}/ws` | go2rtc `/api/ws?src=<server-resolved stream>` |
+| `/ui/live/media/{camera}/{profile}/stream.m3u8` | go2rtc `/api/stream.m3u8?src=<server-resolved stream>` |
+| `/ui/live/media/{camera}/{profile}/hls/playlist.m3u8` | go2rtc `/api/hls/playlist.m3u8?id=<opaque id>` |
+| `/ui/live/media/{camera}/{profile}/hls/init.mp4` | go2rtc `/api/hls/init.mp4?id=<opaque id>` |
+| `/ui/live/media/{camera}/{profile}/hls/segment.m4s` | go2rtc `/api/hls/segment.m4s?id=<opaque id>&n=<segment>` |
+| `/ui/live/media/{camera}/{profile}/hls/segment.ts` | go2rtc `/api/hls/segment.ts?id=<opaque id>&n=<segment>` |
+| `/ui/live/media/{camera}/{profile}/snapshot.jpg` | Frigate loopback `/api/<camera>/latest.jpg` |
+
+`bitternd` resolves the camera and profile against the rendered inventory, then opens exactly one
+allowed upstream request. The proxy refuses absolute-form targets, traversal and encoded
+separators, caller-supplied `src` or host values, unknown endpoints, non-GET methods and redirect
+following. It drops the browser cookie and authorization header before the upstream call, sets
+`Cache-Control: no-store` on every media response, and never logs a media path or query string.
+Every media request passes the administrator session. A navigation without a session gets the login
+page with a bounded return path; a fragment gets `HX-Redirect` to its parent page and media gets
+`401` with no login HTML. A WebSocket revalidates the session every 30 seconds and closes when it
+ends. The proxy keeps the hard nine-connection ceiling per session.
+
+`ui/static/live-player.js` owns the video element, the MSE `SourceBuffer` and the WebSocket. Its
+states are connecting, playing, switching, stalled, reconnecting, offline, unsupported and session
+ended. Recovery is bounded to three retries with visible 1, 2 and 4 second waits, then HLS where the
+browser supports it, then the snapshot with a retry action. The current camera model has one RTSP
+path, so `main` and `sub` resolve to the same path and the page says so. The profile control is a
+normal link without JavaScript and a runtime switch with it.
+
+The remaining BIT-023 layout work is the grid, the per-device layout cookie and the full 1/4/9
+selection. The single-tile page already exposes the viewport ceiling on the player node
+(`data-device-ceiling`) and the active count (`data-active-tiles`) so the grid can use the same
+structure.
 
 ## Boundaries
 

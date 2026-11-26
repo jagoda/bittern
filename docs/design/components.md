@@ -46,6 +46,7 @@ pattern in [patterns.md](patterns.md), not a component here.
 | Footer and page links | `.site-footer`, `.page-links`, `.action-links` | Keep |
 | Camera card | `.camera-card`, `.camera-head`, `.camera-ident`, `.camera-actions` | Extend |
 | Test picture preview | `.camera-picture`, `.camera-picture-image`, `.camera-picture-error`, `.camera-picture figcaption` | Extend |
+| Live player island | `[data-live-player]`, `.live-media`, `.live-video`, `.live-status`, `.live-profiles` | Extend |
 | Candidate list and row | `.candidate-list`, `.candidate-row`, `.candidate-meta` | Extend |
 | Layer list and evidence | `.layer-list`, `.candidate-evidence` | Keep |
 | Error summary | top `.alert` with `ErrorList` | Extend |
@@ -692,6 +693,33 @@ Current evidence for the list:
 - A successful edit or remove result is a flash that disappears on the next navigation.
 - A menu or action that appears only on `:hover` is not allowed. No current template has one, and
   this entry keeps it that way.
+
+## Live player island
+
+- Class: extend.
+- Purpose: show one camera's live stream and its connection state without letting a live update
+  replace the video element.
+- Anatomy, in order: the stable `[data-live-player]` node with the camera ID, profile and Bittern
+  media base; a media area with the `<video>` and the snapshot image; a status region with a badge,
+  a title, a sentence and one retry action; a profile control that names the playing profile; the
+  one-stream hint. A sibling camera-state line may poll and is outside the player node.
+- Variants: MSE, HLS, snapshot fallback, and no-JavaScript snapshot.
+- States: connecting, playing, switching, stalled, reconnecting, offline, unsupported, session
+  ended, device limit and player error.
+- Tokens: `--color-surface`, `--color-text`, `--color-text-muted`, `--color-border-subtle`,
+  `--color-border-control`, `--color-action`, `--color-on-action`, `--radius-surface`,
+  `--radius-control`, `--space-8`, `--space-12`, `--space-16`, `--space-24`, `--touch-target`,
+  `--type-body`, `--type-meta`, `--type-label`.
+- Do: render the player once. Keep the status sentence and the next action outside the video. Keep
+  the current profile on a bordered control, not a second filled button. Expose the viewport
+  ceiling and active count as data attributes so the grid can use the same component.
+- Don't: put the player or video inside an element with `hx-get`, `hx-post`, `hx-target`, `hx-swap`
+  or `hx-trigger`; use `hx-preserve` as the isolation mechanism; put a stream name, RTSP URL,
+  camera address or credential in the DOM; use a spinner with no state sentence.
+- Accessibility: one labelled video per island, a polite status region, a retry control with a
+  verb, profile links that work without JavaScript, and visible focus on every control.
+- Check: Q5, Q6, Q8 and Q11 in [the professional test](professional-test.md); the template guard
+  and runtime `closest()` check; the four-width screenshots; the browser state walk.
 
 ## Component checks
 

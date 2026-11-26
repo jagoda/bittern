@@ -1,7 +1,7 @@
 # Design system changelog
 
 - Date: 2026-11-21
-- Status: Accepted; v0.18 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
+- Status: Accepted; v0.19 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
   implemented in `ui/static/bittern.css` and the templates; the v0.3 flow layer is binding from v0.6,
   when [ADR 0027](../adr/0027-flow-layer-above-patterns.md) was accepted with amendments P1 and P3.
 - Applies to: every change to a token, a component, a pattern, a flow, or a rule in
@@ -18,6 +18,32 @@ like at vN, and why is it different now".
 Versions are internal to the design documents. Bittern does not publish a package and has no
 second consumer, so there is no SemVer promise, no changeset tooling, and no codemod. A version is
 a date-stamped batch of class changes; the date is how it maps to an app release.
+
+## v0.19: 2026-11-26
+
+- Class: pattern
+- What changed: the live view is now a screen pattern with one full-width camera, a camera picker
+  when needed, named connection states, a bounded retry path and a no-JavaScript snapshot
+  ([patterns.md](patterns.md#live-view), rules LV1 to LV8). The signed-in navigation gains `Live`
+  ([flows.md](flows.md#the-navigation-model)).
+- Why: [ADR 0034](../adr/0034-live-view-owned-by-bittern.md) makes the live view a Bittern product
+  surface, and [UX-14](../principles.md#ux-14-live-updates-must-not-disturb-state-the-user-owns)
+  requires the player to survive a live update. An owner needs one place that says whether the
+  stream is live, stalled, offline or unsupported and what to do next.
+- Evidence: [the live view slice note](../notes/2026-11-26-live-view-slice-1a.md); the live proxy and
+  player tests in `agent/internal/ui/live_proxy_test.go`, `live_test.go` and
+  `tests/browser/live.mjs`; the browser check with 0 failures and 0 warnings; the screenshots
+  `live-360x800.png`, `live-390x844.png`, `live-1280x800.png` and `live-1920x1080.png`.
+
+- Class: component
+- What changed: the live player island is added with a media area, a polite status region, one
+  retry action and a profile control
+  ([components.md](components.md#live-player-island)). The selected profile is a bordered control,
+  not a second filled action.
+- Why: the player is owner state in the strongest sense. It needs stable geometry and a status
+  sentence for each connection state, and the profile choice must not look like the page's primary
+  action.
+- Evidence: the four-width screenshots and the browser state walk listed in the pattern entry.
 
 ## v0.18: 2026-11-26
 

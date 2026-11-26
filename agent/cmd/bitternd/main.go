@@ -6,6 +6,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -367,6 +368,26 @@ func (r *responseRecorder) Write(data []byte) (int, error) {
 
 func (r *responseRecorder) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
+}
+
+// Hijack keeps the live WebSocket proxy working through the request logger.
+// The recorder must forward the optional interface instead of hiding it.
+func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("response writer does not support hijacking")
+	}
+	conn, buffer, err := hijacker.Hijack()
+	if err == nil {
+		r.status = http.StatusSwitchingProtocols
+	}
+	return conn, buffer, err
+}
+
+func (r *responseRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func withLogging(next http.Handler, logger *slog.Logger) http.Handler {

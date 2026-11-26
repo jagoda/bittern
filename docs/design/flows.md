@@ -79,6 +79,8 @@ appear in [the transition contract](#the-transition-contract).
 |-- cameras               persistent, signed in
 |   |-- {id}/edit         object scoped, transient
 |   `-- {id}/remove       object scoped, destructive
+|-- live                  persistent, signed in
+|   `-- {camera}          one camera, full width
 `-- error                 any failure or unknown path
 ```
 
@@ -113,6 +115,7 @@ without that session is not the state it names.
 | --- | --- | --- | --- | --- |
 | `/ui/status` | Answer "is it working, and what do I do next" from the current status document. | Header; sign-in default; done; camera list; refresh link; the update card's 15 second fragment, or 2 seconds while an update or rollback runs. | Cameras; setup today; refresh; update-card fragment. | Persistent |
 | `/ui/cameras` | Show every managed camera, its state, and the path to edit, test, or remove it. | Header; status "Manage cameras"; done "Manage cameras"; edit save; remove confirm; edit and remove cancel. | Camera edit; remove; snapshot action; status; setup today. | Persistent |
+| `/ui/live` and `/ui/live/{camera}` | Show one camera live, or the latest snapshot when the stream cannot start, with a picker when more than one camera exists and one line of camera state. | Header; live picker; a camera name from another live destination; direct. | Another camera; the main or sub profile; status; sign-in when the session ends. | Persistent |
 | `/ui/status/updates/rollback` | Confirm one manual rollback, name its target, and state that configuration and recordings are not reverted. | Status update card "Roll back" when a target exists; direct. | Status on confirm or cancel; status when no target exists. | Persistent while the target exists; the confirmation is transient to the current status document. |
 | `/ui/cameras/{id}/edit` | Change one camera with its current values and one apply action. | Camera card "Edit". | Camera list on save or cancel; the same destination on a validation or apply failure. | Transient, object scoped |
 | `/ui/cameras/{id}/remove` | Remove one camera with its exact effect stated before the commit. | Camera card "Remove". | Camera list on confirm or cancel; the same destination on an apply failure; the error page when the saved credential cannot be deleted. | Transient, object scoped |
@@ -260,14 +263,14 @@ map, not a stepper, and not a set of shortcuts to a flow that has already finish
 | --- | --- | --- |
 | Signed out | Brand, Sign in | Every other route redirects to sign-in, and a header entry that bounces is not a destination. |
 | Setup required | Brand, Set up | `/ui/setup` is the only served destination until the administrator exists. |
-| Signed in, first run incomplete | Brand, Setup, Cameras, Status, Sign out | The first run is the current job, and the camera list shows what exists so far. `Setup` points at the current step. |
-| Signed in, first run complete | Brand, Cameras, Status, Sign out | Setup is gone permanently. Camera changes go through the list; reconfiguration is a reset. |
+| Signed in, first run incomplete | Brand, Setup, Cameras, Live, Status, Sign out | The first run is the current job, and the camera list shows what exists so far. `Setup` points at the current step. |
+| Signed in, first run complete | Brand, Cameras, Live, Status, Sign out | Setup is gone permanently. Camera changes go through the list; reconfiguration is a reset. |
 
 A signed-out visitor can reach `/ui/login`, and `/ui/setup` while setup is required. Every other
 `/ui` path redirects to sign-in with the requested path in `next`, so the header must not offer a
 destination the visitor cannot open.
 
-The current header renders `Setup`, `Cameras`, `Status`, and the sign-out form unconditionally for
+The current header renders `Setup`, `Cameras`, `Live`, `Status`, and the sign-out form unconditionally for
 every authenticated session ([base.html](../../ui/templates/base.html), line 18 for `Setup`), and
 the signed-out login and setup pages render the same three links. The signed-out case violates N2:
 `Cameras` and `Status` redirect to `/ui/login?next=...`, and `Setup` after completion redirects to

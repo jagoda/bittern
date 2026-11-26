@@ -114,7 +114,10 @@ def validate(base: Path = BASE) -> list[str]:
     )
     require("table inet bittern {" in firewall, "rendered firewall has the wrong table name")
     require("policy drop;" in firewall, "rendered firewall must default to drop")
-    require("OQ-03" in firewall, "rendered firewall must name OQ-03 for the closed video path")
+    require(
+        "ADR 0034" in firewall,
+        "rendered firewall must name ADR 0034 for the closed video path",
+    )
     for iface in ("lan0", "cam0"):
         require(
             f'iifname "{iface}" tcp dport {{ 1984, 5000, 8554, 8555, 8971 }} drop' in firewall,

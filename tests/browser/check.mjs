@@ -15,6 +15,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { checkLayout } from "./assertions.mjs";
+import { runLivePlayerChecks } from "./live.mjs";
 import { startBitternd } from "./server.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,7 @@ const WIDTHS = [
   { name: "desktop-wide", width: 1920, height: 1080 },
 ];
 const ACTION_TIMEOUT = 15_000;
+const LIVE_CHECK_COUNT = 12;
 const WAIT_STATES = new Set(["attached", "detached", "visible", "hidden"]);
 
 // The manifest actions are deliberately a short list, not a test framework:
@@ -611,6 +613,22 @@ async function main() {
 
     let failureCount = 0;
     let warningCount = 0;
+    const liveFailures = await runLivePlayerChecks({
+      browser,
+      baseURL: server.baseURL,
+      adminPassword: server.adminPassword,
+    });
+    if (liveFailures.length > 0) {
+      failureCount += liveFailures.length;
+      console.log(`FAIL live-player (${LIVE_CHECK_COUNT} state and ceiling checks)`);
+      for (const failure of liveFailures) {
+        console.log(`  - ${failure}`);
+      }
+    } else {
+      console.log(
+        `passed live-player: ${LIVE_CHECK_COUNT} state and device-ceiling checks`,
+      );
+    }
     for (const result of results) {
       if (result.failures.length > 0) {
         failureCount += result.failures.length;

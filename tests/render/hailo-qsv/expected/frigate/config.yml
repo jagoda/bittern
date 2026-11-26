@@ -44,9 +44,19 @@ record:
 objects:
     track:
         - person
+go2rtc:
+    streams:
+        loading_bay_main: rtsp://10.99.0.30:8554/stream1
+        loading_bay_sub: rtsp://10.99.0.30:8554/stream1
+        rear_gate_main: rtsp://10.99.0.31:554/h264
+        rear_gate_sub: rtsp://10.99.0.31:554/h264
 cameras:
     loading_bay:
         enabled: true
+        live:
+            streams:
+                Main stream: loading_bay_main
+                Sub stream: loading_bay_sub
         ffmpeg:
             inputs:
                 - path: rtsp://10.99.0.30:8554/stream1
@@ -58,6 +68,10 @@ cameras:
             fps: 5
     rear_gate:
         enabled: true
+        live:
+            streams:
+                Main stream: rear_gate_main
+                Sub stream: rear_gate_sub
         ffmpeg:
             inputs:
                 - path: rtsp://10.99.0.31:554/h264

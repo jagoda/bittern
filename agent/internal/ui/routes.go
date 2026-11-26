@@ -181,6 +181,23 @@ var uiRoutes = []route{
 		Auth: true, Status: http.StatusOK, Handler: routeHandler((*handler).removeCamera),
 	},
 	{
+		Name: "live", Method: http.MethodGet, Pattern: "/ui/live", Template: "live",
+		Auth: true, Responsive: true, Status: http.StatusOK, Handler: routeHandler((*handler).showLive),
+	},
+	{
+		Name: "live-camera", Method: http.MethodGet, Pattern: "/ui/live/{camera}", Template: "live",
+		Auth: true, Responsive: true, Status: http.StatusOK, Handler: routeHandler((*handler).showLiveCamera),
+	},
+	{
+		Name: "live-status", Method: http.MethodGet, Pattern: "/ui/live/{camera}/status",
+		Template: "live-status", Auth: true, Status: http.StatusOK,
+		Handler: routeHandler((*handler).showLiveStatus),
+	},
+	{
+		Name: "live-media", Method: http.MethodGet, Pattern: "/ui/live/media/{camera}/{profile}/{kind...}",
+		Auth: true, Status: http.StatusBadRequest, Handler: routeHandler((*handler).serveLiveMedia),
+	},
+	{
 		Name: "status", Method: http.MethodGet, Pattern: "/ui/status", Template: "status",
 		Auth: true, Responsive: true, Status: http.StatusOK, Handler: routeHandler((*handler).showStatus),
 	},

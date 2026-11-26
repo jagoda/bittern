@@ -44,9 +44,19 @@ record:
 objects:
     track:
         - person
+go2rtc:
+    streams:
+        poc_cam0_main: '{FRIGATE_CAMERA_POC_CAM0_RTSP_URL}'
+        poc_cam0_sub: '{FRIGATE_CAMERA_POC_CAM0_RTSP_URL}'
+        poc_cam1_main: '{FRIGATE_CAMERA_POC_CAM1_RTSP_URL}'
+        poc_cam1_sub: '{FRIGATE_CAMERA_POC_CAM1_RTSP_URL}'
 cameras:
     poc_cam0:
         enabled: true
+        live:
+            streams:
+                Main stream: poc_cam0_main
+                Sub stream: poc_cam0_sub
         ffmpeg:
             inputs:
                 - path: '{FRIGATE_CAMERA_POC_CAM0_RTSP_URL}'
@@ -58,6 +68,10 @@ cameras:
             fps: 5
     poc_cam1:
         enabled: true
+        live:
+            streams:
+                Main stream: poc_cam1_main
+                Sub stream: poc_cam1_sub
         ffmpeg:
             inputs:
                 - path: '{FRIGATE_CAMERA_POC_CAM1_RTSP_URL}'

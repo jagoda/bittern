@@ -41,9 +41,17 @@ record:
 objects:
     track:
         - person
+go2rtc:
+    streams:
+        camera_1_main: '{FRIGATE_CAMERA_CAMERA_1_RTSP_URL}'
+        camera_1_sub: '{FRIGATE_CAMERA_CAMERA_1_RTSP_URL}'
 cameras:
     camera_1:
         enabled: true
+        live:
+            streams:
+                Main stream: camera_1_main
+                Sub stream: camera_1_sub
         ffmpeg:
             inputs:
                 - path: '{FRIGATE_CAMERA_CAMERA_1_RTSP_URL}'

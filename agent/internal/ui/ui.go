@@ -65,6 +65,9 @@ type Options struct {
 	// implementation in a preview build and a refusing service otherwise. The
 	// product daemon passes AgentUpdateService.
 	Updates UpdateService
+	// Go2RTCURL is the loopback go2rtc base used by the live media proxy.
+	// Empty uses http://127.0.0.1:1984. Tests point it at a local server.
+	Go2RTCURL string
 }
 
 // CameraDiscovery is the camera list shown by the wizard. The production
@@ -81,7 +84,7 @@ func NewHandler(options Options) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return securityHeaders(handler.authenticate(mux)), nil
+	return securityHeaders(livePathGuard(handler.authenticate(mux))), nil
 }
 
 func newHandler(options Options) (*handler, *routeMux, error) {
@@ -142,6 +145,8 @@ func newHandler(options Options) (*handler, *routeMux, error) {
 		secretsFile: options.SecretsPath,
 		stateRoot:   options.StateRoot,
 		updates:     options.Updates,
+		go2rtcURL:   options.Go2RTCURL,
+		liveLimiter: newLiveLimiter(liveMaxConnections),
 	}
 
 	mux := newRouteMux()
@@ -168,6 +173,8 @@ type handler struct {
 	secretsFile string
 	stateRoot   string
 	updates     UpdateService
+	go2rtcURL   string
+	liveLimiter *liveLimiter
 }
 
 type pageData struct {
@@ -216,6 +223,7 @@ type pageData struct {
 	StatusQuery            string
 	StatusRefresh          string
 	UpdateCard             updateView
+	Live                   liveView
 	MockPreview            bool
 	StateOptions           []stateOption
 	CSRFToken              string
@@ -273,6 +281,25 @@ func (h *handler) render(w http.ResponseWriter, r *http.Request, code int, name 
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	_, _ = w.Write(output.Bytes())
+}
+
+// livePathGuard refuses an unsafe media target before the mux can clean or
+// redirect it. Header-only navigation still reaches the auth gate.
+func livePathGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, BasePath+"/live/media/") {
+			if liveRequestUnsafe(r) {
+				writeLiveError(w, http.StatusBadRequest, "Bittern refused a media request that was not a plain local path.")
+				return
+			}
+			if r.Method != http.MethodGet {
+				w.Header().Set("Allow", http.MethodGet)
+				writeLiveError(w, http.StatusMethodNotAllowed, "Bittern serves live media only with GET.")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (h *handler) staticFiles() http.Handler {
@@ -378,7 +405,7 @@ func (h *handler) statusRefresh(document status.Document) string {
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+			"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self' blob:; connect-src 'self'; object-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")

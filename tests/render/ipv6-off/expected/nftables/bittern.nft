@@ -25,8 +25,8 @@ table inet bittern {
         iifname "tailscale0" tcp dport 443 accept
 
         # Frigate's UI is loopback-only (ADR 0016), not a LAN or tailnet service.
-        # The support path is an ADR 0016 follow-up and the live-video path is
-        # OQ-03, so 8555 stays closed.
+        # Live video reaches the browser through bitternd on 443 (ADR 0034),
+        # so go2rtc and WebRTC ports stay closed.
 
         # Unauthenticated upstream ports and the RTSP restream stay closed.
         # OQ-15 is not decided: 8554 remains closed by default until it is.

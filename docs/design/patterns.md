@@ -201,6 +201,46 @@ has a dedicated confirmation destination at `/ui/status/updates/rollback`. The s
 limitation are recorded in
 [the update card note](../notes/2026-11-22-update-card-ui.md).
 
+## Live view
+
+**Job.** Show one camera clearly, say whether the stream is live, and recover or name the exact
+failure without reloading the appliance.
+
+**Primary action.** While the stream plays there is no filled action. The profile control is a
+secondary choice. When the stream cannot start, the player's one retry action is the next step, and
+the snapshot remains visible.
+
+**Steps.**
+
+1. Read the camera name, the live state and the sentence that says what is happening.
+2. Watch the stream, or read the snapshot when the stream cannot start.
+3. Switch between the main and sub profiles; the player says which one is playing.
+4. If the stream stalls or drops, read the bounded reconnect attempt and wait, or take the named
+   next action.
+
+**Components.** Page shell, page title block, card and plain section, status badge, live player
+island, button, link, camera picker.
+
+**States.** No cameras, one camera, several cameras, connecting, playing, switching, stalled,
+reconnecting, offline, unsupported codec, session ended, device limit, no JavaScript, camera removed,
+camera disabled, snapshot available and snapshot unavailable.
+
+**Rules.**
+
+| ID | Rule | Check |
+| --- | --- | --- |
+| LV1 | The single-camera view uses the full content width, one active player, and a camera picker only when more than one enabled camera exists. | Q1 and Q2; 360 and 1280 screenshots. |
+| LV2 | The player is a stable node outside every HTMX swap region. A sibling server-owned line may poll; the player never is its target. | The template guard, the runtime `closest()` check, and the browser poll walk. |
+| LV3 | Every connection state has a word, a sentence and, when it cannot recover, a next action. A retry label names the action. | Q5 and Q7; the browser state walk. |
+| LV4 | Recovery is bounded and visible. The page names the attempt and the wait, then falls back to HLS or the snapshot. | Q5; the player state walk and the proxy tests. |
+| LV5 | The profile control names the playing profile. A camera with one configured stream says so rather than offering a false quality choice. | Q9; template read and the profile switch test. |
+| LV6 | The browser receives no upstream URL, camera address, stream name or credential. | Q10; the live template scan and the proxy tests. |
+| LV7 | The viewport ceiling is enforced before a connection opens, and the active count is exposed for the later grid. | Q4 and Q8; the browser ceiling checks at 360, 390, 1280 and 1920. |
+| LV8 | Without JavaScript the page still shows the latest snapshot and a named next action. | Q5; the no-JavaScript template path. |
+
+The single-camera slice implements LV1 to LV8. The grid, the per-device layout cookie and the full
+saved-layout clamp remain BIT-023 work.
+
 ## Managed-device list and detail
 
 **Job.** Show every camera Bittern manages, its state, the one fact that decides the next action,

@@ -723,6 +723,7 @@ class Vm:
         self.name = name
         self.config = config
         self.overlay = VMS / f"{name}.qcow2"
+        self.recording_disk = VMS / f"{name}-recording.qcow2"
         self.seed = SEEDS / f"{name}-seed.iso"
         self.qmp_path = RUN / f"{name}.qmp"
         self.pidfile = RUN / f"{name}.pid"
@@ -782,15 +783,26 @@ class Vm:
             f"file={self.overlay},if=virtio,format=qcow2,cache=writeback,discard=unmap",
             "-drive",
             f"file={self.seed},if=virtio,format=raw,readonly=on",
-            "-display",
-            "none",
-            "-serial",
-            f"file:{self.serial_log}",
-            "-qmp",
-            f"unix:{self.qmp_path},server=on,wait=off",
-            "-pidfile",
-            str(self.pidfile),
         ]
+        if self.name == "appliance" and self.recording_disk.exists():
+            args.extend(
+                [
+                    "-drive",
+                    f"file={self.recording_disk},if=virtio,format=qcow2,cache=writeback,discard=unmap",
+                ]
+            )
+        args.extend(
+            [
+                    "-display",
+                "none",
+                "-serial",
+                f"file:{self.serial_log}",
+                "-qmp",
+                f"unix:{self.qmp_path},server=on,wait=off",
+                "-pidfile",
+                str(self.pidfile),
+            ]
+        )
         if load_snapshot and self.has_snapshot():
             args.extend(["-loadvm", SNAPSHOT_TAG])
         if self.name == "appliance":
@@ -1744,6 +1756,27 @@ class WizardClient:
             self.csrf = match.group(1)
         return body
 
+    def get_bytes(self, path: str, *, expect: int = 200, timeout: float = 30) -> bytes:
+        request = urllib.request.Request(
+            self.base + path,
+            headers={"User-Agent": "bittern-qemu-live/1"},
+            method="GET",
+        )
+        try:
+            with self.opener.open(request, timeout=timeout) as response:
+                body = response.read()
+                if response.status != expect:
+                    raise HarnessError(
+                        f"live media GET {path} returned HTTP {response.status}, expected {expect}"
+                    )
+                return body
+        except urllib.error.HTTPError as exc:
+            raise HarnessError(
+                f"live media GET {path} returned HTTP {exc.code}, expected {expect}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise HarnessError(f"live media GET {path} failed: {exc.reason}") from exc
+
     def post(
         self,
         path: str,
@@ -1830,6 +1863,19 @@ def build_installer_payload(bittern: Path, bitternd: Path, launcher: Path) -> Pa
             else 0o644
         )
         checksums.append(f"{hashlib.sha256(destination.read_bytes()).hexdigest()}  {name}\n")
+    # The installer verifies the bundled CI trust anchor before it copies any
+    # unit. Keep the firstboot payload shaped like the beta kit instead of
+    # omitting the anchor and failing the kit completeness check.
+    trust_source = ROOT / "packaging" / "trust" / "beta-ci.pub"
+    trust_name = hashlib.sha256(trust_source.read_bytes()).hexdigest() + ".pub"
+    trust_dir = stage / "trust" / "release-keys"
+    trust_dir.mkdir(parents=True)
+    trust_destination = trust_dir / trust_name
+    shutil.copy2(trust_source, trust_destination)
+    trust_destination.chmod(0o644)
+    checksums.append(
+        f"{hashlib.sha256(trust_destination.read_bytes()).hexdigest()}  trust/release-keys/{trust_name}\n"
+    )
     version_stamp = (
         "product: bittern\n"
         "baseline: true\n"
@@ -1952,6 +1998,7 @@ class FirstbootScenario:
         self.run_phase("wizard", self.drive_wizard)
         self.run_phase("post-apply-reboot", self.reboot_after_apply)
         self.run_phase("post-reboot", self.assert_appliance_units_after_reboot)
+        self.run_phase("live-view", self.assert_live_view)
         self.run_phase("docker-frigate", self.restart_docker_with_frigate)
         self.run_phase("assertions", self.assert_applied)
         self.run_phase("cleanup", self.assert_cleanup)
@@ -2194,6 +2241,17 @@ class FirstbootScenario:
         self.strip_baseline_packages()
         self.seed_static_resolver()
         baseline_states = self.disable_baseline_enablement()
+        # The committed harness attaches a dedicated recording disk, but a
+        # blank qcow2 has no filesystem and the non-interactive installer will
+        # not format without explicit approval. Label it as the prepared drive
+        # this scenario represents, then let install.sh mount it.
+        self.appliance.ssh(
+            "sudo -n sh -c '"
+            "if [ \"$(blkid -o value -s TYPE /dev/vdc 2>/dev/null || true)\" != ext4 ]; then "
+            "mkfs.ext4 -F -L bittern-media /dev/vdc >/dev/null; "
+            "else e2label /dev/vdc bittern-media; fi'",
+            timeout=120,
+        )
         output = self.run_installer_commands()
         docker_version, compose_version = self.assert_installer_result(output)
         self.appliance.ssh(f"rm -f {shlex.quote(self.installer_archive)}", timeout=30)
@@ -2215,7 +2273,9 @@ class FirstbootScenario:
         self.appliance.write_remote_file(HARNESS_DNSMASQ_DROPIN, HARNESS_DNSMASQ_CONFIG, mode="0644")
         self.appliance.ssh(
             "sudo -n systemctl reset-failed dnsmasq.service chrony.service 2>/dev/null || true; "
-            "sudo -n systemctl start dnsmasq.service chrony.service",
+            "sudo -n systemctl start dnsmasq.service chrony.service || { "
+            "sudo -n systemctl stop dnsmasq.service chrony.service 2>/dev/null || true; "
+            "sudo -n systemctl start dnsmasq.service chrony.service; }",
             timeout=120,
         )
         # This pre-apply start is a fixture, not an enablement shortcut: it
@@ -3114,7 +3174,29 @@ class FirstbootScenario:
         require_data(body, "data-camera-address", self.camera_address, "review page")
         require_data(body, "data-camera-port", str(self.camera_port), "review page")
         require_data(body, "data-camera-path", self.camera_path, "review page")
-        client.post("/ui/wizard/apply", timeout=1800)
+        location, _ = client.post("/ui/wizard/apply", timeout=1800)
+        if location.startswith("/ui/wizard/apply"):
+            deadline = time.monotonic() + 1800
+            while time.monotonic() < deadline:
+                status, next_location, _ = client._request("GET", "/ui/wizard/apply")
+                if status == 303 and next_location.startswith("/ui/wizard/result"):
+                    location = next_location
+                    break
+                if status != 200:
+                    raise HarnessError(
+                        f"wizard GET /ui/wizard/apply returned HTTP {status}, expected 200 or a result redirect"
+                    )
+                time.sleep(2)
+            else:
+                raise HarnessError("the apply operation did not reach a result page")
+        if not location.startswith("/ui/wizard/result"):
+            raise HarnessError(
+                f"wizard POST /ui/wizard/apply returned Location {location!r}, expected /ui/wizard/result"
+            )
+        body = client.get_page("/ui/wizard/result")
+        require_data(body, "data-step-name", "result", "wizard result page")
+        require_data(body, "data-result-state", "succeeded", "wizard result page")
+        self.capture("wizard-result.html", body)
         body = client.get_page("/ui/wizard/done")
         require_data(body, "data-step-name", "done", "wizard done page")
         require_data(body, "data-result-state", "succeeded", "wizard done page")
@@ -3300,6 +3382,102 @@ class FirstbootScenario:
             f"camera cam0 received {address} from {lease.get('server', 'dnsmasq')}, "
             f"and {lease_file} records the lease"
         )
+
+    def assert_live_view(self) -> str:
+        port = int(self.config["network"]["lan"]["hostfwd"]["ui"])
+        client = WizardClient(port)
+        client.get_page("/ui/login")
+        location, _ = client.post(
+            "/ui/login",
+            {"username": "admin", "password": self.admin_password},
+            expect=303,
+        )
+        if location != "/ui/status":
+            raise HarnessError(
+                f"live view sign-in returned Location {location!r}, expected /ui/status"
+            )
+        page = client.get_page("/ui/live/camera_1")
+        require_data(page, "data-live-player", "true", "live page")
+        require_data(page, "data-camera-id", "camera_1", "live page")
+        for forbidden in ("rtsp://", "camera_1_main", "127.0.0.1:1984", self.camera_address):
+            if forbidden in page:
+                raise HarnessError(f"the live page leaked {forbidden!r}")
+
+        playlist = client.get_page("/ui/live/media/camera_1/main/stream.m3u8", timeout=30)
+        if "#EXTM3U" not in playlist:
+            raise HarnessError(
+                "the authenticated HLS master did not return a playlist: "
+                f"{playlist[:200]!r}"
+            )
+        match = re.search(r"(hls/playlist\.m3u8\?id=[A-Za-z0-9_-]{8})", playlist)
+        if match is None:
+            raise HarnessError(f"the HLS master has no session playlist: {playlist!r}")
+        live_playlist = client.get_page(
+            "/ui/live/media/camera_1/main/" + match.group(1), timeout=30
+        )
+        if "segment.ts?id=" not in live_playlist:
+            raise HarnessError(
+                f"the HLS session playlist has no segment: {live_playlist!r}"
+            )
+        segment_match = re.search(r"(segment\.ts\?id=[^\s]+)", live_playlist)
+        if segment_match is None:
+            raise HarnessError("the HLS playlist segment URL could not be read")
+        segment = client.get_bytes(
+            "/ui/live/media/camera_1/main/hls/" + segment_match.group(1),
+            timeout=30,
+        )
+        if len(segment) < 188:
+            raise HarnessError(
+                f"the authenticated HLS segment is {len(segment)} bytes; expected media"
+            )
+
+        state = "not checked"
+        node = shutil.which("node")
+        script = ROOT / "tests" / "browser" / "qemu-live.mjs"
+        package = ROOT / "tests" / "browser" / "node_modules" / "@playwright" / "test"
+        if node and script.exists() and package.exists():
+            screenshot = self.log_dir / "live-view.png"
+            environment = os.environ.copy()
+            environment["BITTERN_ADMIN_PASSWORD"] = self.admin_password
+            result = run_command(
+                [
+                    node,
+                    str(script),
+                    f"https://127.0.0.1:{port}",
+                    str(screenshot),
+                ],
+                timeout=180,
+                env=environment,
+            )
+            if result.returncode != 0:
+                raise HarnessError(
+                    "the live player did not reach playing in the QEMU browser: "
+                    f"{result.stdout}{result.stderr}".strip()
+                )
+            try:
+                evidence = json.loads(result.stdout.strip().splitlines()[-1])
+            except (IndexError, json.JSONDecodeError) as exc:
+                raise HarnessError(
+                    f"the QEMU browser check returned no result: {result.stdout}{result.stderr}"
+                ) from exc
+            if evidence.get("state") != "playing" or int(evidence.get("videoWidth", 0)) <= 0:
+                raise HarnessError(
+                    f"the QEMU browser player did not reach playing: {json.dumps(evidence, sort_keys=True)}"
+                )
+            state = (
+                f"browser player playing at {evidence.get('videoWidth')}x"
+                f"{evidence.get('videoHeight')}, screenshot {screenshot.name}"
+            )
+        else:
+            state = "browser player state skipped (node, @playwright/test or qemu-live.mjs missing)"
+
+        detail = (
+            "authenticated live page has the player island with no stream name or camera "
+            f"address; HLS master, session playlist and {len(segment)}-byte segment arrived "
+            f"through the proxy; {state}"
+        )
+        self.capture("live-view.txt", detail + "\n")
+        return detail
 
     def assert_applied(self) -> str:
         document = self.status_document()
@@ -6311,6 +6489,21 @@ def prepare(args: argparse.Namespace) -> int:
         log("base image changed; recreating overlays")
     for name in ("appliance", "camera"):
         create_overlay(config, base_image, name, force=force)
+    recording_disk = VMS / "appliance-recording.qcow2"
+    if force or not recording_disk.exists():
+        recording_disk.unlink(missing_ok=True)
+        result = run_command(
+            [
+                "qemu-img",
+                "create",
+                "-f",
+                "qcow2",
+                str(recording_disk),
+                config["vm"].get("recording_disk_size", "64G"),
+            ]
+        )
+        if result.returncode != 0:
+            raise HarnessError(f"qemu-img create recording disk failed: {result.stderr.strip()}")
     if force:
         # Fresh overlays have no baseline, so any timing from an older run is stale.
         state.pop("cold_boot_seconds", None)

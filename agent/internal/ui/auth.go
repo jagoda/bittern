@@ -89,19 +89,32 @@ func (h *handler) authenticate(next http.Handler) http.Handler {
 // redirectToAuth keeps a normal navigation as a 303 so the browser renders the
 // destination as a page. An HTMX request gets a non-2xx response and
 // HX-Redirect, because a 303 would be followed inside the XHR and the login or
-// setup HTML would be swapped into the live region.
+// setup HTML would be swapped into the live region. A media or JSON request
+// gets 401 and no HTML at all.
 func (h *handler) redirectToAuth(w http.ResponseWriter, r *http.Request, target string) {
-	if !isHXRequest(r) {
-		http.Redirect(w, r, target, http.StatusSeeOther)
+	if isHXRequest(r) {
+		w.Header().Set("HX-Redirect", target)
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	w.Header().Set("HX-Redirect", target)
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusUnauthorized)
+	if isPartialMediaRequest(r) {
+		w.Header().Set("Cache-Control", "no-store")
+		http.Error(w, "Sign in to Bittern.", http.StatusUnauthorized)
+		return
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func isHXRequest(r *http.Request) bool {
 	return strings.EqualFold(r.Header.Get("HX-Request"), "true")
+}
+
+func isPartialMediaRequest(r *http.Request) bool {
+	if strings.HasPrefix(r.URL.Path, BasePath+"/live/media/") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(r.Header.Get("Accept")), "application/json")
 }
 
 // hxReturnPath returns the page that owns an HTMX request. HTMX sends the

@@ -1628,6 +1628,13 @@ live verification path until the Bittern NVR surfaces land.
   the hardware Level 2 pass in the near-term queue. **Size.** M.
 
 ### BIT-023 Live view
+**Status.** In progress. Slice 1a implements the single-camera page at `/ui/live` and
+`/ui/live/{camera}`, the authenticated MSE and HLS proxy, the snapshot fallback, the renderer
+`go2rtc.streams` block and `cameras.<name>.live.streams` mapping, the player isolation guard and the
+1/4/9 viewport ceiling structure. The grid, the per-device layout cookie, the saved-layout clamp and
+the QEMU playback scenario remain open. Evidence: [the live view slice
+note](../notes/2026-11-26-live-view-slice-1a.md).
+
 **Goal.** Give the owner a live camera view in the Bittern UI on the authenticated 443 surface,
 following [ADR 0034](../adr/0034-live-view-owned-by-bittern.md), with no exposure of port 8555 and no
 embedded Frigate UI.

@@ -1,0 +1,58 @@
+{{define "live-status"}}
+<p class="meta" data-live-camera-state="{{if .Live.Selected.Disabled}}disabled{{else}}enabled{{end}}">{{if .Live.Selected.Disabled}}This camera is disabled in Bittern.{{else}}This camera is enabled in Bittern's configuration.{{end}}</p>
+{{end}}
+
+{{define "live"}}{{template "head" .}}
+<h1>Live</h1>
+<p class="lede">Watch one camera live. Video stays on your appliance and is available only after you sign in.</p>
+{{template "preview-notice" .}}
+{{if .Live.NoCameras}}
+<section class="card">
+  <h2>No cameras to watch</h2>
+  <p>Bittern has no camera in its configuration. Add a camera and it appears here.</p>
+  <div class="form-actions"><a class="button" href="/ui/wizard/camera">Add camera</a></div>
+</section>
+{{else}}
+{{with .Live.Selected}}
+{{if gt (len $.Live.Cameras) 1}}
+<nav class="live-camera-picker" aria-label="Choose a camera">
+  <h2>Cameras</h2>
+  <ul>
+    {{range $.Live.Cameras}}<li><a href="{{.URL}}"{{if .Selected}} aria-current="true"{{end}}>{{.Name}}</a></li>{{end}}
+  </ul>
+</nav>
+{{end}}
+<section class="live-view" aria-labelledby="live-camera-title">
+  <div class="live-heading">
+    <h2 id="live-camera-title">{{.Name}}</h2>
+    <span class="state-badge state-unknown" data-player-state-label="true">Connecting</span>
+  </div>
+  <div id="live-player" class="live-player" data-live-player="true" data-camera-id="{{.ID}}" data-camera-name="{{.Name}}" data-profile="{{.Profile}}" data-profile-name="{{.ProfileName}}" data-media-base="{{.MediaBase}}" data-snapshot-url="{{.SnapshotURL}}" data-login-url="{{.LoginURL}}">
+    <div class="live-media">
+      <video id="live-video" class="live-video" muted="muted" playsinline="playsinline" preload="none" aria-label="Live video from {{.Name}}"></video>
+      <img class="live-snapshot" data-player-snapshot="true" alt="Latest picture from {{.Name}}" hidden="hidden" />
+      <noscript>
+        <img class="live-snapshot" src="{{.SnapshotURL}}" alt="Latest picture from {{.Name}}" />
+        <p class="live-noscript">Live video needs JavaScript. This is the latest picture from the camera. <a href="/ui/cameras">Open cameras</a>.</p>
+      </noscript>
+    </div>
+    <div class="live-status" data-player-status="true" role="status" aria-live="polite">
+      <p class="live-status-line"><span class="state-badge state-unknown" data-player-badge="true">Connecting</span> <strong data-player-title="true">Connecting to {{.Name}}</strong></p>
+      <p class="live-status-detail" data-player-detail="true">Bittern is opening the live stream.</p>
+      <p><button type="button" class="button secondary" data-player-retry="true" hidden="hidden">Try again</button></p>
+    </div>
+    <div class="live-controls">
+      <div class="live-profiles" role="group" aria-label="Stream profile">
+        {{range .Profiles}}<a href="{{.URL}}" data-profile-link="{{.Name}}"{{if .Selected}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}
+      </div>
+      <p class="hint">{{.ProfileHint}}</p>
+    </div>
+  </div>
+  <div id="live-camera-state" class="live-camera-state" hx-get="{{.StatusURL}}" hx-trigger="every 15s" hx-target="this" hx-swap="innerHTML">
+    {{template "live-status" $}}
+  </div>
+</section>
+{{end}}
+<script src="/ui/static/live-player.js" defer="defer"></script>
+{{end}}
+{{template "foot" .}}{{end}}

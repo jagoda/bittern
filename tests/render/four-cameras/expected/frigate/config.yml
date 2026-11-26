@@ -41,9 +41,23 @@ record:
 objects:
     track:
         - person
+go2rtc:
+    streams:
+        back_garden_main: '{FRIGATE_CAMERA_BACK_GARDEN_RTSP_URL}'
+        back_garden_sub: '{FRIGATE_CAMERA_BACK_GARDEN_RTSP_URL}'
+        driveway_main: '{FRIGATE_CAMERA_DRIVEWAY_RTSP_URL}'
+        driveway_sub: '{FRIGATE_CAMERA_DRIVEWAY_RTSP_URL}'
+        front_door_main: '{FRIGATE_CAMERA_FRONT_DOOR_RTSP_URL}'
+        front_door_sub: '{FRIGATE_CAMERA_FRONT_DOOR_RTSP_URL}'
+        side_gate_main: '{FRIGATE_CAMERA_SIDE_GATE_RTSP_URL}'
+        side_gate_sub: '{FRIGATE_CAMERA_SIDE_GATE_RTSP_URL}'
 cameras:
     back_garden:
         enabled: true
+        live:
+            streams:
+                Main stream: back_garden_main
+                Sub stream: back_garden_sub
         ffmpeg:
             inputs:
                 - path: '{FRIGATE_CAMERA_BACK_GARDEN_RTSP_URL}'
@@ -55,6 +69,10 @@ cameras:
             fps: 5
     driveway:
         enabled: true
+        live:
+            streams:
+                Main stream: driveway_main
+                Sub stream: driveway_sub
         ffmpeg:
             inputs:
                 - path: '{FRIGATE_CAMERA_DRIVEWAY_RTSP_URL}'
@@ -66,6 +84,10 @@ cameras:
             fps: 5
     front_door:
         enabled: true
+        live:
+            streams:
+                Main stream: front_door_main
+                Sub stream: front_door_sub
         ffmpeg:
             inputs:
                 - path: '{FRIGATE_CAMERA_FRONT_DOOR_RTSP_URL}'
@@ -77,6 +99,10 @@ cameras:
             fps: 5
     side_gate:
         enabled: true
+        live:
+            streams:
+                Main stream: side_gate_main
+                Sub stream: side_gate_sub
         ffmpeg:
             inputs:
                 - path: '{FRIGATE_CAMERA_SIDE_GATE_RTSP_URL}'

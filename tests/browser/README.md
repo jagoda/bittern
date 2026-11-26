@@ -89,6 +89,20 @@ clicks `Test picture` on `/ui/cameras`, waits for `img[data-picture-image]` to b
 decoded, then captures and measures that state as `cameras-picture-taken-<width>x<height>.png`. The
 `-expanded` capture still applies.
 
+
+## Live player checks
+
+`tests/browser/live.mjs` runs after the route walk on the same daemon. It stubs `WebSocket`,
+`MediaSource` and the media element so every player state can be walked without a camera or go2rtc:
+connecting, playing, stalled, reconnecting, offline, unsupported, session ended and switching. It
+also checks the 1/4/9 viewport ceiling at 360, 390, 1280 and 1920, and in the playing state it swaps
+the sibling camera-state fragment and asserts the player, video element and state survive. Every
+case asserts the player and video are outside an `hx-*` ancestor.
+
+`tests/browser/qemu-live.mjs` is the host-side QEMU assertion. It signs in to the forwarded
+appliance, opens the applied virtual camera, waits for the real MSE player to report playing with a
+non-zero video size and time, and writes `build/qemu/logs/<run>/live-view.png`.
+
 ## What is checked
 
 The viewport list is provisional under [OQ-26](../../docs/open-questions.md) and
@@ -101,8 +115,8 @@ The viewport list is provisional under [OQ-26](../../docs/open-questions.md) and
 | desktop | 1280 by 800 |
 | desktop-wide | 1920 by 1080 |
 
-The manifest has 35 screens from 18 routes, so each run checks 140 route-width screens and writes
-140 default full-page screenshots, plus an `-expanded` copy for each screen with a closed
+The manifest has 37 screens from 20 routes, so each run checks 148 route-width screens and writes
+148 default full-page screenshots, plus an `-expanded` copy for each screen with a closed
 disclosure. Fifteen status variants cover the five overall states and the update card: factory
 baseline with an offered update, up to date, update available, installing, failed, rolled back,
 offline, rate limited, and a failed check. The `live-refresh` variant opens Technical details, focuses

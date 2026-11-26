@@ -168,6 +168,7 @@ func browserRouteManifestPath(entry route) string {
 	}
 	path := strings.ReplaceAll(entry.Pattern, "{id}", "front_door")
 	path = strings.ReplaceAll(path, "{ref}", "c1")
+	path = strings.ReplaceAll(path, "{camera}", "front_door")
 	return strings.ReplaceAll(path, "{$}", "")
 }
 

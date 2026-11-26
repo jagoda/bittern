@@ -336,7 +336,14 @@ func TestSecurityHeadersOnAuthenticatedAndLoginPages(t *testing.T) {
 func assertSecurityHeaders(t *testing.T, response *http.Response) {
 	t.Helper()
 	csp := response.Header.Get("Content-Security-Policy")
-	for _, directive := range []string{"default-src 'self'", "script-src 'self'", "frame-ancestors 'none'", "object-src 'none'"} {
+	for _, directive := range []string{
+		"default-src 'self'",
+		"script-src 'self'",
+		"media-src 'self' blob:",
+		"connect-src 'self'",
+		"frame-ancestors 'none'",
+		"object-src 'none'",
+	} {
 		if !strings.Contains(csp, directive) {
 			t.Errorf("CSP is missing %q: %q", directive, csp)
 		}

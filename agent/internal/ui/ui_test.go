@@ -865,7 +865,7 @@ func TestWizardCameraSettingsChangeOnlyOneCamera(t *testing.T) {
 		`id="camera-username" name="username" type="text" value=""`,
 		`id="camera-password" name="password" type="password"`,
 	)
-	for _, unwanted := range []string{"Driveway", "10.77.0.21", "8554", "/live"} {
+	for _, unwanted := range []string{"Driveway", "10.77.0.21", "8554", `value="/live"`} {
 		if strings.Contains(body, unwanted) {
 			t.Errorf("one camera's settings rendered another camera's value %q", unwanted)
 		}

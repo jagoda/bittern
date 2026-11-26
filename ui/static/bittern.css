@@ -1271,3 +1271,151 @@ button:disabled {
   gap: var(--space-4);
   align-items: baseline;
 }
+
+.live-camera-picker {
+  margin-block: var(--space-24);
+}
+
+.live-camera-picker h2 {
+  margin-block-start: 0;
+}
+
+.live-camera-picker ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.live-camera-picker a {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: var(--touch-target);
+  min-inline-size: var(--touch-target);
+  padding-inline: var(--space-8);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.live-camera-picker a[aria-current="true"] {
+  border-color: var(--color-action);
+  font-weight: var(--font-weight-strong);
+}
+
+.live-view {
+  margin-block: var(--space-24);
+}
+
+.live-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.live-heading h2 {
+  margin-block: 0;
+}
+
+.live-player {
+  margin-block-start: var(--space-16);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-surface);
+  padding: var(--space-16);
+  background: var(--color-surface);
+}
+
+.live-media {
+  overflow: hidden;
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-surface);
+  background: var(--color-text);
+}
+
+.live-video {
+  display: block;
+  inline-size: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--color-text);
+  object-fit: contain;
+}
+
+.live-snapshot {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+}
+
+.live-video[hidden],
+.live-snapshot[hidden],
+.live-status [data-player-retry][hidden] {
+  display: none;
+}
+
+.live-noscript {
+  margin: 0;
+  padding: var(--space-16);
+  background: var(--color-surface);
+  font: var(--type-body);
+}
+
+.live-status {
+  margin-block-start: var(--space-16);
+}
+
+.live-status-line {
+  margin-block: 0 var(--space-4);
+}
+
+.live-status-detail {
+  color: var(--color-text-muted);
+  font: var(--type-body);
+}
+
+.live-status [data-player-retry] {
+  margin-block: var(--space-8) 0;
+}
+
+.live-controls {
+  margin-block-start: var(--space-16);
+  padding-block-start: var(--space-12);
+  border-block-start: var(--border-width) solid var(--color-border-subtle);
+}
+
+.live-profiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-block-end: var(--space-8);
+}
+
+.live-profiles a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: var(--touch-target);
+  min-inline-size: var(--touch-target);
+  padding-inline: var(--space-12);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.live-profiles a[aria-current="true"] {
+  border: calc(var(--border-width) * 2) solid var(--color-action);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: var(--font-weight-strong);
+}
+
+.live-camera-state {
+  margin-block-start: var(--space-8);
+  color: var(--color-text-muted);
+}
+
+.live-camera-state p {
+  margin-block: 0;
+}

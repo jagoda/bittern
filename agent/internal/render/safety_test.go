@@ -69,8 +69,8 @@ func TestCAM0Isolation(t *testing.T) {
 		t.Error("ruleset has an IPv6-specific table; the appliance uses one inet table")
 	}
 
-	// The Frigate UI is loopback-only (ADR 0016) and the live-video path is
-	// undecided (OQ-03), so these ports are explicitly blocked on both
+	// The Frigate UI is loopback-only (ADR 0016) and live video is proxied by
+	// bitternd on 443 (ADR 0034), so these ports are explicitly blocked on both
 	// appliance interfaces, not merely caught by the default-deny policy.
 	blocked := make(map[string]bool)
 	for _, port := range []string{"1984", "5000", "8554", "8555", "8971"} {

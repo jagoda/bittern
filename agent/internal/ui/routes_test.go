@@ -32,7 +32,8 @@ func TestRouteTableResponses(t *testing.T) {
 			if templates.Lookup(route.Template) == nil {
 				t.Fatalf("template %q is not embedded", route.Template)
 			}
-			if route.Name == "status-fragment" || route.Name == "status-updates-fragment" || route.Name == "wizard-operation-fragment" {
+			if route.Name == "status-fragment" || route.Name == "status-updates-fragment" ||
+				route.Name == "wizard-operation-fragment" || route.Name == "live-status" {
 				if strings.Contains(body, "<!DOCTYPE html>") || strings.Contains(body, "<main") {
 					t.Fatalf("%s is a full page", route.Name)
 				}
@@ -101,7 +102,8 @@ func TestRouteTableMarksEveryFullPageResponsive(t *testing.T) {
 		if route.Responsive && route.Template == "" && route.Name != "camera-picture" {
 			t.Errorf("%s: responsive route has no template", route.Name)
 		}
-		if route.Name != "status-fragment" && route.Name != "status-updates-fragment" && route.Name != "wizard-operation-fragment" &&
+		if route.Name != "status-fragment" && route.Name != "status-updates-fragment" &&
+			route.Name != "wizard-operation-fragment" && route.Name != "live-status" &&
 			route.Template != "" && !route.Responsive && route.Method == http.MethodGet {
 			t.Errorf("%s: full-page GET route is not marked responsive", route.Name)
 		}
@@ -123,9 +125,13 @@ func routeRequestPath(route route) string {
 		return BasePath + "/missing"
 	case "static":
 		return BasePath + "/static/htmx-2.0.11.min.js"
+	case "live-media":
+		return BasePath + "/live/media/front_door/main/not-allowed"
 	}
 	path := strings.ReplaceAll(route.Pattern, "{id}", "front_door")
 	path = strings.ReplaceAll(path, "{ref}", "c1")
+	path = strings.ReplaceAll(path, "{camera}", "front_door")
+	path = strings.ReplaceAll(path, "{kind...}", "not-allowed")
 	return strings.ReplaceAll(path, "{$}", "")
 }
 
@@ -204,7 +210,11 @@ func exerciseRoute(t *testing.T, route route) (int, string) {
 		addCamera(t, client, server.URL, cameraFormValues("Front door", "10.77.0.20"))
 		disableRedirects(client)
 		return postPage(t, client, server.URL+path, url.Values{})
-	case "camera-edit", "camera-remove", "camera-picture":
+	case "camera-edit", "camera-remove", "camera-picture", "live", "live-camera", "live-status":
+		configPath, secretsPath := writeCameraFixture(t)
+		server, client := newTestServer(t, Options{ConfigPath: configPath, SecretsPath: secretsPath, MockPreview: true})
+		return getPage(t, client, server.URL+path)
+	case "live-media":
 		configPath, secretsPath := writeCameraFixture(t)
 		server, client := newTestServer(t, Options{ConfigPath: configPath, SecretsPath: secretsPath, MockPreview: true})
 		return getPage(t, client, server.URL+path)
