@@ -1,8 +1,17 @@
-// Browser checks for the Bittern live player island. The checks use a stub
-// WebSocket and MediaSource so every player state can be walked without a
-// camera, a go2rtc process or a Frigate container.
+// Browser checks for the Bittern live player islands and the grid. The checks
+// use a stub WebSocket and MediaSource so every player state can be walked
+// without a camera, a go2rtc process or a Frigate container.
+
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const SCREENSHOT_DIR = path.resolve(HERE, "../../build/ui-screenshots");
 
 const LIVE_PATH = "/ui/live/front_door";
+const GRID_PATH = "/ui/live";
+const LIVE_CAMERAS = ["front_door", "driveway", "side_gate", "back_garden"];
 const PLAYER_STATES = [
   "connecting",
   "playing",
@@ -14,8 +23,12 @@ const PLAYER_STATES = [
   "switching",
 ];
 
-const STUB = ({ mode }) => {
-  window.__liveStub = { mode, sockets: [] };
+// One named check per player state, four device-ceiling widths, and six grid
+// checks. check.mjs prints this count with the pass or fail line.
+export const LIVE_CHECK_COUNT = PLAYER_STATES.length + 4 + 6;
+
+const STUB = ({ mode, failingCamera }) => {
+  window.__liveStub = { mode, failingCamera: failingCamera || "", sockets: [] };
 
   class FakeBuffer extends EventTarget {
     constructor() {
@@ -72,11 +85,17 @@ const STUB = ({ mode }) => {
       this.url = url;
       this.readyState = FakeWebSocket.CONNECTING;
       this.binaryType = "arraybuffer";
+      this.mode =
+        window.__liveStub.failingCamera &&
+        url.includes("/media/" + window.__liveStub.failingCamera + "/")
+          ? "offline"
+          : window.__liveStub.mode;
       window.__liveStub.sockets.push(this);
       setTimeout(() => this.begin(), 5);
     }
 
     begin() {
+      const mode = this.mode;
       if (mode === "connecting") return;
       this.readyState = FakeWebSocket.OPEN;
       this.dispatchEvent(new Event("open"));
@@ -155,6 +174,35 @@ async function waitForState(page, state, timeout = 8000) {
   );
 }
 
+async function waitForTileState(page, index, state, timeout = 10000) {
+  await page.waitForFunction(
+    ({ index, state }) => {
+      const player = document.querySelector(
+        `[data-live-tile="${index}"] [data-live-player]`,
+      );
+      return player?.getAttribute("data-player-state") === state;
+    },
+    { index, state },
+    { timeout },
+  );
+}
+
+async function waitForTileProfile(page, index, profile, timeout = 10000) {
+  await page.waitForFunction(
+    ({ index, profile }) => {
+      const player = document.querySelector(
+        `[data-live-tile="${index}"] [data-live-player]`,
+      );
+      return (
+        player?.getAttribute("data-profile") === profile &&
+        player?.getAttribute("data-player-state") === "playing"
+      );
+    },
+    { index, profile },
+    { timeout },
+  );
+}
+
 async function openLive(context, baseURL, password, mode, route) {
   const page = await context.newPage();
   await signIn(page, baseURL, password);
@@ -181,7 +229,7 @@ function playerMessage(page) {
 async function assertIsland(page, label, failures) {
   const result = await page.evaluate(() => {
     const player = document.querySelector("[data-live-player]");
-    const video = document.querySelector("#live-video");
+    const video = player?.querySelector("video");
     const inSwap = (node) =>
       !!node &&
       !!node.closest(
@@ -227,7 +275,7 @@ async function walkState(browser, baseURL, password, mode) {
     if (mode === "switching") {
       await waitForState(page, "playing");
     } else {
-      await waitForState(page, mode, mode === "offline" ? 15000 : 8000);
+      await waitForState(page, mode, mode === "offline" ? 15000 : 12000);
     }
     await assertIsland(page, `live player ${mode}`, failures);
     const message = await playerMessage(page);
@@ -235,8 +283,9 @@ async function walkState(browser, baseURL, password, mode) {
     if (!message.detail) failures.push(`${mode}: the state has no detail sentence`);
     if (mode === "playing") {
       await page.evaluate(() => {
-        document.querySelector("#live-video").dataset.liveMarker = "keep";
-        document.querySelector("[data-live-player]").dataset.liveMarker = "keep";
+        const player = document.querySelector("[data-live-player]");
+        player.querySelector("video").dataset.liveMarker = "keep";
+        player.dataset.liveMarker = "keep";
       });
       const request = page.waitForRequest("**/ui/live/front_door/status");
       await page.evaluate(() => {
@@ -254,18 +303,17 @@ async function walkState(browser, baseURL, password, mode) {
           ),
         { timeout: 5000 },
       );
-      const afterPoll = await page.evaluate(() => ({
-        state: document
-          .querySelector("[data-live-player]")
-          ?.getAttribute("data-player-state"),
-        videoMarker: document.querySelector("#live-video")?.dataset.liveMarker,
-        playerMarker: document
-          .querySelector("[data-live-player]")
-          ?.dataset.liveMarker,
-        videoSwapped: !!document
-          .querySelector("#live-video")
-          ?.closest("[hx-get],[hx-post],[hx-target],[hx-swap],[hx-trigger]"),
-      }));
+      const afterPoll = await page.evaluate(() => {
+        const player = document.querySelector("[data-live-player]");
+        return {
+          state: player?.getAttribute("data-player-state"),
+          videoMarker: player?.querySelector("video")?.dataset.liveMarker,
+          playerMarker: player?.dataset.liveMarker,
+          videoSwapped: !!player
+            ?.querySelector("video")
+            ?.closest("[hx-get],[hx-post],[hx-target],[hx-swap],[hx-trigger]"),
+        };
+      });
       if (afterPoll.state !== "playing") {
         failures.push(`playing: state became ${afterPoll.state} after the camera poll`);
       }
@@ -345,11 +393,438 @@ async function walkCeilings(browser, baseURL, password) {
   return failures;
 }
 
+// The layout cookie value uses the same query form the server writes.
+function layoutCookie(preset, cameras) {
+  const values = new URLSearchParams();
+  values.set("v", "1");
+  values.set("p", String(preset));
+  for (const camera of cameras) values.append("t", camera);
+  return values.toString();
+}
+
+async function openGrid(browser, baseURL, password, options = {}) {
+  const context = await browser.newContext({
+    viewport: options.viewport || { width: 1280, height: 800 },
+  });
+  if (options.preset) {
+    const host = new URL(baseURL).hostname;
+    await context.addCookies([
+      {
+        name: "bittern_live_layout",
+        value: layoutCookie(options.preset, options.cameras || []),
+        domain: host,
+        path: "/ui/live",
+        httpOnly: true,
+        secure: false,
+        sameSite: "Strict",
+      },
+    ]);
+  }
+  const page = await context.newPage();
+  await signIn(page, baseURL, password);
+  await page.addInitScript(STUB, {
+    mode: options.mode || "playing",
+    failingCamera: options.failingCamera || "",
+  });
+  await page.goto(`${baseURL}${GRID_PATH}`, { waitUntil: "load" });
+  return { context, page };
+}
+
+async function gridStates(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("[data-live-player]")).map((player) => ({
+      camera: player.getAttribute("data-camera-id"),
+      state: player.getAttribute("data-player-state"),
+      profile: player.getAttribute("data-profile"),
+      marker: player.dataset.liveMarker || "",
+    })),
+  );
+}
+
+async function waitForPlayingCount(page, count, timeout = 12000) {
+  await page.waitForFunction(
+    (expected) =>
+      document.querySelectorAll(
+        '[data-live-player][data-player-state="playing"]',
+      ).length === expected,
+    count,
+    { timeout },
+  );
+}
+
+async function clickPreset(page, preset) {
+  const disclosure = page.locator("details.live-layout-disclosure");
+  const open = await disclosure.evaluate((details) => details.open);
+  if (!open) await disclosure.locator("summary").click();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "load", timeout: 15000 }),
+    page.click(`[data-live-preset="${preset}"]`),
+  ]);
+}
+
+// 1. All three presets switch and are remembered by the device cookie.
+async function walkGridPresets(browser, baseURL, password) {
+  const failures = [];
+  const { context, page } = await openGrid(browser, baseURL, password, {
+    preset: 1,
+    cameras: ["front_door"],
+  });
+  try {
+    await waitForPlayingCount(page, 1);
+    if ((await page.locator("[data-live-tile]").count()) !== 1) {
+      failures.push("presets: one-camera layout does not render one tile");
+    }
+    if (
+      (await page.locator('[data-live-preset="1"]').getAttribute("aria-pressed")) !==
+      "true"
+    ) {
+      failures.push("presets: the stored preset is not marked current");
+    }
+    await clickPreset(page, "4");
+    if ((await page.locator("[data-live-tile]").count()) !== 4) {
+      failures.push("presets: four-camera layout does not render four tiles");
+    }
+    if (
+      (await page.locator('[data-live-preset="4"]').getAttribute("aria-pressed")) !==
+      "true"
+    ) {
+      failures.push("presets: the four-camera preset is not marked current");
+    }
+    if (
+      (await page.locator('[data-live-tile="0"] [data-camera-id]').getAttribute("data-camera-id")) !==
+      "front_door"
+    ) {
+      failures.push("presets: switching the preset lost the tile assignment");
+    }
+    await clickPreset(page, "9");
+    if ((await page.locator("[data-live-tile]").count()) !== 9) {
+      failures.push("presets: nine-camera layout does not render nine tiles");
+    }
+    await clickPreset(page, "1");
+    if ((await page.locator("[data-live-tile]").count()) !== 1) {
+      failures.push("presets: returning to one camera does not render one tile");
+    }
+    await page.reload({ waitUntil: "load" });
+    if ((await page.locator("[data-live-tile]").count()) !== 1) {
+      failures.push("presets: the chosen layout was not remembered by the device");
+    }
+    await waitForPlayingCount(page, 1);
+  } catch (error) {
+    failures.push(`presets: ${error.message}`);
+  } finally {
+    await context.close();
+  }
+  return failures;
+}
+
+// 2. Assigning a camera to one tile replaces only that tile's island.
+async function walkGridAssignment(browser, baseURL, password) {
+  const failures = [];
+  const { context, page } = await openGrid(browser, baseURL, password, {
+    preset: 4,
+    cameras: ["front_door"],
+  });
+  try {
+    await waitForPlayingCount(page, 1);
+    await page.evaluate(() => {
+      document
+        .querySelector('[data-live-tile="0"] [data-live-player]')
+        .setAttribute("data-live-marker", "keep");
+    });
+    await page.selectOption('[data-live-tile="1"] select', "driveway");
+    const response = page.waitForResponse(
+      (result) =>
+        result.url().includes("/ui/live/tile") &&
+        result.request().method() === "POST",
+      { timeout: 15000 },
+    );
+    await page.click('[data-live-tile="1"] button[type="submit"]');
+    const replaced = await response;
+    if (replaced.status() !== 200) {
+      failures.push(`assignment: tile replacement status ${replaced.status()}`);
+    }
+    await waitForTileState(page, 1, "playing");
+    if ((await page.locator("[data-live-tile]").count()) !== 4) {
+      failures.push("assignment: assigning a camera changed the tile count");
+    }
+    if ((await page.locator("[data-live-player]").count()) !== 2) {
+      failures.push("assignment: the new tile did not become a player");
+    }
+    const first = await page.evaluate(() => {
+      const player = document.querySelector(
+        '[data-live-tile="0"] [data-live-player]',
+      );
+      return {
+        marker: player?.getAttribute("data-live-marker"),
+        state: player?.getAttribute("data-player-state"),
+        camera: player?.getAttribute("data-camera-id"),
+      };
+    });
+    if (first.marker !== "keep") {
+      failures.push("assignment: the other tile's player was replaced");
+    }
+    if (first.state !== "playing" || first.camera !== "front_door") {
+      failures.push("assignment: the other tile stopped playing");
+    }
+    await page.reload({ waitUntil: "load" });
+    await waitForTileState(page, 1, "playing");
+    if ((await page.locator("[data-live-player]").count()) !== 2) {
+      failures.push("assignment: the assignment was not remembered by the device");
+    }
+  } catch (error) {
+    failures.push(`assignment: ${error.message}`);
+  } finally {
+    await context.close();
+  }
+  return failures;
+}
+
+// 3. A status poll during playback leaves every player and the open picker.
+async function walkGridPoll(browser, baseURL, password) {
+  const failures = [];
+  const { context, page } = await openGrid(browser, baseURL, password, {
+    preset: 4,
+    cameras: LIVE_CAMERAS,
+  });
+  try {
+    await waitForPlayingCount(page, 4);
+    await page.evaluate(() => {
+      document.querySelectorAll("[data-live-player]").forEach((player) => {
+        player.setAttribute("data-live-marker", "keep");
+      });
+      const details = document.querySelector('[data-live-tile="0"] details');
+      details.open = true;
+      details.querySelector("summary").focus();
+    });
+    const request = page.waitForRequest("**/ui/live/front_door/status");
+    await page.evaluate(() => {
+      const target = document.querySelector('[data-live-tile="0"] .live-camera-state');
+      window.htmx.ajax("GET", target.getAttribute("hx-get"), {
+        target: "#" + target.id,
+        swap: "innerHTML",
+      });
+    });
+    await request;
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-live-tile="0"] .live-camera-state')
+          ?.textContent.includes("enabled"),
+      { timeout: 5000 },
+    );
+    const after = await page.evaluate(() => {
+      const players = Array.from(document.querySelectorAll("[data-live-player]"));
+      const details = document.querySelector('[data-live-tile="0"] details');
+      return {
+        states: players.map((player) => player.getAttribute("data-player-state")),
+        markers: players.map((player) => player.getAttribute("data-live-marker")),
+        open: details.open,
+        focus: document.activeElement?.tagName === "SUMMARY",
+        tiles: document.querySelectorAll("[data-live-tile]").length,
+        preset: document
+          .querySelector('[data-live-preset="4"]')
+          ?.getAttribute("aria-pressed"),
+        swapped: players.some((player) =>
+          player.closest("[hx-get],[hx-post],[hx-target],[hx-swap],[hx-trigger]"),
+        ),
+      };
+    });
+    if (after.tiles !== 4 || after.preset !== "true") {
+      failures.push("poll: the poll changed the chosen layout");
+    }
+    if (after.states.some((state) => state !== "playing")) {
+      failures.push(`poll: a player left playing after the poll: ${after.states}`);
+    }
+    if (after.markers.some((marker) => marker !== "keep")) {
+      failures.push("poll: the poll replaced a player island");
+    }
+    if (!after.open) failures.push("poll: the poll closed the open camera picker");
+    if (!after.focus) failures.push("poll: the poll moved focus out of the picker");
+    if (after.swapped) failures.push("poll: a player is inside the polled region");
+  } catch (error) {
+    failures.push(`poll: ${error.message}`);
+  } finally {
+    await context.close();
+  }
+  return failures;
+}
+
+// 4. One camera fails while the other three keep playing.
+async function walkGridCameraFailure(browser, baseURL, password) {
+  const failures = [];
+  const { context, page } = await openGrid(browser, baseURL, password, {
+    preset: 4,
+    cameras: LIVE_CAMERAS,
+    failingCamera: "driveway",
+  });
+  try {
+    await waitForTileState(page, 1, "offline", 20000);
+    await Promise.all([
+      waitForTileState(page, 0, "playing"),
+      waitForTileState(page, 2, "playing"),
+      waitForTileState(page, 3, "playing"),
+    ]);
+    const states = await gridStates(page);
+    if (states.length !== 4) {
+      failures.push(`failure: ${states.length} tiles are playing or failed, want 4`);
+    }
+    if (states[1].state !== "offline") {
+      failures.push(`failure: the failing camera is ${states[1].state}, want offline`);
+    }
+    for (const index of [0, 2, 3]) {
+      if (states[index].state !== "playing") {
+        failures.push(`failure: camera ${states[index].camera} stopped at ${states[index].state}`);
+      }
+    }
+    const message = await page.evaluate(() => {
+      const player = document.querySelector('[data-live-tile="1"] [data-live-player]');
+      return {
+        title: player.querySelector("[data-player-title]").textContent.trim(),
+        detail: player.querySelector("[data-player-detail]").textContent.trim(),
+      };
+    });
+    if (!message.title.includes("Driveway")) {
+      failures.push(`failure: the failing tile does not name its camera: ${message.title}`);
+    }
+    if (!message.detail.toLowerCase().includes("offline")) {
+      failures.push(`failure: the failing tile does not name the offline state: ${message.detail}`);
+    }
+  } catch (error) {
+    failures.push(`failure: ${error.message}`);
+  } finally {
+    await context.close();
+  }
+  return failures;
+}
+
+// 5. Full width switches one tile to the main profile and back without
+// touching the other islands.
+async function walkGridFullWidth(browser, baseURL, password) {
+  const failures = [];
+  const { context, page } = await openGrid(browser, baseURL, password, {
+    preset: 4,
+    cameras: LIVE_CAMERAS,
+  });
+  try {
+    await waitForPlayingCount(page, 4);
+    await page.evaluate(() => {
+      document.querySelectorAll("[data-live-player]").forEach((player) => {
+        player.setAttribute("data-live-marker", "keep");
+      });
+    });
+    await page.click('[data-live-tile="1"] [data-live-expand]');
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("[data-live-grid]")
+          ?.getAttribute("data-live-full") === "true",
+      { timeout: 5000 },
+    );
+    await waitForTileProfile(page, 1, "main");
+    await mkdir(SCREENSHOT_DIR, { recursive: true });
+    await page.screenshot({
+      path: path.join(SCREENSHOT_DIR, "live-full-width-1280x800.png"),
+      fullPage: true,
+    });
+    const full = await gridStates(page);
+    if (full.length !== 4) {
+      failures.push("full width: a tile was removed from the page");
+    }
+    if (full[1].profile !== "main") {
+      failures.push(`full width: the selected tile profile is ${full[1].profile}, want main`);
+    }
+    for (const index of [0, 2, 3]) {
+      if (full[index].state !== "playing" || full[index].marker !== "keep") {
+        failures.push(`full width: camera ${full[index].camera} did not keep playing`);
+      }
+    }
+    await page.click('[data-live-tile="1"] [data-live-collapse]');
+    await page.waitForFunction(
+      () =>
+        document.querySelector("[data-live-grid]")?.getAttribute("data-live-full") ===
+        null,
+      { timeout: 5000 },
+    );
+    await waitForTileProfile(page, 1, "sub");
+    const grid = await gridStates(page);
+    if (grid.length !== 4) {
+      failures.push("full width: a tile was lost on the way back to the grid");
+    }
+    for (const index of [0, 1, 2, 3]) {
+      if (grid[index].state !== "playing") {
+        failures.push(`full width: camera ${grid[index].camera} is ${grid[index].state} after returning`);
+      }
+      if (grid[index].marker !== "keep") {
+        failures.push(`full width: camera ${grid[index].camera} was replaced`);
+      }
+    }
+  } catch (error) {
+    failures.push(`full width: ${error.message}`);
+  } finally {
+    await context.close();
+  }
+  return failures;
+}
+
+// 6. A phone clamps a four-tile layout to one live tile and says so.
+async function walkGridCeilingNote(browser, baseURL, password) {
+  const failures = [];
+  const { context, page } = await openGrid(browser, baseURL, password, {
+    viewport: { width: 390, height: 844 },
+    preset: 4,
+    cameras: LIVE_CAMERAS,
+  });
+  try {
+    await waitForPlayingCount(page, 1, 15000);
+    await page.waitForFunction(
+      () => document.querySelectorAll("[data-live-player]").length === 4,
+      { timeout: 5000 },
+    );
+    const state = await page.evaluate(() => {
+      const players = Array.from(document.querySelectorAll("[data-live-player]"));
+      const note = document.querySelector("[data-live-ceiling-note]");
+      return {
+        tiles: document.querySelectorAll("[data-live-tile]").length,
+        playing: players.filter(
+          (player) => player.getAttribute("data-player-state") === "playing",
+        ).length,
+        idle: players.filter(
+          (player) => player.getAttribute("data-player-state") === "idle",
+        ).length,
+        sockets: window.__liveStub.sockets.length,
+        ceiling: players[0]?.getAttribute("data-device-ceiling"),
+        note: note && !note.hidden ? note.textContent.trim() : "",
+        failed: document.querySelectorAll(".state-failed").length,
+      };
+    });
+    if (state.tiles !== 4) failures.push(`phone ceiling: ${state.tiles} tiles, want 4`);
+    if (state.playing !== 1) failures.push(`phone ceiling: ${state.playing} playing, want 1`);
+    if (state.idle !== 3) failures.push(`phone ceiling: ${state.idle} idle, want 3`);
+    if (state.sockets !== 1) failures.push(`phone ceiling: ${state.sockets} sockets, want 1`);
+    if (state.ceiling !== "1") failures.push(`phone ceiling: ceiling ${state.ceiling}, want 1`);
+    if (!state.note.includes("one camera")) {
+      failures.push(`phone ceiling: the note does not name the limit: ${state.note}`);
+    }
+    if (state.failed !== 0) failures.push("phone ceiling: a clamped tile shows an error state");
+  } catch (error) {
+    failures.push(`phone ceiling: ${error.message}`);
+  } finally {
+    await context.close();
+  }
+  return failures;
+}
+
 export async function runLivePlayerChecks({ browser, baseURL, adminPassword }) {
   const failures = [];
   for (const state of PLAYER_STATES) {
     failures.push(...(await walkState(browser, baseURL, adminPassword, state)));
   }
   failures.push(...(await walkCeilings(browser, baseURL, adminPassword)));
+  failures.push(...(await walkGridPresets(browser, baseURL, adminPassword)));
+  failures.push(...(await walkGridAssignment(browser, baseURL, adminPassword)));
+  failures.push(...(await walkGridPoll(browser, baseURL, adminPassword)));
+  failures.push(...(await walkGridCameraFailure(browser, baseURL, adminPassword)));
+  failures.push(...(await walkGridFullWidth(browser, baseURL, adminPassword)));
+  failures.push(...(await walkGridCeilingNote(browser, baseURL, adminPassword)));
   return failures;
 }

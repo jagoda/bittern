@@ -8,17 +8,11 @@ import (
 	"testing"
 )
 
-func TestLivePageKeepsThePlayerOutsideEveryHTMXRegion(t *testing.T) {
-	configPath, secretsPath := writeCameraFixture(t)
-	server, client := newTestServer(t, Options{
-		ConfigPath:  configPath,
-		SecretsPath: secretsPath,
-		MockPreview: true,
-	})
-	status, body := getPage(t, client, server.URL+"/ui/live/front_door")
-	if status != http.StatusOK {
-		t.Fatalf("live page status = %d\n%s", status, body)
-	}
+// assertPlayersOutsideHTMX walks the rendered markup and fails if a player
+// island, a video element or a snapshot sits inside an HTMX swap attribute or a
+// known polled panel. It returns the player and video counts it saw.
+func assertPlayersOutsideHTMX(t *testing.T, body string) (int, int) {
+	t.Helper()
 	decoder := xml.NewDecoder(strings.NewReader(body))
 	type frame struct {
 		htmx  bool
@@ -27,8 +21,8 @@ func TestLivePageKeepsThePlayerOutsideEveryHTMXRegion(t *testing.T) {
 	var stack []frame
 	htmxDepth := 0
 	panelDepth := 0
-	playerSeen := false
-	videoSeen := false
+	players := 0
+	videos := 0
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -55,17 +49,20 @@ func TestLivePageKeepsThePlayerOutsideEveryHTMXRegion(t *testing.T) {
 			if isPanel {
 				panelDepth++
 			}
-			if attributes["id"] == "live-player" {
-				playerSeen = true
+			if attributes["data-live-player"] == "true" {
+				players++
 				if htmxDepth > 0 || panelDepth > 0 {
-					t.Fatalf("live player is inside an HTMX swap region")
+					t.Fatalf("live player %q is inside an HTMX swap region", attributes["id"])
 				}
 			}
 			if value.Name.Local == "video" {
-				videoSeen = true
+				videos++
 				if htmxDepth > 0 || panelDepth > 0 {
-					t.Fatalf("video element is inside an HTMX swap region")
+					t.Fatalf("video element %q is inside an HTMX swap region", attributes["id"])
 				}
+			}
+			if attributes["data-player-snapshot"] == "true" && (htmxDepth > 0 || panelDepth > 0) {
+				t.Fatalf("snapshot %q is inside an HTMX swap region", attributes["class"])
 			}
 		case xml.EndElement:
 			if len(stack) == 0 {
@@ -81,8 +78,23 @@ func TestLivePageKeepsThePlayerOutsideEveryHTMXRegion(t *testing.T) {
 			}
 		}
 	}
-	if !playerSeen || !videoSeen {
-		t.Fatalf("live page missing player (%v) or video (%v)", playerSeen, videoSeen)
+	return players, videos
+}
+
+func TestLivePageKeepsThePlayerOutsideEveryHTMXRegion(t *testing.T) {
+	configPath, secretsPath := writeCameraFixture(t)
+	server, client := newTestServer(t, Options{
+		ConfigPath:  configPath,
+		SecretsPath: secretsPath,
+		MockPreview: true,
+	})
+	status, body := getPage(t, client, server.URL+"/ui/live/front_door")
+	if status != http.StatusOK {
+		t.Fatalf("live page status = %d\n%s", status, body)
+	}
+	players, videos := assertPlayersOutsideHTMX(t, body)
+	if players != 1 || videos != 1 {
+		t.Fatalf("live page has %d players and %d videos, want 1 and 1", players, videos)
 	}
 	if strings.Contains(body, "front_door_main") || strings.Contains(body, "front_door_sub") {
 		t.Fatal("live page leaked a go2rtc stream name")

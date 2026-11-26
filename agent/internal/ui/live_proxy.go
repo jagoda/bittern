@@ -25,7 +25,11 @@ const (
 	liveDialTimeout    = 5 * time.Second
 	liveHeaderTimeout  = 10 * time.Second
 	liveRecheckEvery   = 30 * time.Second
-	websocketGUID      = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+	// liveHLSIdleTTL is how long an HLS session id counts as an open player
+	// after its last playlist or segment request. A closed tab frees its slot
+	// without a server-side session store.
+	liveHLSIdleTTL = 30 * time.Second
+	websocketGUID  = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 )
 
 var (
@@ -56,41 +60,97 @@ var (
 )
 
 // liveLimiter enforces the proxy's hard maximum independently of the browser
-// device ceiling. The browser can start fewer players, never more.
+// device ceiling. The browser can start fewer players, never more. A slot is
+// either a held WebSocket media connection or a recently active HLS session id,
+// so the count is media sessions, not concurrent HTTP requests.
 type liveLimiter struct {
-	mu    sync.Mutex
-	max   int
-	count map[string]int
+	mu      sync.Mutex
+	max     int
+	now     func() time.Time
+	ttl     time.Duration
+	sockets map[string]int
+	hls     map[string]map[string]time.Time
 }
 
 func newLiveLimiter(max int) *liveLimiter {
-	return &liveLimiter{max: max, count: make(map[string]int)}
+	return &liveLimiter{
+		max:     max,
+		now:     time.Now,
+		ttl:     liveHLSIdleTTL,
+		sockets: make(map[string]int),
+		hls:     make(map[string]map[string]time.Time),
+	}
 }
 
-func (l *liveLimiter) acquire(key string) bool {
+// openSessions is the caller's live media session count. Callers hold the lock.
+func (l *liveLimiter) openSessions(key string) int {
+	l.pruneLocked(key)
+	return l.sockets[key] + len(l.hls[key])
+}
+
+func (l *liveLimiter) pruneLocked(key string) {
+	sessions := l.hls[key]
+	if len(sessions) == 0 {
+		return
+	}
+	cutoff := l.now().Add(-l.ttl)
+	for id, seen := range sessions {
+		if seen.Before(cutoff) {
+			delete(sessions, id)
+		}
+	}
+	if len(sessions) == 0 {
+		delete(l.hls, key)
+	}
+}
+
+func (l *liveLimiter) acquireSocket(key string) bool {
 	if l == nil {
 		return true
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.count[key] >= l.max {
+	if l.openSessions(key) >= l.max {
 		return false
 	}
-	l.count[key]++
+	l.sockets[key]++
 	return true
 }
 
-func (l *liveLimiter) release(key string) {
+func (l *liveLimiter) releaseSocket(key string) {
 	if l == nil {
 		return
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.count[key] <= 1 {
-		delete(l.count, key)
+	if l.sockets[key] <= 1 {
+		delete(l.sockets, key)
 		return
 	}
-	l.count[key]--
+	l.sockets[key]--
+}
+
+// touchHLS counts an HLS session id, refreshing its idle deadline. The id is
+// opaque to the proxy and only scopes a slot; identity is the server session.
+func (l *liveLimiter) touchHLS(key, id string) bool {
+	if l == nil {
+		return true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.pruneLocked(key)
+	sessions := l.hls[key]
+	if sessions == nil {
+		sessions = make(map[string]time.Time)
+		l.hls[key] = sessions
+	}
+	if _, ok := sessions[id]; !ok {
+		if l.sockets[key]+len(sessions) >= l.max {
+			return false
+		}
+	}
+	sessions[id] = l.now()
+	return true
 }
 
 // serveLiveMedia is the allowlisted media proxy. The browser names a camera,
@@ -128,16 +188,31 @@ func (h *handler) serveLiveMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := authKey(r)
-	if !h.liveLimiter.acquire(key) {
-		writeLiveError(w, http.StatusTooManyRequests, "This session already has the maximum number of live streams open.")
-		return
-	}
-	defer h.liveLimiter.release(key)
 	if ws {
+		if !h.liveLimiter.acquireSocket(key) {
+			writeLiveError(w, http.StatusTooManyRequests, "This session already has the maximum number of live streams open.")
+			return
+		}
+		defer h.liveLimiter.releaseSocket(key)
 		h.proxyLiveWebSocket(w, r, target)
 		return
 	}
+	if liveHLSSessionRequest(kind) {
+		if !h.liveLimiter.touchHLS(key, r.URL.Query().Get("id")) {
+			writeLiveError(w, http.StatusTooManyRequests, "This session already has the maximum number of live streams open.")
+			return
+		}
+	}
 	h.proxyLiveHTTP(w, r, target)
+}
+
+// liveHLSSessionRequest reports the endpoints that belong to one HLS player.
+func liveHLSSessionRequest(kind string) bool {
+	switch kind {
+	case "hls/playlist.m3u8", "hls/init.mp4", "hls/segment.m4s", "hls/segment.ts":
+		return true
+	}
+	return false
 }
 
 func (h *handler) liveSource(cameraID, profile string) (config.Camera, bool) {

@@ -1419,3 +1419,197 @@ button:disabled {
 .live-camera-state p {
   margin-block: 0;
 }
+
+/* Live grid. The server resolves the tile list; this layer chooses the columns
+   for the viewport and the full-width state (ADR 0034 sections 4 and 7). */
+.live-layout {
+  margin-block: var(--space-24) 0;
+}
+
+.live-preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.live-presets button[aria-pressed="true"] {
+  border-width: calc(var(--border-width) * 2);
+  font-weight: var(--font-weight-strong);
+}
+
+.live-ceiling-note {
+  margin-block: var(--space-16) 0;
+  padding: var(--space-12) var(--space-16);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-surface);
+  background: var(--color-notice-surface);
+  color: var(--color-notice-text);
+  font: var(--type-body);
+}
+
+.live-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-16);
+  margin-block: var(--space-24);
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 44rem) {
+  .live-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 80rem) {
+  .live-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.live-grid[data-live-full="true"] {
+  grid-template-columns: 1fr;
+}
+
+.live-grid[data-live-full="true"] .live-tile:not([data-tile-full="true"]) {
+  display: none;
+}
+
+/* In full width the way back sits above the video, so it stays in reach even
+   when the stream is taller than the viewport. */
+.live-grid[data-live-full="true"] [data-tile-full="true"] .live-player {
+  display: flex;
+  flex-direction: column;
+}
+
+.live-grid[data-live-full="true"] [data-tile-full="true"] .live-heading {
+  order: 0;
+}
+
+.live-grid[data-live-full="true"] [data-tile-full="true"] .live-controls {
+  order: 1;
+  margin-block-start: var(--space-8);
+  padding-block-start: 0;
+  border-block-start: 0;
+}
+
+.live-grid[data-live-full="true"] [data-tile-full="true"] .live-media {
+  order: 2;
+  margin-block-start: var(--space-12);
+}
+
+.live-grid[data-live-full="true"] [data-tile-full="true"] .live-status {
+  order: 3;
+}
+
+.live-tile {
+  min-inline-size: 0;
+}
+
+.live-tile .live-player {
+  margin-block-start: 0;
+  padding: var(--space-12);
+}
+
+.live-tile .live-heading {
+  align-items: flex-start;
+}
+
+.live-tile .live-heading h2 {
+  font: var(--type-section);
+}
+
+.live-tile .live-status {
+  margin-block-start: var(--space-12);
+}
+
+.live-tile .live-status-detail {
+  margin-block: var(--space-4) 0;
+  font: var(--type-meta);
+}
+
+/* A tile the device cannot start is a row with its controls, not a media
+   surface. The page-level note explains the limit (ADR 0034 section 4). */
+.live-tile .live-player[data-player-state="idle"] .live-media {
+  display: none;
+}
+
+.live-tile .live-player[data-player-state="idle"] .live-status {
+  margin-block-start: var(--space-4);
+}
+
+.live-tile-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-8);
+  margin-block-start: var(--space-12);
+  padding-block-start: var(--space-12);
+  border-block-start: var(--border-width) solid var(--color-border-subtle);
+}
+
+.live-tile-controls [hidden],
+.live-idle-placeholder[hidden] {
+  display: none;
+}
+
+.live-tile-picker {
+  flex-basis: 100%;
+}
+
+.live-tile-picker > summary {
+  min-block-size: var(--touch-target);
+}
+
+.live-tile-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  margin-block: var(--space-8) 0;
+}
+
+.live-tile-form label {
+  font: var(--type-label);
+}
+
+.live-tile-form select {
+  min-block-size: var(--touch-target);
+  max-inline-size: 100%;
+  padding: var(--space-8) var(--space-12);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: var(--type-body);
+}
+
+.live-tile-form select:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.live-tile-empty {
+  border: var(--border-width) dashed var(--color-border-control);
+  border-radius: var(--radius-surface);
+  padding: var(--space-16);
+  background: var(--color-surface);
+}
+
+.live-tile-empty h2 {
+  margin-block-start: 0;
+  font: var(--type-section);
+}
+
+.live-idle-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  margin: 0;
+  padding: var(--space-16);
+  background: var(--color-unknown-surface);
+  color: var(--color-unknown-text);
+  font: var(--type-body);
+}

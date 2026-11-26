@@ -15,8 +15,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { checkLayout } from "./assertions.mjs";
-import { runLivePlayerChecks } from "./live.mjs";
-import { startBitternd } from "./server.mjs";
+import { LIVE_CHECK_COUNT, runLivePlayerChecks } from "./live.mjs";
+import { LIVE_APPLIANCE_YAML, startBitternd } from "./server.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "../..");
@@ -28,12 +28,32 @@ const WIDTHS = [
   { name: "desktop-wide", width: 1920, height: 1080 },
 ];
 const ACTION_TIMEOUT = 15_000;
-const LIVE_CHECK_COUNT = 12;
 const WAIT_STATES = new Set(["attached", "detached", "visible", "hidden"]);
 
 // The manifest actions are deliberately a short list, not a test framework:
 // each one performs one browser step before the screenshot is written.
 const ACTIONS = {
+  // A stored per-device layout is a cookie the owner cannot see. The manifest
+  // sets it and reloads so a screenshot can show a saved layout without
+  // driving the preset form first.
+  cookie: async (page, action) => {
+    if (typeof action.name !== "string" || typeof action.value !== "string") {
+      throw new Error("cookie action needs a name and a value");
+    }
+    const url = new URL(page.url());
+    await page.context().addCookies([
+      {
+        name: action.name,
+        value: action.value,
+        domain: url.hostname,
+        path: action.path || "/",
+        httpOnly: true,
+        secure: false,
+        sameSite: "Strict",
+      },
+    ]);
+    await page.reload({ waitUntil: "load" });
+  },
   click: async (page, action) => {
     await page.locator(action.selector).first().click();
   },
@@ -529,6 +549,7 @@ async function main() {
   await mkdir(SCREENSHOT_DIR, { recursive: true });
 
   let server;
+  let liveServer;
   let browser;
   try {
     server = await startBitternd({ binary });
@@ -613,20 +634,31 @@ async function main() {
 
     let failureCount = 0;
     let warningCount = 0;
+    // The live view checks use their own daemon with a fixed four-camera
+    // inventory, so an earlier failed route step cannot change their layout.
+    liveServer = await startBitternd({ binary, applianceYAML: LIVE_APPLIANCE_YAML });
+    const setupContext = await browser.newContext();
+    try {
+      const setupPage = await setupContext.newPage();
+      await setupPage.goto(`${liveServer.baseURL}/ui/setup`, { waitUntil: "load" });
+      await completeSetup(setupPage, liveServer.setupToken, liveServer.adminPassword);
+    } finally {
+      await setupContext.close();
+    }
     const liveFailures = await runLivePlayerChecks({
       browser,
-      baseURL: server.baseURL,
-      adminPassword: server.adminPassword,
+      baseURL: liveServer.baseURL,
+      adminPassword: liveServer.adminPassword,
     });
     if (liveFailures.length > 0) {
       failureCount += liveFailures.length;
-      console.log(`FAIL live-player (${LIVE_CHECK_COUNT} state and ceiling checks)`);
+      console.log(`FAIL live-view (${LIVE_CHECK_COUNT} player, ceiling and grid checks)`);
       for (const failure of liveFailures) {
         console.log(`  - ${failure}`);
       }
     } else {
       console.log(
-        `passed live-player: ${LIVE_CHECK_COUNT} state and device-ceiling checks`,
+        `passed live-view: ${LIVE_CHECK_COUNT} player, ceiling and grid checks`,
       );
     }
     for (const result of results) {
@@ -667,6 +699,9 @@ async function main() {
     }
     if (server) {
       await server.stop();
+    }
+    if (liveServer) {
+      await liveServer.stop();
     }
   }
 }

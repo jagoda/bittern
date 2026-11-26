@@ -1,8 +1,9 @@
 # Live view slice 1a: one camera through the authenticated proxy
 
 - Date: 2026-11-26
-- Status: implemented and verified on the QEMU harness. The grid, the layout cookie and the saved
-  layout clamp remain open in [BIT-023](../plan/implementation-plan.md#bit-023-live-view).
+- Status: implemented and verified on the QEMU harness. Slice 1b adds the grid, the per-device
+  layout cookie and the saved-layout clamp; see
+  [the slice 1b note](2026-11-26-live-view-slice-1b.md).
 - Scope: the single-camera page, the authenticated MSE and HLS proxy, the snapshot fallback, the
   renderer stream block, the player state machine and the 1/4/9 ceiling structure.
 - Related: [ADR 0034](../adr/0034-live-view-owned-by-bittern.md),
@@ -49,6 +50,6 @@
 
 ## Cut from this slice
 
-The grid, the per-device layout cookie, the saved-layout clamp, PTZ, audio, event review, playback
-and camera configuration are not in this change. The player has the profile switch and the ceiling
-structure the grid needs, but the grid itself is still BIT-023.
+The grid, the per-device layout cookie and the saved-layout clamp are in
+[slice 1b](2026-11-26-live-view-slice-1b.md). PTZ, audio, event review, playback and camera
+configuration are not in either slice.

@@ -1,6 +1,8 @@
-// Bittern live player. The player container is a stable node outside every
-// HTMX swap region. This file owns the video element, the MediaSource, the
-// WebSocket and the recovery state machine; no server fragment may replace it.
+// Bittern live player. Each player island owns its own video element, its own
+// MediaSource and its own WebSocket; the grid owns the viewport ceiling, the
+// full-width selection and the tile replacement. A player root is a stable node
+// outside every HTMX swap region, and this file refuses to mount one inside a
+// region HTMX can replace (ADR 0034 section 3).
 (function () {
   "use strict";
 
@@ -21,6 +23,13 @@
     "opus",
   ];
 
+  // The exact device ceilings from ADR 0034 section 7. The proxy enforces its
+  // own hard maximum of nine; this one is the UX ceiling for the viewport.
+  var CEILING_PHONE = 1;
+  var CEILING_TABLET = 4;
+  var CEILING_DESKTOP = 9;
+  var CEILING_WORDS = { 1: "one", 2: "two", 4: "four", 9: "nine" };
+
   var STATE_CLASS = {
     connecting: "unknown",
     playing: "ok",
@@ -28,6 +37,7 @@
     stalled: "degraded",
     reconnecting: "degraded",
     snapshot: "unknown",
+    idle: "unknown",
     offline: "failed",
     unsupported: "failed",
     session: "failed",
@@ -35,32 +45,278 @@
     error: "failed",
   };
 
+  var STATE_LABEL = {
+    connecting: "Connecting",
+    playing: "Live",
+    switching: "Switching",
+    stalled: "Stalled",
+    reconnecting: "Reconnecting",
+    snapshot: "Still picture",
+    idle: "Not started",
+    offline: "Offline",
+    unsupported: "Not supported",
+    session: "Signed out",
+    limit: "Limit reached",
+    error: "Not working",
+  };
+
   function ceilingForWidth(width) {
-    if (width < 704) return 1;
-    if (width < 1280) return 4;
-    return 9;
+    if (width < 704) return CEILING_PHONE;
+    if (width < 1280) return CEILING_TABLET;
+    return CEILING_DESKTOP;
   }
 
   function now() {
     return Date.now();
   }
 
-  function LivePlayer(root) {
+  function each(selector, root, callback) {
+    Array.prototype.forEach.call(root.querySelectorAll(selector), callback);
+  }
+
+  // LiveGrid owns the page-level state: which tiles are wanted, the viewport
+  // ceiling, the full-width tile and the ceiling sentence.
+  function LiveGrid(root) {
+    this.root = root; // [data-live-grid] on the grid page, null for one camera
+    this.players = [];
+    this.ceiling = ceilingForWidth(window.innerWidth || 0);
+    this.fullTile = null;
+    this.preFull = null;
+    this.note = document.querySelector("[data-live-ceiling-note]");
+  }
+
+  LiveGrid.prototype.add = function (player) {
+    this.players.push(player);
+  };
+
+  LiveGrid.prototype.init = function () {
+    this.players.forEach((player) => player.init());
+    this.sync(true);
+    window.addEventListener("resize", () => this.sync(false));
+    if (!this.root) return;
+    this.root.addEventListener("submit", (event) => {
+      var form = event.target;
+      if (!form || !form.matches("[data-live-tile-form]")) return;
+      event.preventDefault();
+      this.replaceTile(form);
+    });
+  };
+
+  // sync applies the ceiling in DOM order. On boot it starts the first tiles;
+  // on a resize it only ever stops the excess, never starts new players.
+  LiveGrid.prototype.sync = function (allowStart) {
+    this.ceiling = ceilingForWidth(window.innerWidth || 0);
+    if (this.fullTile) {
+      this.updateNote();
+      this.updateCounts();
+      return;
+    }
+    var allowed = 0;
+    this.players.forEach((player) => {
+      if (allowed < this.ceiling) {
+        allowed += 1;
+        player.want(allowStart);
+        return;
+      }
+      player.unwant();
+    });
+    this.updateNote();
+    this.updateCounts();
+  };
+
+  LiveGrid.prototype.startTile = function (player) {
+    if (!player || player.wanted) {
+      if (player) player.want(true);
+      return;
+    }
+    var wanted = this.players.filter((candidate) => candidate.wanted);
+    if (wanted.length >= this.ceiling) {
+      wanted[wanted.length - 1].unwant();
+    }
+    player.want(true);
+    this.updateNote();
+    this.updateCounts();
+  };
+
+  LiveGrid.prototype.playerForTile = function (tile) {
+    if (!tile) return null;
+    for (var index = 0; index < this.players.length; index += 1) {
+      if (this.players[index].tile === tile) return this.players[index];
+    }
+    return null;
+  };
+
+  LiveGrid.prototype.expand = function (tile) {
+    var player = this.playerForTile(tile);
+    if (!player || !this.root) {
+      if (player) this.startTile(player);
+      return;
+    }
+    this.preFull = this.players
+      .filter((candidate) => candidate.wanted)
+      .map((candidate) => candidate.tile);
+    this.fullTile = tile;
+    this.root.setAttribute("data-live-full", "true");
+    tile.setAttribute("data-tile-full", "true");
+    if (tile.scrollIntoView) tile.scrollIntoView({ block: "start" });
+    if (!player.wanted) {
+      var wanted = this.players.filter((candidate) => candidate.wanted);
+      if (wanted.length >= this.ceiling) {
+        wanted[wanted.length - 1].unwant();
+      }
+    }
+    player.setProfile("main");
+    player.want(true);
+    this.players.forEach((candidate) =>
+      candidate.showFullControls(candidate === player),
+    );
+    this.updateNote();
+    this.updateCounts();
+  };
+
+  LiveGrid.prototype.collapse = function () {
+    var tile = this.fullTile;
+    var player = this.playerForTile(tile);
+    var before = this.preFull || [];
+    this.clearFull();
+    if (player) player.setProfile("sub");
+    this.players.forEach((candidate) => {
+      if (before.indexOf(candidate.tile) >= 0) {
+        candidate.want(true);
+        return;
+      }
+      if (candidate !== player) candidate.unwant();
+    });
+    if (player && before.indexOf(player.tile) < 0) player.unwant();
+    this.updateNote();
+    this.updateCounts();
+  };
+
+  LiveGrid.prototype.clearFull = function () {
+    if (this.fullTile) this.fullTile.removeAttribute("data-tile-full");
+    if (this.root) this.root.removeAttribute("data-live-full");
+    this.fullTile = null;
+    this.preFull = null;
+    this.players.forEach((candidate) => candidate.showFullControls(false));
+  };
+
+  LiveGrid.prototype.updateNote = function () {
+    if (!this.note) return;
+    var total = this.players.length;
+    if (total <= this.ceiling) {
+      this.note.hidden = true;
+      this.note.textContent = "";
+      return;
+    }
+    var word = CEILING_WORDS[this.ceiling] || String(this.ceiling);
+    var cameras = this.ceiling === 1 ? "one camera" : word + " cameras";
+    var live =
+      this.ceiling === 1
+        ? "only the first tile is live"
+        : "only the first " + word + " tiles are live";
+    this.note.textContent =
+      "This screen plays " +
+      cameras +
+      " at a time, so " +
+      live +
+      ". Open a tile to watch it full width.";
+    this.note.hidden = false;
+  };
+
+  LiveGrid.prototype.updateCounts = function () {
+    var active = this.players.filter((player) => player.state === "playing").length;
+    var shown = Math.min(active, this.ceiling);
+    this.players.forEach((player) => {
+      player.root.setAttribute("data-device-ceiling", String(this.ceiling));
+      player.root.setAttribute("data-active-tiles", String(shown));
+    });
+  };
+
+  LiveGrid.prototype.mount = function (slot) {
+    var root = slot.querySelector("[data-live-player]");
+    if (!root) return null;
+    var player = new LivePlayer(root, this);
+    this.add(player);
+    player.init();
+    return player;
+  };
+
+  LiveGrid.prototype.replaceTile = function (form) {
+    var grid = this;
+    var slot = form.closest("[data-live-tile]");
+    if (!slot || !window.fetch || !window.FormData) {
+      form.submit();
+      return;
+    }
+    var button = form.querySelector("button[type='submit']");
+    if (button) button.disabled = true;
+    var failure = function () {
+      if (button) button.disabled = false;
+      form.submit();
+    };
+    window
+      .fetch(form.getAttribute("action"), {
+        method: "POST",
+        body: new URLSearchParams(new FormData(form)),
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: {
+          Accept: "text/html",
+          "HX-Request": "true",
+          "HX-Current-URL": window.location.href,
+          "X-Bittern-Tile": "1",
+        },
+      })
+      .then((response) => {
+        if (response.status === 401) {
+          window.location.href = response.headers.get("HX-Redirect") || "/ui/login";
+          return null;
+        }
+        if (!response.ok) throw new Error("tile " + response.status);
+        return response.text();
+      })
+      .then((html) => {
+        if (html === null) return;
+        var old = grid.playerForTile(slot);
+        if (grid.fullTile === slot) grid.clearFull();
+        if (old) {
+          old.destroy();
+          grid.players = grid.players.filter((player) => player !== old);
+        }
+        slot.innerHTML = html;
+        grid.mount(slot);
+        grid.sync(true);
+        // The form and its button are gone; move focus to the new content.
+        var heading = slot.querySelector("h2");
+        if (heading) heading.focus();
+      })
+      .catch(failure);
+  };
+
+  // LivePlayer is one island. It never reads another island's nodes.
+  function LivePlayer(root, grid) {
     this.root = root;
+    this.grid = grid;
+    this.tile = root.closest("[data-live-tile]");
     this.video = root.querySelector("video");
     this.snapshot = root.querySelector("[data-player-snapshot]");
+    this.idlePlaceholder = root.querySelector("[data-player-idle]");
     this.badge = root.querySelector("[data-player-badge]");
     this.title = root.querySelector("[data-player-title]");
     this.detail = root.querySelector("[data-player-detail]");
     this.retryButton = root.querySelector("[data-player-retry]");
-    this.headingBadge = document.querySelector("[data-player-state-label]");
+    this.headingBadge = root.querySelector("[data-player-state-label]");
+    this.expandButton = root.querySelector("[data-live-expand]");
+    this.collapseButton = root.querySelector("[data-live-collapse]");
     this.cameraName = root.getAttribute("data-camera-name") || "this camera";
     this.mediaBase = root.getAttribute("data-media-base") || "";
     this.snapshotURL = root.getAttribute("data-snapshot-url") || "";
     this.loginURL = root.getAttribute("data-login-url") || "/ui/login";
     this.profile = root.getAttribute("data-profile") || "main";
     this.profileName = root.getAttribute("data-profile-name") || "Main stream";
-    this.state = "connecting";
+    this.state = "idle";
+    this.wanted = false;
+    this.started = false;
     this.attempt = 0;
     this.ws = null;
     this.mediaSource = null;
@@ -90,49 +346,107 @@
       );
       return;
     }
-    this.retryButton.addEventListener("click", () => {
-      if (this.retryAction) {
-        this.retryAction();
-        return;
-      }
-      this.retry();
+    if (this.retryButton) {
+      this.retryButton.addEventListener("click", () => {
+        if (this.retryAction) {
+          this.retryAction();
+          return;
+        }
+        this.retry();
+      });
+    }
+    each("[data-profile-link]", this.root, (link) => {
+      link.addEventListener("click", (event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        this.setProfile(
+          link.getAttribute("data-profile-link"),
+          link.textContent.trim(),
+          link.getAttribute("href"),
+        );
+      });
     });
-    Array.prototype.forEach.call(
-      this.root.querySelectorAll("[data-profile-link]"),
-      (link) => {
-        link.addEventListener("click", (event) => {
-          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-          event.preventDefault();
-          this.switchProfile(
-            link.getAttribute("data-profile-link"),
-            link.getAttribute("href"),
-            link.textContent.trim(),
-          );
-        });
-      },
-    );
-    this.root.addEventListener("bittern-player-stop", () => this.stop());
-    this.applyCeiling();
-    window.addEventListener("resize", () => this.applyCeiling());
+    if (this.expandButton) {
+      this.expandButton.hidden = false;
+      this.expandButton.addEventListener("click", () => {
+        if (this.grid) this.grid.expand(this.tile);
+      });
+    }
+    if (this.collapseButton) {
+      this.collapseButton.addEventListener("click", () => {
+        if (this.grid) this.grid.collapse();
+      });
+    }
     this.watchdog = window.setInterval(() => this.tick(), 1000);
+  };
+
+  LivePlayer.prototype.showFullControls = function (full) {
+    var active = document.activeElement;
+    if (this.expandButton) this.expandButton.hidden = full;
+    if (this.collapseButton) this.collapseButton.hidden = !full;
+    // The control that was just pressed is now hidden. Keep keyboard focus on
+    // the matching control instead of dropping it to the document.
+    if (active === this.expandButton && full && this.collapseButton) {
+      this.collapseButton.focus();
+    }
+    if (active === this.collapseButton && !full && this.expandButton) {
+      this.expandButton.focus();
+    }
+  };
+
+  LivePlayer.prototype.want = function (start) {
+    this.wanted = true;
+    this.root.setAttribute("data-player-wanted", "true");
+    if (start || this.started) {
+      this.start();
+      return;
+    }
+    if (this.state === "idle") this.showIdle();
+  };
+
+  LivePlayer.prototype.unwant = function () {
+    this.wanted = false;
+    this.root.setAttribute("data-player-wanted", "false");
+    if (this.started) {
+      this.stopToIdle();
+      return;
+    }
+    this.showIdle();
+  };
+
+  LivePlayer.prototype.start = function () {
+    if (this.started) return;
+    this.started = true;
+    if (this.idlePlaceholder) this.idlePlaceholder.hidden = true;
     this.startMSE();
   };
 
-  LivePlayer.prototype.applyCeiling = function () {
-    var ceiling = ceilingForWidth(window.innerWidth || 0);
-    this.root.setAttribute("data-device-ceiling", String(ceiling));
-    var players = Array.prototype.slice.call(
-      document.querySelectorAll("[data-live-player]"),
+  LivePlayer.prototype.stopToIdle = function () {
+    this.started = false;
+    this.clearTimers();
+    this.closeSocket();
+    this.clearVideo();
+    this.action("", null);
+    this.showIdle();
+  };
+
+  LivePlayer.prototype.showIdle = function () {
+    this.clearTimers();
+    this.closeSocket();
+    this.clearVideo();
+    if (this.video) this.video.hidden = true;
+    if (this.snapshot) this.snapshot.hidden = true;
+    if (this.idlePlaceholder) this.idlePlaceholder.hidden = false;
+    this.setState(
+      "idle",
+      "Not started on this screen",
+      this.wanted
+        ? "This camera is not started yet. Start it here, or open the tile full width."
+        : "This screen plays a limited number of cameras at a time. Start this camera here, or open this tile full width.",
     );
-    var active = 0;
-    players.forEach((player) => {
-      var playing = player.getAttribute("data-player-active") === "true";
-      if (playing) active += 1;
-      if (active > ceiling) {
-        player.dispatchEvent(new CustomEvent("bittern-player-stop"));
-      }
+    this.action("Start this camera", () => {
+      if (this.grid) this.grid.startTile(this);
     });
-    this.refreshActiveCount();
   };
 
   LivePlayer.prototype.setState = function (name, title, detail) {
@@ -140,34 +454,20 @@
     this.root.setAttribute("data-player-state", name);
     this.root.setAttribute("data-player-active", name === "playing" ? "true" : "false");
     var stateClass = STATE_CLASS[name] || "unknown";
+    var label = STATE_LABEL[name] || name;
     if (this.badge) {
-      this.badge.textContent = name.charAt(0).toUpperCase() + name.slice(1);
+      this.badge.textContent = label;
       this.badge.className = "state-badge state-" + stateClass;
     }
     if (this.headingBadge) {
-      this.headingBadge.textContent = name.charAt(0).toUpperCase() + name.slice(1);
+      this.headingBadge.textContent = label;
       this.headingBadge.className = "state-badge state-" + stateClass;
     }
     if (this.title) this.title.textContent = title;
     if (this.detail) this.detail.textContent = detail;
-    this.refreshActiveCount();
+    if (this.grid) this.grid.updateCounts();
     this.root.dispatchEvent(
       new CustomEvent("bittern-player-state", { detail: { state: name } }),
-    );
-  };
-
-  LivePlayer.prototype.refreshActiveCount = function () {
-    var active = 0;
-    Array.prototype.forEach.call(
-      document.querySelectorAll("[data-live-player]"),
-      (player) => {
-        if (player.getAttribute("data-player-active") === "true") active += 1;
-      },
-    );
-    var ceiling = Number(this.root.getAttribute("data-device-ceiling") || 9);
-    this.root.setAttribute(
-      "data-active-tiles",
-      String(Math.min(active, ceiling)),
     );
   };
 
@@ -182,6 +482,7 @@
   LivePlayer.prototype.startMSE = function () {
     this.clearTimers();
     this.closeSocket();
+    if (this.idlePlaceholder) this.idlePlaceholder.hidden = true;
     if (!window.MediaSource && typeof window.ManagedMediaSource !== "function") {
       this.startHLS();
       return;
@@ -255,12 +556,7 @@
 
   LivePlayer.prototype.connectSocket = function () {
     var scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
-    var url =
-      scheme +
-      "//" +
-      window.location.host +
-      this.mediaBase +
-      "/ws";
+    var url = scheme + "//" + window.location.host + this.mediaBase + "/ws";
     var socket;
     try {
       socket = new WebSocket(url);
@@ -482,6 +778,7 @@
     this.lastMediaAt = now();
     this.video.hidden = false;
     if (this.snapshot) this.snapshot.hidden = true;
+    if (this.idlePlaceholder) this.idlePlaceholder.hidden = true;
     this.setState(
       "connecting",
       "Connecting to " + this.cameraName,
@@ -540,13 +837,13 @@
     this.clearVideo();
     this.root.setAttribute("data-player-active", "false");
     if (this.video) this.video.hidden = true;
+    if (this.idlePlaceholder) this.idlePlaceholder.hidden = true;
     if (this.snapshot) {
       this.snapshot.hidden = false;
       this.snapshot.onerror = () => {
         this.snapshot.hidden = true;
       };
-      this.snapshot.src =
-        this.snapshotURL + "?at=" + encodeURIComponent(String(now()));
+      this.snapshot.src = this.snapshotURL + "?at=" + encodeURIComponent(String(now()));
     }
     this.setState(state, title, detail);
     this.action("Try again", () => this.retry());
@@ -558,10 +855,11 @@
     this.attempt = 0;
     this.hlsStarted = false;
     this.retryAction = null;
+    this.started = true;
     this.startMSE();
   };
 
-  LivePlayer.prototype.switchProfile = function (profile, url, label) {
+  LivePlayer.prototype.setProfile = function (profile, label, url) {
     if (!profile || profile === this.profile) return;
     this.clearTimers();
     this.closeSocket();
@@ -579,19 +877,17 @@
       "/" + encodeURIComponent(profile) + "/snapshot.jpg",
     );
     this.root.setAttribute("data-snapshot-url", this.snapshotURL);
-    Array.prototype.forEach.call(
-      this.root.querySelectorAll("[data-profile-link]"),
-      (link) => {
-        if (link.getAttribute("data-profile-link") === profile) {
-          link.setAttribute("aria-current", "true");
-        } else {
-          link.removeAttribute("aria-current");
-        }
-      },
-    );
+    each("[data-profile-link]", this.root, (link) => {
+      if (link.getAttribute("data-profile-link") === profile) {
+        link.setAttribute("aria-current", "true");
+      } else {
+        link.removeAttribute("aria-current");
+      }
+    });
     if (url && window.history && window.history.replaceState) {
       window.history.replaceState(null, "", url);
     }
+    if (!this.started || !this.wanted) return;
     this.attempt = 0;
     this.setState(
       "switching",
@@ -643,16 +939,15 @@
     }
   };
 
-  LivePlayer.prototype.stop = function () {
+  LivePlayer.prototype.destroy = function () {
     this.clearTimers();
+    if (this.watchdog) window.clearInterval(this.watchdog);
+    this.watchdog = null;
     this.closeSocket();
     this.clearVideo();
-    this.action("", null);
-    this.setState(
-      "offline",
-      "This camera stopped",
-      "Another player took the device's active tile, so Bittern stopped this one.",
-    );
+    this.wanted = false;
+    this.started = false;
+    this.state = "idle";
   };
 
   LivePlayer.prototype.clearRetryTimer = function () {
@@ -671,10 +966,18 @@
   };
 
   function boot() {
-    Array.prototype.forEach.call(
-      document.querySelectorAll("[data-live-player]"),
-      (root) => new LivePlayer(root).init(),
-    );
+    // A preset change reloads the page. Open the layout control again so the
+    // browser-restored focus lands on a visible preset button, not a hidden one.
+    if (window.location.hash === "#live-layout") {
+      var disclosure = document.querySelector(".live-layout-disclosure");
+      if (disclosure) disclosure.open = true;
+    }
+    var grid = new LiveGrid(document.querySelector("[data-live-grid]"));
+    each("[data-live-player]", document, (root) => {
+      var player = new LivePlayer(root, grid);
+      grid.add(player);
+    });
+    grid.init();
   }
 
   if (document.readyState === "loading") {

@@ -8,7 +8,10 @@ harness needs no TAP device, bridge, root network setup, or Docker socket on the
 Status: executed on a KVM-enabled container on 2026-11-14 and repeated on 2026-11-15. All four
 harness tests, the Frigate fixture smoke test, the firewall probe, the firstboot scenarios, and the
 BIT-008 adoption scenario pass on 2026-11-15. The firstboot live-view phase passed on 2026-11-26:
-the authenticated MSE player reached playing at 640x360 against the virtual camera. The firstboot and adoption scenarios with the
+the authenticated MSE player reached playing at 640x360 against the virtual camera. The grid slice
+passed on 2026-11-26 with two synthetic cameras in a four-tile layout: both tiles reached playing
+at 640x360 and the screenshot is `build/qemu/logs/firstboot-20261126-135843/live-view.png`. The
+firstboot and adoption scenarios with the
 setup-token QR phase passed again on 2026-11-17. The measured cold-boot, snapshot, and restore
 times are in [the harness note](../../docs/notes/2026-11-14-qemu-harness.md). The `firstboot`
 scenario also passes with the camera link down through first boot and apply: generation 2, Frigate
@@ -46,6 +49,12 @@ it is blank, so the non-interactive storage setup can mount it. The camera guest
 plus the isolated `cam0` NIC. The RTSP fixture binds on the camera's `cam0` address and on its
 management NIC; the host-side test forward is bound to `127.0.0.1` only.
 
+One camera guest serves two synthetic cameras: `cam0` on its `cam0` address, and `cam1` on a
+macvlan link with its own hardware address. The product allows one camera per hardware address, so
+the macvlan gives the second camera its own identity without a second guest or NIC. Both streams
+come from one mediamtx process and two ffmpeg publishers. The fixture proves two concurrent
+authenticated media sessions and two player islands; it is not a camera compatibility test.
+
 ## Requirements
 
 Host packages:
@@ -79,7 +88,7 @@ python3 tests/qemu/run.py status
 python3 tests/qemu/run.py stop
 python3 tests/qemu/run.py stop --all    # orphaned guests whose worktree is gone
 python3 tests/qemu/run.py firewall  # load the renderer rules and probe the ports
-python3 tests/qemu/run.py firstboot # first boot, TLS wizard, apply, one camera, then stop
+python3 tests/qemu/run.py firstboot # first boot, TLS wizard, apply, two cameras, live grid, then stop
 python3 tests/qemu/run.py firstboot --stock-names  # first boot from udev stock NIC names
 python3 tests/qemu/run.py firstboot --clean-network  # no network files, empty resolver, external DNS black-holed
 python3 tests/qemu/run.py adoption # adopt a DHCP camera through discovery, credentials and a reservation
@@ -112,9 +121,11 @@ that names the field and contains the value. The visible copy is free to change.
 | `data-camera-sources`, `data-discovery-layer`, `data-discovery-layer-state`, `data-discovery-detail`, `data-discovery-state` | discovery evidence and page state | camera step |
 | `data-network-lan-address`, `data-network-lan-carrier`, `data-network-cam-address`, `data-network-cam-carrier` | live network values | network step |
 | `data-storage-path`, `data-storage-present`, `data-storage-free`, `data-storage-reserve` | live storage values | storage step |
-| `data-live-player` | `true` | live page player island |
-| `data-camera-id` | camera ID | live page player island |
-| `data-player-state` | `connecting`, `playing`, `stalled`, `reconnecting`, `offline`, `unsupported`, `session` | live player state |
+| `data-live-tile` | tile index | live grid tile |
+| `data-live-preset` | `auto`, `1`, `2`, `4`, `9` | live grid preset picker |
+| `data-live-player` | `true` | live page or tile player island |
+| `data-camera-id` | camera ID | live page or tile player island |
+| `data-player-state` | `connecting`, `playing`, `stalled`, `reconnecting`, `idle`, `offline`, `unsupported`, `session` | live player state |
 
 `data_values(page, "data-camera-address")` in [run.py](run.py) returns every value for one hook.
 `require_data(page, attribute, expected, context)` fails with the missing selector and the values it

@@ -189,6 +189,14 @@ var uiRoutes = []route{
 		Auth: true, Responsive: true, Status: http.StatusOK, Handler: routeHandler((*handler).showLiveCamera),
 	},
 	{
+		Name: "live-layout", Method: http.MethodPost, Pattern: "/ui/live/layout",
+		Auth: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).setLiveLayout),
+	},
+	{
+		Name: "live-tile", Method: http.MethodPost, Pattern: "/ui/live/tile",
+		Auth: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).setLiveTile),
+	},
+	{
 		Name: "live-status", Method: http.MethodGet, Pattern: "/ui/live/{camera}/status",
 		Template: "live-status", Auth: true, Status: http.StatusOK,
 		Handler: routeHandler((*handler).showLiveStatus),

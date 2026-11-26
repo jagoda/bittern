@@ -92,16 +92,23 @@ decoded, then captures and measures that state as `cameras-picture-taken-<width>
 
 ## Live player checks
 
-`tests/browser/live.mjs` runs after the route walk on the same daemon. It stubs `WebSocket`,
-`MediaSource` and the media element so every player state can be walked without a camera or go2rtc:
-connecting, playing, stalled, reconnecting, offline, unsupported, session ended and switching. It
-also checks the 1/4/9 viewport ceiling at 360, 390, 1280 and 1920, and in the playing state it swaps
-the sibling camera-state fragment and asserts the player, video element and state survive. Every
-case asserts the player and video are outside an `hx-*` ancestor.
+`tests/browser/live.mjs` runs after the route walk on its own daemon with a fixed four-camera
+inventory. It stubs `WebSocket`, `MediaSource` and the media element so every player state can be
+walked without a camera or go2rtc: connecting, playing, stalled, reconnecting, offline, unsupported,
+session ended and switching. It also checks the 1/4/9 viewport ceiling at 360, 390, 1280 and 1920,
+and in the playing state it swaps the sibling camera-state fragment and asserts the player, video
+element and state survive. Every case asserts the player and video are outside an `hx-*` ancestor.
+
+Six grid checks follow the state walk: switching all three presets, assigning a camera to an empty
+tile while the other tile keeps playing, a status poll with an open picker and four running players,
+one camera failing while three keep playing, full width to main and back to sub with the other
+players alive, and a phone clamping a four-tile layout to one live tile with the ceiling sentence.
+The full-width check writes `build/ui-screenshots/live-full-width-1280x800.png`.
 
 `tests/browser/qemu-live.mjs` is the host-side QEMU assertion. It signs in to the forwarded
-appliance, opens the applied virtual camera, waits for the real MSE player to report playing with a
-non-zero video size and time, and writes `build/qemu/logs/<run>/live-view.png`.
+appliance, opens the authenticated live grid, waits for the four stored tiles and for both applied
+virtual cameras to report playing with a non-zero video size and time, and writes
+`build/qemu/logs/<run>/live-view.png`.
 
 ## What is checked
 
@@ -115,11 +122,13 @@ The viewport list is provisional under [OQ-26](../../docs/open-questions.md) and
 | desktop | 1280 by 800 |
 | desktop-wide | 1920 by 1080 |
 
-The manifest has 37 screens from 20 routes, so each run checks 148 route-width screens and writes
-148 default full-page screenshots, plus an `-expanded` copy for each screen with a closed
+The manifest has 38 screens from 20 routes, so each run checks 152 route-width screens and writes
+152 default full-page screenshots, plus an `-expanded` copy for each screen with a closed
 disclosure. Fifteen status variants cover the five overall states and the update card: factory
 baseline with an offered update, up to date, update available, installing, failed, rolled back,
-offline, rate limited, and a failed check. The `live-refresh` variant opens Technical details, focuses
+offline, rate limited, and a failed check. The `live-nine-tiles` variant sets the saved layout
+cookie and reloads, so the nine-tile grid and its empty-tile pickers appear at every width. The
+`live-refresh` variant opens Technical details, focuses
 its summary, marks a table scroll region, and waits for two real update-card polls. It then aborts
 the fragment request, asserts the disclosure, focus, scroll, and card content are unchanged, and
 writes `status-live-reconnect-<width>x<height>.png` with the reconnecting notice visible. The
@@ -173,7 +182,7 @@ the floor, so a control that matches both a 44 role and the floor gets 44. The s
 A failure names the role and the measured size, for example `a "Refresh now" is 99x32, below the
 44x44 navigation target`. A control in the floor role between 24 and 43 warns instead, so an inline
 prose link stays visible as advisory without failing the run. The current templates have no inline
-prose links, so a clean run reports 0 failures and 0 warnings across the 136 route-width screens; the
+prose links, so a clean run reports 0 failures and 0 warnings across the 152 route-width screens; the
 state links and every back link are in a 44 role.
 
 `routes.json` covers every `Responsive` row in `agent/internal/ui/routes.go`, plus all five status

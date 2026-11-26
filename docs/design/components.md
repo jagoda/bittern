@@ -700,26 +700,33 @@ Current evidence for the list:
 - Purpose: show one camera's live stream and its connection state without letting a live update
   replace the video element.
 - Anatomy, in order: the stable `[data-live-player]` node with the camera ID, profile and Bittern
-  media base; a media area with the `<video>` and the snapshot image; a status region with a badge,
-  a title, a sentence and one retry action; a profile control that names the playing profile; the
-  one-stream hint. A sibling camera-state line may poll and is outside the player node.
-- Variants: MSE, HLS, snapshot fallback, and no-JavaScript snapshot.
-- States: connecting, playing, switching, stalled, reconnecting, offline, unsupported, session
-  ended, device limit and player error.
+  media base; a media area with the `<video>`, the snapshot image and the idle placeholder; a status
+  region with a badge, a title, a sentence and one retry action; a profile control that names the
+  playing profile; the one-stream hint. A sibling camera-state line may poll and is outside the
+  player node. A grid tile adds a heading, an in-place full-width control, a noscript full-width
+  link and a Change camera picker inside the island.
+- Variants: MSE, HLS, snapshot fallback, no-JavaScript snapshot, and a grid tile that plays the sub
+  profile until it opens full width and switches to main.
+- States: connecting, playing, switching, stalled, reconnecting, idle (not started on this screen),
+  offline, unsupported, session ended, device limit and player error.
 - Tokens: `--color-surface`, `--color-text`, `--color-text-muted`, `--color-border-subtle`,
   `--color-border-control`, `--color-action`, `--color-on-action`, `--radius-surface`,
   `--radius-control`, `--space-8`, `--space-12`, `--space-16`, `--space-24`, `--touch-target`,
   `--type-body`, `--type-meta`, `--type-label`.
 - Do: render the player once. Keep the status sentence and the next action outside the video. Keep
   the current profile on a bordered control, not a second filled button. Expose the viewport
-  ceiling and active count as data attributes so the grid can use the same component.
+  ceiling and active count as data attributes. Give every grid tile its own island; the grid owns
+  the ceiling, the full-width selection and the one-tile replacement, never a shared player or a
+  shared media source.
 - Don't: put the player or video inside an element with `hx-get`, `hx-post`, `hx-target`, `hx-swap`
   or `hx-trigger`; use `hx-preserve` as the isolation mechanism; put a stream name, RTSP URL,
-  camera address or credential in the DOM; use a spinner with no state sentence.
+  camera address or credential in the DOM; use a spinner with no state sentence; render two cameras
+  in one island or tear down every island to replace or remove one tile.
 - Accessibility: one labelled video per island, a polite status region, a retry control with a
   verb, profile links that work without JavaScript, and visible focus on every control.
 - Check: Q5, Q6, Q8 and Q11 in [the professional test](professional-test.md); the template guard
-  and runtime `closest()` check; the four-width screenshots; the browser state walk.
+  and runtime `closest()` check; the four-width screenshots; the browser state walk; the grid
+  preset, assignment, poll, failure, full-width and ceiling checks.
 
 ## Component checks
 

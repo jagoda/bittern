@@ -43,7 +43,21 @@ cameras:
     address: 10.77.0.20
     rtsp_port: 554
     rtsp_path: /stream1
-    credentials_ref: cameras.front_door.rtsp_url
+  - id: driveway
+    name: Driveway
+    address: 10.77.0.21
+    rtsp_port: 554
+    rtsp_path: /stream2
+  - id: side_gate
+    name: Side gate
+    address: 10.77.0.22
+    rtsp_port: 554
+    rtsp_path: /stream3
+  - id: back_garden
+    name: Back garden
+    address: 10.77.0.23
+    rtsp_port: 554
+    rtsp_path: /stream4
 
 storage:
   recording:
@@ -66,6 +80,10 @@ identity:
 setup_token: ${SETUP_TOKEN}
 tls: {}
 `;
+
+// The live view checks get their own daemon with the same fixed four-camera
+// inventory, so the grid checks do not depend on the route walk's auth state.
+export const LIVE_APPLIANCE_YAML = APPLIANCE_YAML;
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -102,7 +120,7 @@ async function waitForServer(baseURL, child, logs) {
   throw new Error(`bitternd did not answer on ${baseURL}: ${lastError}\n${logs.join("")}`);
 }
 
-export async function startBitternd({ binary }) {
+export async function startBitternd({ binary, applianceYAML = APPLIANCE_YAML }) {
   if (!existsSync(binary)) {
     throw new Error(
       `bitternd binary not found at ${binary}; run: make ui-browser-check`,
@@ -115,7 +133,7 @@ export async function startBitternd({ binary }) {
   const secretsPath = path.join(root, "secrets.yaml");
   const authPath = path.join(stateRoot, "auth.json");
   await mkdir(stateRoot, { recursive: true });
-  await writeFile(configPath, APPLIANCE_YAML, { mode: 0o644 });
+  await writeFile(configPath, applianceYAML, { mode: 0o644 });
   await writeFile(secretsPath, SECRETS_YAML, { mode: 0o600 });
 
   const apiPort = await freePort();

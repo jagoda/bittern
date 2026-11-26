@@ -344,20 +344,145 @@ func TestPartialAuthRedirectKeepsLoginOutOfTheFragment(t *testing.T) {
 	}
 }
 
-func TestLiveLimiterEnforcesHardMaximum(t *testing.T) {
+func TestLiveLimiterSharesTheMaximumAcrossSocketsAndHLSSessions(t *testing.T) {
 	limiter := newLiveLimiter(2)
-	if !limiter.acquire("session") || !limiter.acquire("session") {
+	if !limiter.acquireSocket("session") || !limiter.acquireSocket("session") {
 		t.Fatal("limiter refused a connection below its maximum")
 	}
-	if limiter.acquire("session") {
-		t.Fatal("limiter allowed a connection above its maximum")
+	if limiter.acquireSocket("session") {
+		t.Fatal("limiter allowed a socket above its maximum")
 	}
-	limiter.release("session")
-	if !limiter.acquire("session") {
-		t.Fatal("limiter did not release a slot")
+	if limiter.touchHLS("session", "AbCd1234") {
+		t.Fatal("limiter allowed an HLS session above its maximum")
 	}
-	if !limiter.acquire("other") {
+	limiter.releaseSocket("session")
+	if !limiter.touchHLS("session", "AbCd1234") {
+		t.Fatal("limiter did not share a freed slot with an HLS session")
+	}
+	if !limiter.acquireSocket("other") {
 		t.Fatal("limiter mixed two sessions")
+	}
+}
+
+func TestLiveLimiterExpiresAnIdleHLSSession(t *testing.T) {
+	clock := time.Unix(0, 0)
+	limiter := newLiveLimiter(1)
+	limiter.now = func() time.Time { return clock }
+	if !limiter.touchHLS("session", "AbCd1234") {
+		t.Fatal("limiter refused the first HLS session")
+	}
+	if limiter.touchHLS("session", "AbCd1235") {
+		t.Fatal("limiter allowed a second HLS session above the maximum")
+	}
+	clock = clock.Add(liveHLSIdleTTL + time.Second)
+	if !limiter.touchHLS("session", "AbCd1235") {
+		t.Fatal("limiter did not free an idle HLS session")
+	}
+	if limiter.touchHLS("session", "AbCd1236") {
+		t.Fatal("limiter allowed two HLS sessions after the idle one expired")
+	}
+}
+
+func TestLiveMediaProxyRefusesMoreThanTheHardMaximumOfConcurrentSessions(t *testing.T) {
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("upstream is not a hijacker")
+			return
+		}
+		conn, buffer, err := hijacker.Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		key := r.Header.Get("Sec-WebSocket-Key")
+		_, _ = fmt.Fprintf(buffer, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", websocketAccept(key))
+		_ = buffer.Flush()
+		<-release
+	}))
+	base, _ := liveProxyServer(t, upstream.URL)
+	parsed, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef"))
+	open := func() (net.Conn, *http.Response) {
+		conn, err := net.Dial("tcp", parsed.Host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = fmt.Fprintf(conn,
+			"GET /ui/live/media/front_door/main/ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n",
+			parsed.Host, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader := bufio.NewReader(conn)
+		response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return conn, response
+	}
+	connections := make([]net.Conn, 0, liveMaxConnections)
+	defer func() {
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+		close(release)
+		upstream.Close()
+	}()
+	for index := 0; index < liveMaxConnections; index++ {
+		conn, response := open()
+		connections = append(connections, conn)
+		if response.StatusCode != http.StatusSwitchingProtocols {
+			t.Fatalf("session %d status = %d, want 101", index+1, response.StatusCode)
+		}
+		if response.Header.Get("Sec-WebSocket-Accept") != websocketAccept(key) {
+			t.Fatalf("session %d handshake accept = %q", index+1, response.Header.Get("Sec-WebSocket-Accept"))
+		}
+	}
+	refused, response := open()
+	defer refused.Close()
+	if response.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("session above the maximum status = %d, want 429", response.StatusCode)
+	}
+	body, _ := io.ReadAll(response.Body)
+	if !strings.Contains(string(body), "maximum number of live streams") {
+		t.Fatalf("refusal body = %q", body)
+	}
+}
+
+func TestLiveMediaProxyRefusesMoreThanNineConcurrentHLSSessions(t *testing.T) {
+	var hits int32
+	upstream := liveTestUpstream(t, &hits, nil, nil, nil, nil)
+	base, client := liveProxyServer(t, upstream.URL)
+	lastID := ""
+	for index := 0; index < liveMaxConnections; index++ {
+		lastID = fmt.Sprintf("AbCd%04d", index)
+		response, err := client.Get(base + "/ui/live/media/front_door/main/hls/playlist.m3u8?id=" + lastID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("HLS session %d status = %d", index+1, response.StatusCode)
+		}
+	}
+	response, err := client.Get(base + "/ui/live/media/front_door/main/hls/playlist.m3u8?id=AbCd9999")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("HLS session above the maximum status = %d, want 429", response.StatusCode)
+	}
+	if hits != int32(liveMaxConnections) {
+		t.Fatalf("upstream hits = %d, want %d", hits, liveMaxConnections)
 	}
 }
 

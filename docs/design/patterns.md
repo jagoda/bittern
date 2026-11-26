@@ -203,27 +203,34 @@ limitation are recorded in
 
 ## Live view
 
-**Job.** Show one camera clearly, say whether the stream is live, and recover or name the exact
+**Job.** Show the cameras clearly, say whether each stream is live, and recover or name the exact
 failure without reloading the appliance.
 
-**Primary action.** While the stream plays there is no filled action. The profile control is a
-secondary choice. When the stream cannot start, the player's one retry action is the next step, and
-the snapshot remains visible.
+**Primary action.** While the streams play there is no filled action. The profile control is a
+secondary choice. When a stream cannot start, the player's one retry action is the next step, and
+the snapshot remains visible. The layout preset and the tile camera picker are secondary controls.
 
 **Steps.**
 
-1. Read the camera name, the live state and the sentence that says what is happening.
-2. Watch the stream, or read the snapshot when the stream cannot start.
-3. Switch between the main and sub profiles; the player says which one is playing.
-4. If the stream stalls or drops, read the bounded reconnect attempt and wait, or take the named
-   next action.
+1. Read the grid or the single camera: each camera name, its live state and the sentence that says
+   what is happening.
+2. Watch a stream, or read the snapshot when the stream cannot start.
+3. Choose a layout of one, two, four or nine tiles, or leave it automatic. Bittern remembers the
+   choice on this device only.
+4. Assign a camera to an empty or replaced tile, or clear a tile.
+5. Open a tile full width in place and return to the grid without losing the other streams.
+6. Switch between the main and sub profiles on the single-camera view; the player says which one is
+   playing.
+7. If a stream stalls or drops, read the bounded reconnect attempt and wait, or take the named next
+   action.
 
 **Components.** Page shell, page title block, card and plain section, status badge, live player
-island, button, link, camera picker.
+island, live grid tile, camera picker, preset picker, button, link.
 
-**States.** No cameras, one camera, several cameras, connecting, playing, switching, stalled,
-reconnecting, offline, unsupported codec, session ended, device limit, no JavaScript, camera removed,
-camera disabled, snapshot available and snapshot unavailable.
+**States.** No cameras, one camera, several cameras, a grid with empty tiles, connecting, playing,
+switching, stalled, reconnecting, offline, unsupported codec, session ended, device limit, a layout
+above the device ceiling, not started on this screen, no JavaScript, camera removed, camera
+disabled, snapshot available and snapshot unavailable.
 
 **Rules.**
 
@@ -235,11 +242,15 @@ camera disabled, snapshot available and snapshot unavailable.
 | LV4 | Recovery is bounded and visible. The page names the attempt and the wait, then falls back to HLS or the snapshot. | Q5; the player state walk and the proxy tests. |
 | LV5 | The profile control names the playing profile. A camera with one configured stream says so rather than offering a false quality choice. | Q9; template read and the profile switch test. |
 | LV6 | The browser receives no upstream URL, camera address, stream name or credential. | Q10; the live template scan and the proxy tests. |
-| LV7 | The viewport ceiling is enforced before a connection opens, and the active count is exposed for the later grid. | Q4 and Q8; the browser ceiling checks at 360, 390, 1280 and 1920. |
+| LV7 | The viewport ceiling is enforced before a connection opens, and the active count is exposed. | Q4 and Q8; the browser ceiling checks at 360, 390, 1280 and 1920. |
 | LV8 | Without JavaScript the page still shows the latest snapshot and a named next action. | Q5; the no-JavaScript template path. |
+| LV9 | The layout is data: a preset is a tile count and a per-tile camera assignment, resolved by the server from a first-party per-device cookie. A new preset is a count, not a template. | Q1; the layout, cookie and preset tests; the preset screenshots. |
+| LV10 | A stored layout above the device ceiling starts only the tiles the ceiling allows, says so in one sentence, and never shows an error. The proxy enforces its own hard maximum. | Q5; the phone ceiling check and the proxy session-limit test. |
+| LV11 | Each tile is its own player island. One failing camera names itself in its own tile while the others keep playing, and replacing one tile replaces only that island. | Q5 and Q11; the failure and assignment checks; the template guard. |
+| LV12 | Full width selects one tile in place, switches it to the main profile and back to sub, and the other streams keep playing. | Q11 to Q16; the full-width check. |
+| LV13 | A poll during playback leaves every player, every open picker and the chosen preset alone. | Q6; the grid poll check and the player isolation guard. |
 
-The single-camera slice implements LV1 to LV8. The grid, the per-device layout cookie and the full
-saved-layout clamp remain BIT-023 work.
+Slice 1a implements LV1 to LV8. Slice 1b implements LV9 to LV13.
 
 ## Managed-device list and detail
 

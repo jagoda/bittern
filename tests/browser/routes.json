@@ -103,6 +103,21 @@
     "flow": "auth"
   },
   {
+    "route": "live",
+    "path": "/ui/live",
+    "flow": "auth",
+    "variant": "nine-tiles",
+    "actions": [
+      {
+        "action": "cookie",
+        "name": "bittern_live_layout",
+        "value": "v=1&p=9&t=front_door&t=driveway&t=side_gate&t=back_garden",
+        "path": "/ui/live",
+        "selector": "body"
+      }
+    ]
+  },
+  {
     "route": "status",
     "path": "/ui/status",
     "flow": "auth",

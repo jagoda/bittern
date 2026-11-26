@@ -31,7 +31,8 @@
       "mode": "qemu-dgram-unix",
       "subnet": "10.77.0.0/24",
       "appliance_address": "10.77.0.1",
-      "camera_address": "10.77.0.20"
+      "camera_address": "10.77.0.20",
+      "second_camera_address": "10.77.0.21"
     }
   },
   "camera": {
@@ -45,7 +46,9 @@
       "url": "https://github.com/bluenviron/mediamtx/releases/download/v1.21.3/mediamtx_v1.21.3_linux_amd64.tar.gz",
       "sha256": "0a2ea7eba96023631efa1bea7804823a9145b043b6646a8a05798d4ac24ed635",
       "license": "MIT"
-    }
+    },
+    "second_rtsp_path": "/cam1",
+    "second_mac": "52:54:00:be:00:05"
   },
   "timeouts_seconds": {
     "kvm_boot": 180,

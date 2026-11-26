@@ -334,9 +334,12 @@ def render_cloud_init(config: dict[str, Any], ssh_public_key: str) -> None:
             "__MGMT_MAC__": macs["camera_mgmt"],
             "__CAM_MAC__": macs["camera_cam"],
             "__CAM_ADDR__": cam["camera_address"],
+            "__CAM_ADDR_2__": cam["second_camera_address"],
+            "__CAM_MAC_2__": config["camera"]["second_mac"],
             "__CAM_RES__": config["camera"]["resolution"],
             "__CAM_FPS__": str(config["camera"]["fps"]),
             "__CAM_PATH__": config["camera"]["rtsp_path"],
+            "__CAM_PATH_2__": config["camera"]["second_rtsp_path"],
             "__MEDIAMTX_URL__": config["camera"]["mediamtx"]["url"],
             "__MEDIAMTX_SHA256__": config["camera"]["mediamtx"]["sha256"],
         }
@@ -1181,6 +1184,12 @@ def wait_ready(
                 f"{config['camera']['rtsp_path']}",
                 timeout=10,
             )
+            appliance.ssh(
+                "bittern-rtsp-probe "
+                f"{config['network']['cam']['second_camera_address']} 8554 "
+                f"{config['camera']['second_rtsp_path']}",
+                timeout=10,
+            )
             return
         except (HarnessError, subprocess.TimeoutExpired) as exc:
             last_error = str(exc)
@@ -1921,8 +1930,10 @@ class FirstbootScenario:
         self.setup_url = ""
         self.admin_password = ""
         self.camera_address = config["network"]["cam"]["camera_address"]
+        self.second_camera_address = config["network"]["cam"]["second_camera_address"]
         self.camera_port = 8554
         self.camera_path = config["camera"]["rtsp_path"]
+        self.second_camera_path = config["camera"]["second_rtsp_path"]
         self.camera_url = f"rtsp://{self.camera_address}:{self.camera_port}{self.camera_path}"
         self.marker: dict[str, Any] = {}
         self.rendered_tree: list[str] = []
@@ -2781,9 +2792,9 @@ class FirstbootScenario:
         sections = document.get("sections", {})
         frigate = sections.get("frigate", {})
         render = sections.get("render", {})
-        if frigate.get("camera_count") != 1:
+        if frigate.get("camera_count") != 2:
             raise HarnessError(
-                f"the post-reboot status does not report one camera: {json.dumps(frigate, sort_keys=True)}"
+                f"the post-reboot status does not report two cameras: {json.dumps(frigate, sort_keys=True)}"
             )
         image = frigate.get("image", {})
         if image.get("state") != "ready" or image.get("digest") != FRIGATE_IMAGE_DIGEST:
@@ -3169,6 +3180,16 @@ class FirstbootScenario:
                 "credentials_ref": "",
             },
         )
+        client.post(
+            "/ui/wizard/camera",
+            {
+                "name": "Virtual camera two",
+                "address": self.second_camera_address,
+                "rtsp_port": str(self.camera_port),
+                "rtsp_path": self.second_camera_path,
+                "credentials_ref": "",
+            },
+        )
         body = client.get_page("/ui/wizard/review")
         require_data(body, "data-step-name", "review", "review page")
         require_data(body, "data-camera-address", self.camera_address, "review page")
@@ -3399,9 +3420,46 @@ class FirstbootScenario:
         page = client.get_page("/ui/live/camera_1")
         require_data(page, "data-live-player", "true", "live page")
         require_data(page, "data-camera-id", "camera_1", "live page")
-        for forbidden in ("rtsp://", "camera_1_main", "127.0.0.1:1984", self.camera_address):
+        for forbidden in (
+            "rtsp://",
+            "camera_1_main",
+            "camera_2_main",
+            "127.0.0.1:1984",
+            self.camera_address,
+            self.second_camera_address,
+        ):
             if forbidden in page:
                 raise HarnessError(f"the live page leaked {forbidden!r}")
+
+        # The grid: both cameras in a four-tile layout, resolved by the server
+        # from the per-device layout cookie the POST sets.
+        client.get_page("/ui/live")
+        client.post("/ui/live/layout", {"preset": "4"})
+        grid = client.get_page("/ui/live")
+        if len(data_values(grid, "data-live-tile")) != 4:
+            raise HarnessError(
+                "the live grid does not render four tiles: "
+                f"{data_values(grid, 'data-live-tile')!r}"
+            )
+        if len(data_values(grid, "data-live-player")) != 2:
+            raise HarnessError(
+                "the live grid does not render two players: "
+                f"{data_values(grid, 'data-live-player')!r}"
+            )
+        require_data(grid, "data-camera-id", "camera_1", "live grid")
+        require_data(grid, "data-camera-id", "camera_2", "live grid")
+        if data_values(grid, "data-live-preset") != ["auto", "1", "2", "4", "9"]:
+            raise HarnessError("the live grid preset picker is incomplete")
+        for forbidden in ("rtsp://", "camera_1_main", "camera_2_sub", self.camera_address):
+            if forbidden in grid:
+                raise HarnessError(f"the live grid leaked {forbidden!r}")
+
+        second_playlist = client.get_page("/ui/live/media/camera_2/sub/stream.m3u8", timeout=30)
+        if "#EXTM3U" not in second_playlist:
+            raise HarnessError(
+                "the authenticated second-camera HLS master did not return a playlist: "
+                f"{second_playlist[:200]!r}"
+            )
 
         playlist = client.get_page("/ui/live/media/camera_1/main/stream.m3u8", timeout=30)
         if "#EXTM3U" not in playlist:
@@ -3460,21 +3518,35 @@ class FirstbootScenario:
                 raise HarnessError(
                     f"the QEMU browser check returned no result: {result.stdout}{result.stderr}"
                 ) from exc
-            if evidence.get("state") != "playing" or int(evidence.get("videoWidth", 0)) <= 0:
+            players = evidence.get("players") or []
+            if (
+                evidence.get("tiles") != 4
+                or len(players) != 2
+                or any(
+                    player.get("state") != "playing" or int(player.get("videoWidth", 0)) <= 0
+                    for player in players
+                )
+            ):
                 raise HarnessError(
-                    f"the QEMU browser player did not reach playing: {json.dumps(evidence, sort_keys=True)}"
+                    "the QEMU browser grid did not play both tiles: "
+                    f"{json.dumps(evidence, sort_keys=True)}"
                 )
             state = (
-                f"browser player playing at {evidence.get('videoWidth')}x"
-                f"{evidence.get('videoHeight')}, screenshot {screenshot.name}"
+                "browser grid has four tiles and "
+                + ", ".join(
+                    f"{player.get('camera')} playing at {player.get('videoWidth')}x"
+                    f"{player.get('videoHeight')}"
+                    for player in players
+                )
+                + f", screenshot {screenshot.name}"
             )
         else:
-            state = "browser player state skipped (node, @playwright/test or qemu-live.mjs missing)"
+            state = "browser grid state skipped (node, @playwright/test or qemu-live.mjs missing)"
 
         detail = (
             "authenticated live page has the player island with no stream name or camera "
-            f"address; HLS master, session playlist and {len(segment)}-byte segment arrived "
-            f"through the proxy; {state}"
+            f"address; the grid resolves two cameras into four tiles; HLS master, session "
+            f"playlist and {len(segment)}-byte segment arrived through the proxy; {state}"
         )
         self.capture("live-view.txt", detail + "\n")
         return detail
@@ -3489,7 +3561,7 @@ class FirstbootScenario:
         if render.get("apply_state") != "applied" or not render.get("generation"):
             raise HarnessError(f"render is not applied: {json.dumps(render, sort_keys=True)}")
         frigate = sections.get("frigate", {})
-        if not frigate.get("configured") or frigate.get("camera_count") != 1:
+        if not frigate.get("configured") or frigate.get("camera_count") != 2:
             raise HarnessError(f"Frigate/camera inventory is wrong: {json.dumps(frigate, sort_keys=True)}")
         if frigate.get("state") != "ok":
             raise HarnessError(f"Frigate is not healthy in status: {json.dumps(frigate, sort_keys=True)}")
@@ -3640,6 +3712,7 @@ rm -f /tmp/bittern-frigate.cookies
                 "ExecStart=/usr/bin/docker-compose --file /var/lib/bittern/compose/compose.yaml",
             ),
             ("/var/lib/bittern/frigate/config.yml", "camera_1"),
+            ("/var/lib/bittern/frigate/config.yml", "camera_2"),
             ("/var/lib/bittern/frigate/config.yml", "enabled: true"),
             ("/var/lib/bittern/frigate/config.yml", "FRIGATE_CAMERA_CAMERA_1_RTSP_URL"),
             ("/var/lib/bittern/compose/compose.yaml", "ghcr.io/blakeblackshear/frigate:0.18.3@sha256:"),

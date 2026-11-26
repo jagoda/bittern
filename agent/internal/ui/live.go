@@ -32,6 +32,9 @@ type liveSelection struct {
 	LoginURL    string
 	ProfileHint string
 	Disabled    bool
+	ElementID   string
+	TileIndex   int
+	InGrid      bool
 }
 
 type liveProfileChoice struct {
@@ -45,14 +48,17 @@ type liveProfileChoice struct {
 type liveView struct {
 	Cameras     []liveCameraLink
 	Selected    *liveSelection
+	Single      *liveTile
+	Grid        *liveGrid
 	Profile     string
 	ProfileName string
 	StatusURL   string
 	NoCameras   bool
 }
 
-// showLive opens the first enabled camera. The grid route is a later slice;
-// this page shows one camera at full width today (ADR 0034, BIT-023 slice 1a).
+// showLive renders the grid from the per-device layout cookie. The server
+// resolves the assignment; the browser only remembers the preset and the
+// cameras (ADR 0034 sections 4 and 5).
 func (h *handler) showLive(w http.ResponseWriter, r *http.Request) {
 	cameras, ok := h.liveCameras(w, r)
 	if !ok {
@@ -66,7 +72,12 @@ func (h *handler) showLive(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	h.renderLive(w, r, cameras, cameras[0].ID)
+	grid := resolveLiveGrid(liveLayoutFromRequest(r), cameras, liveCSRF(r))
+	h.render(w, r, http.StatusOK, "live", pageData{
+		Title:   "Live",
+		Preview: h.preview,
+		Live:    liveView{Grid: &grid},
+	})
 }
 
 // showLiveCamera opens the camera named in the route. A camera removed from
@@ -184,6 +195,16 @@ func (h *handler) renderLive(w http.ResponseWriter, r *http.Request, cameras []c
 		MediaBase:   BasePath + "/live/media/" + url.PathEscape(selected.ID) + "/" + url.PathEscape(profile),
 		LoginURL:    BasePath + "/login?next=" + url.QueryEscape(BasePath+"/live/"+selected.ID),
 		ProfileHint: "This camera has one stream. Main and sub use it until Bittern learns the camera profiles.",
+		ElementID:   "live-player",
+		TileIndex:   -1,
+	}
+	// The single-camera page renders the same island component as a grid tile.
+	single := &liveTile{
+		Index:    -1,
+		TitleID:  "live-camera-title",
+		Occupied: true,
+		Player:   selection,
+		FullURL:  BasePath + "/live/" + url.PathEscape(selected.ID),
 	}
 	h.render(w, r, http.StatusOK, "live", pageData{
 		Title:   "Live",
@@ -191,6 +212,7 @@ func (h *handler) renderLive(w http.ResponseWriter, r *http.Request, cameras []c
 		Live: liveView{
 			Cameras:     links,
 			Selected:    selection,
+			Single:      single,
 			Profile:     profile,
 			ProfileName: selection.ProfileName,
 			StatusURL:   selection.StatusURL,

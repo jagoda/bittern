@@ -19,6 +19,27 @@ Versions are internal to the design documents. Bittern does not publish a packag
 second consumer, so there is no SemVer promise, no changeset tooling, and no codemod. A version is
 a date-stamped batch of class changes; the date is how it maps to an app release.
 
+## v0.20: 2026-11-26
+
+- Class: pattern and component
+- What changed: the live view gains a grid. The layout is data: the presets are one, two, four and
+  nine tiles, with a per-tile camera assignment resolved by the server from a first-party per-device
+  cookie. Every tile is its own player island, one failing camera keeps its own message while the
+  others play, a tile opens full width in place and returns without losing the other streams, and a
+  layout above the device ceiling starts the allowed tiles and says so
+  ([patterns.md](patterns.md#live-view), rules LV9 to LV13). The live player island gains the grid
+  tile variant, the idle state and the in-place full-width control
+  ([components.md](components.md#live-player-island)).
+- Why: BIT-023 slice 1b follows [ADR 0034](../adr/0034-live-view-owned-by-bittern.md) sections 4, 5
+  and 7. One camera is not the product job; the owner wants to glance at all cameras, open one
+  clearly, and recover without reloading the appliance. A saved desktop wall must not start nine
+  streams on a phone, and one failed camera must not take the grid down.
+- Evidence: [the live view slice 1b note](../notes/2026-11-26-live-view-slice-1b.md); the layout,
+  cookie and proxy-limit tests in `agent/internal/ui/live_layout_test.go` and
+  `live_proxy_test.go`; the grid checks in `tests/browser/live.mjs`; the browser check with 0
+  failures and 0 warnings; the screenshots `live-<width>.png`, `live-nine-tiles-<width>.png`,
+  `live-camera-<width>.png` and `live-full-width-1280x800.png`.
+
 ## v0.19: 2026-11-26
 
 - Class: pattern

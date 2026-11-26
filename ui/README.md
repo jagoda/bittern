@@ -108,6 +108,8 @@ The BIT-020 column is the route's responsive flag. Regenerate the table from `ag
 | POST | `/ui/cameras/{id}/remove` | `camera-remove` | Yes | No |
 | GET | `/ui/live` | `live` | Yes | Yes |
 | GET | `/ui/live/{camera}` | `live` | Yes | Yes |
+| POST | `/ui/live/layout` | - | Yes | No |
+| POST | `/ui/live/tile` | - | Yes | No |
 | GET | `/ui/live/{camera}/status` | `live-status` | Yes | No |
 | GET | `/ui/live/media/{camera}/{profile}/{kind...}` | - | Yes | No |
 | GET | `/ui/status` | `status` | Yes | Yes |
@@ -337,17 +339,34 @@ page with a bounded return path; a fragment gets `HX-Redirect` to its parent pag
 `401` with no login HTML. A WebSocket revalidates the session every 30 seconds and closes when it
 ends. The proxy keeps the hard nine-connection ceiling per session.
 
-`ui/static/live-player.js` owns the video element, the MSE `SourceBuffer` and the WebSocket. Its
-states are connecting, playing, switching, stalled, reconnecting, offline, unsupported and session
-ended. Recovery is bounded to three retries with visible 1, 2 and 4 second waits, then HLS where the
-browser supports it, then the snapshot with a retry action. The current camera model has one RTSP
-path, so `main` and `sub` resolve to the same path and the page says so. The profile control is a
-normal link without JavaScript and a runtime switch with it.
+`/ui/live` is the grid. A layout is a preset of one, two, four or nine tiles plus a camera for each
+tile; the server resolves it at render time from `bittern_live_layout`, a first-party, `HttpOnly`,
+`Secure`, `SameSite=Strict` cookie scoped to `/ui/live` with a one-year lifetime. The cookie holds
+the preset and camera IDs only. Unknown or duplicate cameras are dropped, more than nine tiles is
+clamped to nine, and a missing or broken cookie falls back to automatic without an error. Automatic
+shows one tile per enabled camera. Changing the preset or assigning a camera is an ordinary form
+POST; with JavaScript a tile assignment replaces only that tile's island.
 
-The remaining BIT-023 layout work is the grid, the per-device layout cookie and the full 1/4/9
-selection. The single-tile page already exposes the viewport ceiling on the player node
-(`data-device-ceiling`) and the active count (`data-active-tiles`) so the grid can use the same
-structure.
+The page measures the viewport and applies the ADR 0034 ceiling: one active camera below 44rem,
+four from 44rem to below 80rem, nine at 80rem and above. A saved layout above the ceiling starts
+only the allowed tiles, leaves the rest as compact rows with their own actions, and explains the
+limit in one sentence. The proxy keeps its own hard maximum of nine concurrent media sessions per
+session, counted from held WebSockets and recently active HLS session ids; the browser cannot raise
+it.
+
+Every tile is a separate player island outside every HTMX swap region. A tile's sibling
+camera-state line polls every 15 seconds and touches nothing else. The grid controller owns the
+ceiling, the full-width selection and the one-tile replacement. Full width switches that tile to
+`main`; leaving it switches back to `sub`. A failing camera keeps its own state sentence while the
+others play.
+
+`ui/static/live-player.js` owns each island's video element, MSE `SourceBuffer` and WebSocket. Its
+states are connecting, playing, switching, stalled, reconnecting, idle (not started on this
+screen), offline, unsupported and session ended. Recovery is bounded to three retries with visible
+1, 2 and 4 second waits, then HLS where the browser supports it, then the snapshot with a retry
+action. The current camera model has one RTSP path, so `main` and `sub` resolve to the same path and
+the single-camera page says so. The profile control is a normal link without JavaScript and a
+runtime switch with it.
 
 ## Boundaries
 
