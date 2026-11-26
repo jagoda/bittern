@@ -3,8 +3,9 @@
 This plan turns accepted decisions into an ordered, testable sequence: a phase is done when behaviour
 exists and is verified, not when directories exist. The agent language is Go
 ([ADR 0015](../adr/0015-agent-language.md)); the UI stack is server-rendered Go templates with HTMX
-over TLS ([ADR 0019](../adr/0019-ui-stack.md)). Live video remains open
-([OQ-23](../open-questions.md)). The links at the end are the required reading.
+over TLS ([ADR 0019](../adr/0019-ui-stack.md)). Live view is specified by
+[ADR 0034](../adr/0034-live-view-owned-by-bittern.md) and is not implemented. The links at the end
+are the required reading.
 
 ## Current state
 
@@ -115,8 +116,8 @@ over TLS ([ADR 0019](../adr/0019-ui-stack.md)). Live video remains open
   promoted upstream ([ADR 0022](../adr/0022-community-functionality-ux-wins.md)).
 - Stop and write an ADR when contradicting one, because silent deviations are how docs become fiction.
   Contracts come before stacks: [ADR 0015](../adr/0015-agent-language.md) fixes the agent language,
-  and [ADR 0019](../adr/0019-ui-stack.md) fixes the UI stack. Live video is still
-  [OQ-23](../open-questions.md).
+  and [ADR 0019](../adr/0019-ui-stack.md) fixes the UI stack. Live view is decided by
+  [ADR 0034](../adr/0034-live-view-owned-by-bittern.md).
 - Generated files are never hand-edited: if the renderer cannot express a setting, fix the schema. Every
   risky change is reversible, and risky features ship off by default.
 - Default to automatic detection and configuration: management and camera NICs by carrier and role,
@@ -294,9 +295,9 @@ The maintainer fixed this order in session on 2026-11-22. It is recorded in
     live verification path. It follows the hardware Level 2 run and depends on BIT-015, BIT-019,
     BIT-020 and the clean-install fixes.
 18. **BIT-023 live view, BIT-024 event list and review, BIT-025 playback and timeline, BIT-026
-    camera and detector configuration.** These are the NVR product surfaces. BIT-023 needs the OQ-23
-    ADR before implementation. BIT-025 and BIT-026 wait for BIT-012. They do not preempt any item
-    above.
+    camera and detector configuration.** These are the NVR product surfaces. BIT-023 follows
+    [ADR 0034](../adr/0034-live-view-owned-by-bittern.md) and can implement. BIT-025 and BIT-026
+    wait for BIT-012. They do not preempt any item above.
 19. **BIT-027 robust ONVIF profiles, PTZ and field interoperability.** A later stream after the NVR
     surfaces; it does not preempt this queue.
 20. **BIT-042 release channel and CI pipeline.** The CI and publication work in the release work
@@ -1624,47 +1625,63 @@ live verification path until the Bittern NVR surfaces land.
   the hardware Level 2 pass in the near-term queue. **Size.** M.
 
 ### BIT-023 Live view
-**Goal.** Give the owner a live camera view in the Bittern UI, with the OQ-23 decision recorded before
-implementation and no exposure of port 8555.
+**Goal.** Give the owner a live camera view in the Bittern UI on the authenticated 443 surface,
+following [ADR 0034](../adr/0034-live-view-owned-by-bittern.md), with no exposure of port 8555 and no
+embedded Frigate UI.
 **Scope.**
-- Write the ADR (next free number after 0023) that resolves [OQ-23](../open-questions.md) and records
-  the player, transport, authentication, mobile behavior, failure handling, and the decision that
-  8555 stays closed on `lan0` and the tailnet. Move OQ-23 to resolved with the ADR link, and update
-  the implementation plan, architecture, open questions, and UI README.
-- Add the live page to the Bittern UI with a camera selector, connection state, retry, clear offline
-  or unsupported-camera messages, fullscreen, touch and keyboard controls, and a snapshot fallback
-  when the selected transport cannot start. Keep the page usable on a phone and desktop.
-- Deliver the stream through the existing authenticated 443 surface. Use the loopback Frigate and
-  go2rtc APIs, either HLS or another transport the ADR selects, proxied through `bitternd`. Do not
-  add a second browser listener, do not expose 8555, 1984, 8554, or 5000, and do not route `lan0` to
-  `cam0`. If the ADR selects WebRTC, it must still terminate on the authenticated Bittern surface;
-  no direct 8555 exposure is allowed.
-- Authenticate every player, manifest, segment, key, and WebSocket request with the administrator
-  session. Do not put camera credentials, RTSP URLs, or Frigate credentials in the browser. Close
-  playback on logout, session expiry, or camera removal, and never cache media with `no-store`.
-- Keep the default data flow local. Do not add STUN, a public relay, or a cloud dependency. If a
-  remote path needs STUN, the ADR records the data flow and it stays opt-in.
-- Add tests with the QEMU virtual camera or a fixture: authorized live playback, unauthorized
-  refusal for navigation and segment requests, session expiry, camera offline, reconnect, and no
+- [ADR 0034](../adr/0034-live-view-owned-by-bittern.md) is accepted and [OQ-23](../open-questions.md)
+  is resolved. The plan, architecture, open questions and UI README link the decision.
+- Add the live page at `/ui/live` and the single-camera page at `/ui/live/{camera}`. The page has a
+  camera selector, connection state, retry, clear offline or unsupported-camera messages,
+  fullscreen, touch and keyboard controls, and a snapshot fallback when the selected transport
+  cannot start. Keep the page usable on a phone and desktop.
+- Deliver the stream through the existing authenticated 443 surface. Use go2rtc MSE as the primary
+  transport over `/api/ws?src=<stream>` and HLS as the fallback over `/api/stream.m3u8?src=<stream>`,
+  both proxied through `bitternd`. Do not add a second browser listener, do not expose 8555, 1984,
+  8554, 8971 or 5000, and do not route `lan0` to `cam0`. WebRTC is not used in v1.
+- The renderer emits `go2rtc.streams` and `cameras.<name>.live.streams`. Add the smallest schema
+  change for a named second stream and a migration test. Until BIT-027 collects real ONVIF profiles,
+  `main` and `sub` resolve to the single configured path and the page says one stream.
+- Authenticate every player, playlist, segment, key and WebSocket request with the administrator
+  session. Do not put camera credentials, RTSP URLs, go2rtc stream names, or Frigate credentials in
+  the browser. Close playback on logout, session expiry, or camera removal, and never cache media
+  with `no-store`.
+- The player container is never inside an HTMX swap region. Add the template guard and the runtime
+  `closest()` check from ADR 0034. A sibling status region may poll; the player region may not.
+- Layout is data: presets 1, 2, 4 and 9, a per-tile camera assignment, a versioned per-device cookie,
+  server-side resolution at render time, and the viewport default with the 1/4/9 device ceiling.
+  A stored preset is clamped to the ceiling and the page says so.
+- Keep the default data flow local. Do not add STUN, a public relay, or a cloud dependency. Audio
+  stays muted and out of scope until OQ-21.
+- Add tests with the QEMU virtual camera or a fixture: authorized MSE and HLS playback,
+  unauthorized refusal for navigation, playlist, segment and WebSocket requests, session expiry,
+  camera offline, reconnect, layout cookie validation, device ceiling, player isolation, and no
   listener on 8555. Add phone and desktop checks and the nftables golden assertion.
 **Acceptance.**
-- The ADR is accepted, OQ-23 is resolved, and the plan, architecture, and UI README link the
-  decision.
+- The ADR is accepted, OQ-23 is resolved, and the plan, architecture, open questions and UI README
+  link the decision.
 - An authenticated owner starts live view for a configured camera from a phone and a desktop, sees
-  video within the documented startup budget, switches cameras, and recovers from a dropped stream
-  without reloading the appliance.
-- An unauthenticated LAN or tailnet client gets the login page or 401 for the page, manifest,
-  segments, keys, and WebSocket upgrades and never receives video. Logout or session expiry stops
+  video within the documented startup budget, switches cameras and stream profiles, and recovers
+  from a dropped stream without reloading the appliance.
+- An unauthenticated LAN or tailnet client gets the login page or 401 for the page, playlist,
+  segments, keys and WebSocket upgrades and never receives video. Logout or session expiry stops
   playback.
 - 8555 is closed on `lan0` and the tailnet in the nftables golden and in a runtime scan. 5000, 1984,
-  8554, and the camera subnet remain unreachable from `lan0`; no new listener or forward rule exists.
-- Camera credentials, RTSP URLs, session identifiers, and media URLs with secrets are absent from
-  logs, status, support bundle, and the browser DOM.
+  8554, 8971 and the camera subnet remain unreachable from `lan0`; no new listener or forward rule
+  exists.
+- Camera credentials, RTSP URLs, go2rtc stream names, session identifiers and media URLs with
+  secrets are absent from logs, status, support bundle and the browser DOM.
 - The live page passes the BIT-020 checks at 390 by 844 and 1280 by 800, is keyboard reachable, and
-  has a working no-WebRTC or snapshot fallback.
-- `make check` passes, with Go tests for the transport boundary and auth, QEMU or fixture playback,
-  and firewall evidence.
-**Depends on.** BIT-008, BIT-020, BIT-022. **Size.** L.
+  has a working HLS or snapshot fallback. The player is never inside an HTMX swap region and the
+  template guard test proves it.
+- The layout is remembered per device, resolves at render time, defaults by viewport, and enforces
+  the 1/4/9 UI ceiling. A phone's UI starts one active tile, and the proxy enforces the hard
+  nine-connection maximum.
+- `make check` passes, with Go tests for the proxy auth, WebSocket and HLS boundaries, layout
+  validation, player isolation, QEMU or fixture playback, and firewall evidence.
+**Depends on.** BIT-008, BIT-020, BIT-022, ADR 0034. **Size.** L.
+**Out of scope.** PTZ (BIT-027), audio (OQ-21), event review (BIT-024), recorded playback (BIT-025),
+  the gated advanced Frigate UI (OQ-38), and the kiosk (OQ-25).
 
 ### BIT-024 Event list and review
 **Goal.** Let the owner review Frigate events, thumbnails, and clips in the Bittern UI with filters,

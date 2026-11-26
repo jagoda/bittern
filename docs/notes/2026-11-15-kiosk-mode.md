@@ -1,6 +1,10 @@
 # Kiosk mode on an attached display
 
 - Date: 2026-11-15
+- Updated: 2026-11-26. [OQ-23](../open-questions.md) is resolved by
+  [ADR 0034](../adr/0034-live-view-owned-by-bittern.md). The kiosk can reuse the Bittern live
+  surface, but it still needs its own display, session, authentication and recovery decision. The
+  dependency below is historical and no longer blocks on OQ-23.
 - Status: Deferred, not decided
 - Related: [OQ-25](../open-questions.md), [OQ-23](../open-questions.md),
   [ADR 0009](../adr/0009-remote-access-via-tailscale.md),

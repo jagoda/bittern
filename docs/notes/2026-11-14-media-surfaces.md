@@ -1,6 +1,10 @@
 # Media surfaces: live view, playback and detection review
 
 - Date: 2026-11-14
+- Updated: 2026-11-26. [OQ-23](../open-questions.md) is resolved by
+  [ADR 0034](../adr/0034-live-view-owned-by-bittern.md): live view is a Bittern page on the
+  authenticated 443 surface, using go2rtc MSE with HLS fallback through `bitternd`, and no WebRTC
+  or 8555 exposure. The proposed shape below is historical. The next step is BIT-023.
 - Related: [ADR 0016](../adr/0016-bittern-owns-frigate-config.md),
   [ADR 0019](../adr/0019-ui-stack.md), [OQ-23](../open-questions.md),
   [implementation plan](../plan/implementation-plan.md), [status contract](../status.md),

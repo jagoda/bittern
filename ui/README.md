@@ -5,9 +5,8 @@ Go `html/template` with HTMX for partial updates, and every page works without J
 ([ADR 0019](../docs/adr/0019-ui-stack.md)). It covers the first-run wizard, camera onboarding,
 status and health, update controls, logs, support bundle download, and reset. It talks to `bitternd`
 over a local API and never writes rendered system files itself; mutations go through the agent apply
-transaction. Live video delivery is still open ([OQ-23](../docs/open-questions.md)) and is scoped in
-[the media surfaces note](../docs/notes/2026-11-14-media-surfaces.md); the Frigate UI is not a
-product surface.
+transaction. Live view is specified by [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md)
+and is not implemented yet; the Frigate UI is not a product surface.
 
 The product serves the UI over TLS on `0.0.0.0:443` with a self-signed certificate generated at
 first boot. The wizard and every page show its SHA-256 fingerprint; the browser warning is explained
@@ -291,7 +290,18 @@ support bundle are not part of this change.
 
 Related: [UI skeleton note](../docs/notes/2026-11-14-ui-skeleton.md),
 [status contract](../docs/status.md), [implementation plan](../docs/plan/implementation-plan.md),
-[architecture](../docs/architecture.md), [ADR 0019](../docs/adr/0019-ui-stack.md).
+[architecture](../docs/architecture.md), [ADR 0019](../docs/adr/0019-ui-stack.md),
+[ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md).
+
+## Live view
+
+Live view is specified by [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md). It is not
+implemented and its routes are not in the generated table above. BIT-023 adds `/ui/live` and
+`/ui/live/{camera}`, the MSE player with an HLS fallback, the authenticated media proxy, the
+per-device layout cookie, the 1/4/9 device ceiling and the player isolation guard. The stream is
+served through the existing 443 listener; 8555, 1984, 5000, 8554 and 8971 stay closed. The player
+is never inside an HTMX swap region, because a poll would destroy it and lose playback, fullscreen
+and focus ([UX-14](../docs/principles.md#ux-14-live-updates-must-not-disturb-state-the-user-owns)).
 
 ## Boundaries
 
@@ -304,7 +314,8 @@ In scope:
 
 Out of scope:
 
-- Being the video wall: recordings and Frigate settings stay in Frigate's own UI, which is a support
-  path, not a product surface; live view is [OQ-23](../docs/open-questions.md).
+- Being the video wall: live view is a Bittern surface specified by ADR 0034; event review and
+  recorded playback follow in BIT-024 and BIT-025. Frigate settings stay in Frigate's own UI, which
+  is a support path, not a product surface.
 - Owning or editing Frigate `config.yml` in Git-managed mode
 - Direct root operations; all mutations go through the agent API

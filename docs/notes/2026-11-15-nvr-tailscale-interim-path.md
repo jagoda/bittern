@@ -1,6 +1,9 @@
 # NVR and Tailscale interim path
 
 - Date: 2026-11-15
+- Updated: 2026-11-26. [OQ-23](../open-questions.md) is resolved by
+  [ADR 0034](../adr/0034-live-view-owned-by-bittern.md). The tailnet Frigate UI remains the support
+  and diagnostic path; the Bittern live surface is the product path once BIT-023 lands.
 - Status: plan note for BIT-022 to BIT-026; no implementation on this branch
 - Related: [ADR 0009](../adr/0009-remote-access-via-tailscale.md),
   [ADR 0016](../adr/0016-bittern-owns-frigate-config.md),

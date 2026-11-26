@@ -4,6 +4,14 @@ Assessed 2026-11-14. Re-verify before relying on versions, ports, flags or UI be
 figure below came from that assessment session and was not re-verified while writing this document, so
 treat versions, defaults and UI details as claims to check before they become fixtures or code.
 
+Re-checked for live view on 2026-11-26 against the pinned 0.18.2 release and its bundled go2rtc
+1.9.14. The quoted facts, URLs and access dates are in
+[the live view verification note](../notes/2026-11-26-live-view-upstream-verification.md). Two statements
+below are now stale: 8971 binds loopback, not the LAN, under
+[ADR 0016](../adr/0016-bittern-owns-frigate-config.md), and live video is decided by
+[ADR 0034](../adr/0034-live-view-owned-by-bittern.md), not by the 0.18.2 WebRTC recommendation.
+The rest of the assessment remains dated 2026-11-14.
+
 Verdict: adopt Frigate as the NVR engine, do not fork it, pin the image by digest, and gate every
 Bittern release on upstream advisories and on config-migration tests for the pinned minor.
 

@@ -2,18 +2,20 @@
 
 Bittern is one Debian appliance with two network interfaces, a declarative configuration pipeline,
 and two update loops. This describes the intended design; missing components say so in their README.
-Decisions are in the [ADR index](adr/README.md), and Frigate facts are dated 2026-11-14 and sourced
-in [the Frigate assessment](research/frigate-assessment.md).
+Decisions are in the [ADR index](adr/README.md). Frigate facts are dated 2026-11-14 and sourced
+in [the Frigate assessment](research/frigate-assessment.md); the live view facts were re-verified on
+2026-11-26 in [the upstream verification note](notes/2026-11-26-live-view-upstream-verification.md).
 
 ## System context
 
 A Bittern appliance sits between a house LAN, a private camera segment, and optional remote access.
 
 - **House LAN and internet.** Admin browsers reach only the Bittern UI, which is server-rendered Go
-  templates with HTMX over TLS on 443 ([ADR 0019](adr/0019-ui-stack.md)); how live video reaches the
-  browser is [OQ-23](open-questions.md). Frigate's UI is not exposed on `lan0`; 8971 binds to
-  loopback, and deliberate support access uses the planned tailnet-only `tailscale serve` path in
-  [BIT-022](plan/implementation-plan.md#bit-022-tailscale-remote-access-and-frigate-ui-support-path).
+  templates with HTMX over TLS on 443 ([ADR 0019](adr/0019-ui-stack.md)). Live video is a Bittern
+  page on the same surface, using go2rtc MSE or HLS through `bitternd`
+  ([ADR 0034](adr/0034-live-view-owned-by-bittern.md)). Frigate's UI is not exposed on `lan0`; 8971
+  binds to loopback, and deliberate support access uses the planned tailnet-only `tailscale serve`
+  path in [BIT-022](plan/implementation-plan.md#bit-022-tailscale-remote-access-and-frigate-ui-support-path).
   Live view, event review, playback and camera settings are planned as Bittern UI surfaces in
   BIT-023 to BIT-026, with the tailnet-only Frigate UI as the interim verification path described in
   [the NVR and Tailscale note](notes/2026-11-15-nvr-tailscale-interim-path.md). Robust ONVIF
@@ -72,10 +74,11 @@ flowchart LR
 defaults to deny input and forward and allows admin access only to the Bittern UI, whose stack and
 port are fixed by [ADR 0019](adr/0019-ui-stack.md). The renderer accepts 443 on `lan0`, and on
 `tailscale0` when Tailscale is enabled. Frigate's UI and API are not LAN services: `8971` and `5000`
-bind loopback, and go2rtc's `1984` and `8554` stay blocked from `lan0`. WebRTC on `8555` also stays
-closed until OQ-23 decides the live-video path. Cameras cannot reach the LAN, internet, or each other
-except for their streams. Docker host networking keeps container traffic under the same firewall
-instead of bypassing it through NAT.
+bind loopback, and go2rtc's `1984` and `8554` stay blocked from `lan0`. Live view uses MSE or HLS
+through the authenticated 443 surface, so WebRTC on `8555` also stays closed
+([ADR 0034](adr/0034-live-view-owned-by-bittern.md)). Cameras cannot reach the LAN, internet, or each
+other except for their streams. Docker host networking keeps container traffic under the same
+firewall instead of bypassing it through NAT.
 
 `dnsmasq` listens only on `cam0`: DHCP pool `.50` to `.199`, reservations `.10` to `.49`, option 42
 for NTP, and a gateway option pointing at the appliance for camera compatibility, with no forwarding
@@ -87,12 +90,12 @@ Trust: low is unprivileged and network-facing, medium is reduced, high is root-e
 
 | Component | Runs as | Responsibility | Trust |
 | --- | --- | --- | --- |
-| `bittern-ui` | Unprivileged systemd service | First run, onboarding, status, updates, logs, support bundle, reset; calls the agent API | Low |
-| `bitternd` | Root systemd service | Schema, rendering, apply and rollback, discovery, health, update client, reset | High |
+| `bittern-ui` | Unprivileged systemd service | First run, onboarding, live view, status, updates, logs, support bundle, reset; calls the agent API | Low |
+| `bitternd` | Root systemd service | Schema, rendering, apply and rollback, discovery, health, update client, reset, authenticated media proxy | High |
 | `bittern first-boot` | Root oneshot before `bitternd` | Identity, secrets, TLS certificate, minimal config, first apply, completion marker | High |
 | `bittern` CLI | Caller privileges | Operator and debug front end over the same agent API | High when root |
 | Frigate container | Root in container, host network | NVR engine, recordings, Frigate UI and API, go2rtc | High |
-| go2rtc | Inside Frigate | RTSP restreaming and WebRTC; unauthenticated port 1984 is upstream behavior, blocked by the firewall | High |
+| go2rtc | Inside Frigate | RTSP restreaming, MSE and HLS for live view; WebRTC is unused in v1; unauthenticated port 1984 is upstream behavior, blocked by the firewall | High |
 | Docker | Root daemon | Container lifecycle, digest pulls, log rotation | High |
 | systemd-networkd | Root | Interface addressing and routes | High |
 | nftables | Root, kernel | Input and forward policy, LAN and camera isolation | High |
@@ -100,8 +103,11 @@ Trust: low is unprivileged and network-facing, medium is reduced, high is root-e
 | chrony | Reduced user after bind | Time client on `lan0`, NTP server on `cam0` | Medium |
 | Tailscale | Root daemon | Optional outbound remote access and support | High |
 
-Frigate details are upstream behavior verified 2026-11-14: the container runs as root, ports 5000 and
-1984 are unauthenticated, and the admin password is printed to logs. Contain, do not patch.
+Frigate details are upstream behavior verified 2026-11-14 and re-verified for live view on
+2026-11-26: the container runs as root, ports 5000 and 1984 are unauthenticated, and the admin
+password is printed to logs. Contain, do not patch. The live view uses go2rtc's documented MSE and
+HLS endpoints through `bitternd` and does not expose the Frigate UI or the go2rtc web player
+([ADR 0034](adr/0034-live-view-owned-by-bittern.md)).
 
 ## Status and state
 

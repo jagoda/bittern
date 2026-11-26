@@ -80,6 +80,7 @@ need an ADR. When in doubt, write a short one.
 | 0031 | [Update channel on GitHub Releases](./0031-update-channel-on-github-releases.md) | Accepted; tag-as-publish-signal decision superseded in part by 0033 | 2026-11-22 | GitHub Releases channel; immutable drafts; beta only; payload digest decided. |
 | 0032 | [Continuous integration and build pipeline](./0032-continuous-integration-and-build-pipeline.md) | Accepted | 2026-11-22 | CI phase one checks and bundle artifact; tag publish later. |
 | 0033 | [Dispatch-driven release trigger](./0033-dispatch-driven-release-trigger.md) | Accepted | 2026-11-22 | Manual dispatch triggers release; tag after build; tag push fallback. |
+| 0034 | [Live view owned by Bittern](./0034-live-view-owned-by-bittern.md) | Accepted | 2026-11-26 | Bittern live view uses go2rtc MSE/HLS and Frigate snapshots on 443. |
 
 ## Related documents
 
