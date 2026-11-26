@@ -16,6 +16,7 @@ candidate renderer and applied in the same transaction.*
   [ADR 0031](./0031-update-channel-on-github-releases.md),
   [ADR 0032](./0032-continuous-integration-and-build-pipeline.md),
   [ADR 0034](./0034-live-view-owned-by-bittern.md),
+  [ADR 0035](./0035-appliance-as-time-authority.md),
   [BIT-009](../plan/implementation-plan.md#bit-009-app-bundle-update-transaction-with-rollback),
   [update transaction specification](../notes/2026-11-22-update-transaction-spec.md),
   [live view beta update gap](../notes/2026-11-26-live-view-beta-update-gap.md),
@@ -100,14 +101,18 @@ app transaction from writing an OS slot, bootloader, boot marker, or partition t
 and 105 to 120). ADR 0031 and ADR 0032 fix the channel and the CI test key (ADR 0032, lines 53 to
 65). None of them decides how a unit or a migration reaches the running system. The write boundary
 in the architecture and status documents is an invariant, not an ADR decision
-([architecture](../architecture.md), line 235; [status](../status.md), lines 123 to 127); this ADR
+([architecture](../architecture.md), line 245; [status](../status.md), lines 123 to 127); this ADR
 amends it in a bounded way and those documents are updated in this change.
 
-ADR 0035 (time synchronisation) was not present in `docs/adr/` on `main` when this ADR was
-written, so it could not be checked for consistency. This ADR does not decide time synchronisation.
-The plan orders that work after the apply-on-update and migration persistence work, and a later time
-synchronisation ADR must use this delivery mechanism rather than introduce a second subsystem write
-path.
+[ADR 0035](./0035-appliance-as-time-authority.md) is Accepted. It uses the same app bundle and
+transaction: its tzdata copy is a normal bundle file, its status `time` section is an app change, and
+its ONVIF time client is app code, so none of it needs a new subsystem class. ADR 0035 says the
+release check records the IANA release in the bundle metadata. If that carrier is the signed
+manifest, the v2 field set must carry it and the release tooling must emit it; this ADR does not add
+the field, and the time synchronisation implementation must agree with the manifest version before
+either ships. The plan orders time synchronisation after the apply-on-update and migration
+persistence work, and it must use this delivery mechanism rather than introduce a second subsystem
+write path.
 
 ## Decision
 
