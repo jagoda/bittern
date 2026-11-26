@@ -425,7 +425,8 @@ The order is fixed in the [implementation plan](../plan/implementation-plan.md):
 2. The apply-on-update step and the post-commit migration persistence, with the unit delivery that
    shares the same snapshot and rollback. These are one BIT-009 slice because they share the
    transaction, the snapshot, and the named tests.
-3. Time synchronisation, after the ADR 0035 decision lands. It must use the same update transaction
+3. Time synchronisation, with [ADR 0035](./0035-appliance-as-time-authority.md) as the decision,
+   after the apply-on-update and migration persistence work. It must use the same update transaction
    and must not add a second subsystem write path.
 
 ### 8. Tests the implementation must carry
