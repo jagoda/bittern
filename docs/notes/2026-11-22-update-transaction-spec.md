@@ -4,7 +4,11 @@
 - Status: slice zero specification and slice two design delta for
   [BIT-009](../plan/implementation-plan.md#bit-009-app-bundle-update-transaction-with-rollback).
   Section 15 is the slice two design delta. No implementation code, systemd unit, workflow, UI or
-  packer is part of this note.
+  packer is part of this note. Amended in part on 2026-11-26 by
+  [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md): the new `plan`, `snapshot`,
+  `subsystems`, `apply-config`, and `persist-config` steps extend section 3, and the write boundary
+  in sections 5, 7, 10, 12, and 15 is extended by the bounded subsystem allowlist. The rest of this
+  note is unchanged and remains the slice zero and slice two record.
 - Related: [ADR 0008](../adr/0008-updates-rollback-and-reset.md),
   [ADR 0029](../adr/0029-release-signing-and-key-custody.md),
   [ADR 0030](../adr/0030-ab-from-the-first-image.md),

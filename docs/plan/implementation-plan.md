@@ -334,14 +334,29 @@ These are open after step 5. The first is the next action; the rest do not block
    run. The environment is unchanged now.
 4. **The pending `appliance.yaml` migration is not persisted.** The update engine writes
    `/var/lib/bittern/update/<operation-id>/appliance.yaml` and removes it at the end of the
-   transaction; nothing applies it to `/etc/bittern/appliance.yaml`. Do not publish a bundle that
-   needs a schema migration until that path is wired and tested.
+   transaction; nothing applies it to `/etc/bittern/appliance.yaml`.
+   [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md) decides the durable pending
+   record and the post-commit `persist-config` step. Implement it in the order below. Do not publish
+   a bundle that needs a schema migration until `TestUpdateMigrationAppliedOnce`,
+   `TestUpdateMigrationDiscardedOnRollback`, and `TestUpdateMigrationPersistedAfterCommit` pass.
 5. **Unit changes are not delivered by the bundle.** The payload is files-only under
    `/var/lib/bittern/app/bundles/<generation>/files`; units, scripts, and templates come from the
-   kit or the image. A change to a unit needs the kit or the image, not an update.
+   kit or the image. [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md) decides the
+   bounded `bittern-bundle-*` unit class, its ownership record, and its snapshot and rollback. The
+   image-only answer is replaced for that class only. Base-system units, package units, drop-ins,
+   and a unit that needs a package or kernel module remain image changes.
 6. **OQ-35, the delivery model and supported base.** The image is not yet required, the packaging
    install path is a bridge, and the first device that is not the maintainer's needs a reproducible
    supported base. Decide it before that trigger; it does not block the bench rollout.
+7. **Time synchronisation.** The time synchronisation ADR is being written. It follows the
+   apply-on-update and migration persistence work. It must use this delivery mechanism and must not
+   add a second subsystem write path. The time-source choice itself remains [OQ-20](../open-questions.md).
+
+**Subsystem delivery order (2026-11-26).** For the work this ADR creates, the order is: first this
+decision and the manifest v2 change; then the apply-on-update and migration persistence work, with
+the unit delivery that shares the snapshot and rollback; then time synchronisation. The apply and
+migration steps are what make an update deliver the configuration the bundle already carries; time
+synchronisation is a new subsystem change and must use the same path, not a parallel one.
 
 ## Workstreams
 
@@ -2313,14 +2328,22 @@ rollback step from the journal, a failed step and plain reason, or a rollback wi
 rule. Check, install, and guarded rollback are authenticated POST actions, and manual rollback has a
 confirmation page that states configuration and recordings are not reverted. The limitation and the
 rule that closes it are in [the update card note](../notes/2026-11-22-update-card-ui.md).
+[ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md) decides the remaining delivery
+gap: a signed bundle may declare bounded systemd units and typed migrations, the fixed helper
+installs them, the candidate renderer applies the generated configuration inside the transaction,
+and one snapshot and rollback cover the set. The remaining work is the `plan`, `snapshot`,
+`subsystems`, `migrate`, `apply-config`, and `persist-config` steps with the ADR 0036 named tests.
+The order is this decision, then the apply-on-update and migration persistence work, then time
+synchronisation.
 
 **Goal.** Updates that cannot leave the appliance half-configured. **Scope.**
 - Signed manifest with digest, generation and channel.
 - Transaction: preflight, backup, stop, switch, migrate, start, health, commit or roll back.
 - The platform generation is abstract and supplied by a provider. Image metadata can supply it now,
   and an installer fingerprint can supply it later, without changing the transaction.
-- The transaction writes only under `/var/lib/bittern`. It never assumes a writable root and never
-  assumes knowledge of OS slots.
+- The transaction writes only under `/var/lib/bittern` and the bounded subsystem allowlist in
+  [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md). It never assumes a general
+  writable root and never assumes knowledge of OS slots.
 - The status contract records a base fingerprint covering the Debian version, kernel, Docker
   version, device availability, and firmware presence. It is recorded evidence, not a trust input.
 
@@ -2345,6 +2368,7 @@ the transaction never writes a bootloader or claims an OS slot. The channel and 
 | 3 | QEMU update scenario, release-path evidence, and the end-to-end case. | A valid update, an invalid signature, a digest mismatch, a downgrade and a rollback pass against the fixture on the local or bench QEMU path. The database backup restores; the failing step is reported; a committed update is idempotent. A bundle with the camera-variant fix and its regression test can be published to the channel and installed by an appliance already on that channel. The evidence is recorded in a dated note. QEMU stays outside CI until the KVM question is measured. |
 | 4 | On-demand channel check, channel install, manual rollback, and status fields. Design delta in [the update channel and manual rollback note](../notes/2026-11-22-update-channel-check-and-manual-rollback.md); evidence in [the slice note](../notes/2026-11-22-update-channel-and-manual-rollback-slice.md). | A verified GitHub Releases candidate is reported as a status fact and never auto-installs; generation 0 is the kit baseline and any published generation is an update; manual rollback restores a retained bundle or the baseline without lowering the committed generation; the status document reports running and committed generations, last check, available candidate, rollback target, and last operation. The fake channel covers drafts, the other channel, tag mismatch, lower and higher generations, a bad signature, rate limits, offline, and malformed responses. |
 | 5 | Browser update card, actions, and rollback confirmation. Design delta and evidence in [the update card note](../notes/2026-11-22-update-card-ui.md). | The status card names every update state without blanking out, a failed check never reads as up to date, and the factory baseline is named. Check, install, and rollback require the session and CSRF token, install and rollback show the journal step through the status fragment, and every impossible action is absent. The browser manifest covers each state at four widths, and the manual-rollback limitation and its closing rule are recorded. |
+| 6 | Subsystem delivery per [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md): the manifest v2 section, the `plan`, `snapshot`, `subsystems`, `migrate`, `apply-config`, and `persist-config` steps, the dual-version verifier, the v2 fixture, the helper allowlist, and the named tests. | A bundle with a declared unit and a migration installs, applies the candidate renderer and pin, persists the migration after commit, and rolls the unit, the configuration, and the bundle back on a failed apply. The eight ADR 0036 named cases pass, including the undeclared path, symlink, mode or owner, snapshot failure, migration once, migration discarded on rollback, and post-unit validation failure. A v1 verifier rejects a v2 manifest; a v2 verifier accepts both. The helper writes only the declared allowlist. |
 **Depends on.** BIT-005, BIT-006. **Size.** L.
 
 ### BIT-010 Factory reset and support bundle skeleton

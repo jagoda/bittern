@@ -242,8 +242,11 @@ These hold for the app bundle transaction and for any later OS image provider.
 
 - **The platform generation is abstract.** A provider supplies it. Image metadata can supply it now,
   and an installer fingerprint can supply it later, without changing the transaction.
-- **The transaction writes only under `/var/lib/bittern`.** It never assumes a writable root and
-  never assumes knowledge of OS slots.
+- **The transaction writes only under `/var/lib/bittern` and the bounded subsystem allowlist in
+  [ADR 0036](adr/0036-update-bundles-deliver-subsystem-changes.md).** It never assumes a general
+  writable root and never assumes knowledge of OS slots. The allowlist is the declared unit
+  namespace, the apply live targets, and the snapshot that covers them; it is not a general `/etc`
+  write.
 - **The agent records a base fingerprint in the status contract.** It covers the Debian version, the
   kernel, the Docker version, device availability, and firmware presence. It is recorded evidence,
   not a trust input; compatibility checks still use the root-owned image metadata.

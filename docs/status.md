@@ -121,8 +121,9 @@ covers the Debian version, the kernel version, the Docker version, the presence
 of the devices the appliance needs, and firmware presence. The base fingerprint
 is recorded evidence for support and compatibility review, not a trust input; the
 transaction checks the root-owned OS generation metadata instead. The transaction
-writes only under `/var/lib/bittern` and does not assume a writable root or
-knowledge of OS slots. The platform generation is supplied by a provider that
+writes only under `/var/lib/bittern` and the bounded subsystem allowlist in
+[ADR 0036](adr/0036-update-bundles-deliver-subsystem-changes.md); it does not assume a general
+writable root or knowledge of OS slots. The platform generation is supplied by a provider that
 reads `/usr/lib/bittern/platform.json`, so image metadata can supply it now and
 an installer fingerprint can supply it later without changing the process. The
 daemon does not host the update worker, so it does not set the overall `updating`
