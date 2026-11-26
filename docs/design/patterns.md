@@ -159,14 +159,15 @@ the ranked issue list.
 2. Read the ranked issues, first the one that needs a decision.
 3. Open the failing section, then its evidence, if the cause is not obvious.
 4. Take the next action: retry, open a section, or go to the object that owns the failure.
-5. Refresh, or wait for the 15 second fragment update, without losing focus or scroll position.
+5. Refresh, or wait for the update card's 15 second refresh, without losing focus or scroll position.
 
 **Components.** Page shell, title block and lede, status summary, section heading, status badge,
 fact list, table and table wrapper, inline alert, disclosure, empty state, page links.
 
 **States.** Booting, ready, degraded, updating, failed, unknown section, not applicable section,
-stale status, partial data, no data yet, unavailable API, expired session, factory version, update
-available, up to date, update check failed, update installing, update failed, update rolled back.
+stale status, partial data, no data yet, unavailable API, expired session, reconnecting, factory
+version, update available, up to date, update check failed, update installing, update failed, update
+rolled back.
 
 **Rules.**
 
@@ -177,13 +178,14 @@ available, up to date, update check failed, update installing, update failed, up
 | S3 | Unknown is not zero. Not applicable is not "has not reported yet". Stale data says when it was built. | Q5 and the status tests named in [UX-2](../principles.md#ux-2-a-failure-names-the-step-the-effect-and-the-next-action). |
 | S4 | Every failing section names the failing step, the effect, and the next action. | Q7 and the state matrix. |
 | S5 | Evidence, raw paths, and per-check detail sit behind a disclosure, not in the primary sentence. | Q10 and template read. |
-| S6 | The status refresh, 15 seconds normally and 2 seconds while an update or rollback runs, does not move focus, steal scroll, or announce every unchanged section. | Q6 and a keyboard pass with the fragment refresh. |
+| S6 | The update card refreshes every 15 seconds, or every 2 seconds while an update or rollback runs. The poll replaces only the card's live facts and actions, keeps the action controls with stable ids, and never replaces the status page's disclosures, table wrappers, or other controls. It does not move focus, steal scroll, or announce every unchanged section. | Q6, the live refresh browser check, and a keyboard pass with the fragment refresh. |
 | S7 | Tables are comparison only, inside a named focusable scroll region; rows that are records stack as a description list below 44rem. | Q4 and Q6; keyboard pass and 360 screenshot. |
 | S8 | A healthy page may have no filled button. A degraded page has exactly one repair action. | Q1 and the state matrix. |
 | S9 | The update card always names the running version and the last check result. A failed, offline, or rate-limited check never reads as up to date. The factory baseline is named as the factory version. | Q5 and Q7; the update card state tests and the four-width screenshots. |
 | S10 | Update actions are POST forms with the administrator session and a CSRF token. Install is absent without a verified newer version; roll back is absent without a saved previous version; every action is absent while an update or rollback runs. | Q5, Q8, and Q14; the action guard, session, and CSRF tests. |
-| S11 | Install and rollback show the current step and the measured progress, and the status fragment polls every two seconds while either runs. A failure names the step and the effect, and offers the next action. | Q5, Q7, and Q14; the operation fragment and state tests. |
+| S11 | Install and rollback show the current step and the measured progress, and the update card's live region polls every two seconds while either runs. A failure names the step and the effect, and offers the next action. | Q5, Q7, and Q14; the operation fragment and state tests. |
 | S12 | A manual rollback asks for confirmation on its own destination and states that configuration and recordings are not reverted. It is a secondary, destructive-variant action, not the page's filled action. | Q1, Q9, and Q13; the rollback confirmation test and 360 screenshot. |
+| S13 | A live poll that cannot reach the daemon shows a reconnecting notice beside the live region, leaves the panel and its owner state in place, and clears the notice after the next successful poll. | Q6 and the live refresh browser check with the fragment request aborted. |
 
 The current status page has an overall badge and reason, but then nine cards of equal weight. It
 also says "This section has not reported yet" for sections that may be not applicable. S1 and S3
@@ -332,6 +334,7 @@ second start, reconnected, stale view.
 | O7 | A failure names the failing step, the effect, the rollback result, and the next action. | Q7 and the failure test. |
 | O8 | Reduced motion removes the spinner movement but keeps the step, the elapsed time, and the result. | Q5 and the reduced-motion pass. |
 | O9 | The result is persistent, not a toast. A refresh shows the same result. | Q5 and the reload test. |
+| O10 | The live region carries the step, progress, and status only. Technical details sit outside it, so an open disclosure and its focus survive every poll. A lost poll shows a reconnecting notice and does not replace the panel. | Q6 and the operation live-region test. |
 
 The apply now starts a persisted operation, redirects to `/ui/wizard/apply`, and records the
 current step, the elapsed time, and the terminal result. A reload shows the same operation, and a

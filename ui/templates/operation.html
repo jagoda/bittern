@@ -3,7 +3,7 @@
 <h1 data-step-name="apply" data-result-state="{{if .Operation.Present}}{{.Operation.State}}{{else}}absent{{end}}">Applying configuration</h1>
 <p class="lede">Bittern is checking the configuration, saving it, and starting the recording service. You can leave this page; the appliance continues the apply.</p>
 {{template "preview-notice" .}}
-<div id="operation-panel" hx-get="{{.OperationFragmentURL}}" hx-trigger="every 2s" hx-target="this" hx-swap="innerHTML" aria-live="polite">
+<div id="operation-panel">
 {{template "operation-panel" .}}
 </div>
 <p class="action-links"><a href="/ui/wizard/apply">Refresh now</a> <a href="/ui/status">Open status</a></p>

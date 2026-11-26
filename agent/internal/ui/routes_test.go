@@ -32,7 +32,7 @@ func TestRouteTableResponses(t *testing.T) {
 			if templates.Lookup(route.Template) == nil {
 				t.Fatalf("template %q is not embedded", route.Template)
 			}
-			if route.Name == "status-fragment" || route.Name == "wizard-operation-fragment" {
+			if route.Name == "status-fragment" || route.Name == "status-updates-fragment" || route.Name == "wizard-operation-fragment" {
 				if strings.Contains(body, "<!DOCTYPE html>") || strings.Contains(body, "<main") {
 					t.Fatalf("%s is a full page", route.Name)
 				}
@@ -101,7 +101,7 @@ func TestRouteTableMarksEveryFullPageResponsive(t *testing.T) {
 		if route.Responsive && route.Template == "" && route.Name != "camera-picture" {
 			t.Errorf("%s: responsive route has no template", route.Name)
 		}
-		if route.Name != "status-fragment" && route.Name != "wizard-operation-fragment" &&
+		if route.Name != "status-fragment" && route.Name != "status-updates-fragment" && route.Name != "wizard-operation-fragment" &&
 			route.Template != "" && !route.Responsive && route.Method == http.MethodGet {
 			t.Errorf("%s: full-page GET route is not marked responsive", route.Name)
 		}

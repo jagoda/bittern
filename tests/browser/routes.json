@@ -148,6 +148,13 @@
   },
   {
     "route": "status",
+    "path": "/ui/status?state=failed&update=installing",
+    "flow": "auth",
+    "variant": "live-refresh",
+    "live": "refresh"
+  },
+  {
+    "route": "status",
     "path": "/ui/status?update=failed",
     "flow": "auth",
     "variant": "update-failed"

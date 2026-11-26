@@ -101,11 +101,15 @@ The viewport list is provisional under [OQ-26](../../docs/open-questions.md) and
 | desktop | 1280 by 800 |
 | desktop-wide | 1920 by 1080 |
 
-The manifest has 34 screens from 18 routes, so each run checks 136 route-width screens and writes
-136 default full-page screenshots, plus an `-expanded` copy for each screen with a closed
-disclosure. Nine status variants preview the update card: factory baseline with an offered update,
-up to date, update available, installing, failed, rolled back, offline, rate limited, and a failed
-check. The rollback confirmation has a target and a no-target variant.
+The manifest has 35 screens from 18 routes, so each run checks 140 route-width screens and writes
+140 default full-page screenshots, plus an `-expanded` copy for each screen with a closed
+disclosure. Fifteen status variants cover the five overall states and the update card: factory
+baseline with an offered update, up to date, update available, installing, failed, rolled back,
+offline, rate limited, and a failed check. The `live-refresh` variant opens Technical details, focuses
+its summary, marks a table scroll region, and waits for two real update-card polls. It then aborts
+the fragment request, asserts the disclosure, focus, scroll, and card content are unchanged, and
+writes `status-live-reconnect-<width>x<height>.png` with the reconnecting notice visible. The
+rollback confirmation has a target and a no-target variant.
 Each form factor has two sizes so a layout that only breaks at one end of
 its range is caught: two phone widths for the narrow end and two desktop widths for the wide end.
 The 360 width is the BIT-020 scope floor and the 390 width is the current acceptance width.
@@ -123,6 +127,11 @@ For every route and width the harness asserts, against that width's viewport:
 - Every visible image is decoded and its rendered box has non-zero width and height and fits inside
   the viewport after scrolling to it. An image is a replaced element, so it is measured separately
   from the controls.
+
+The live-refresh screen additionally asserts that two real polls keep the open disclosure, the
+focused summary, the table scroll position, and the table wrapper in place. It aborts the fragment
+request to prove that a lost poll shows the reconnecting notice without replacing the card. These
+are behaviour checks, not markup checks.
 
 A skip link that is deliberately off-screen until focused is measured after focus brings it into
 view. An off-screen control that does not appear on focus still fails.

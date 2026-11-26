@@ -18,8 +18,10 @@ the product service. The status API stays on its separate loopback listener.
 The UI is served behind `bitternd --ui`. Without `--ui-mock` its applier persists the wizard's
 `appliance.yaml` changes and calls the BIT-011 apply transaction. The apply POST starts one
 persisted operation under the state root and redirects to `/ui/wizard/apply`; the operation page
-polls a fragment with HTMX, shows the current step, elapsed time, completed and remaining steps, and
-survives a reload or a closed browser. A second start is refused while one runs. On completion the
+polls a live fragment with HTMX, shows the current step, elapsed time, completed and remaining steps,
+and survives a reload or a closed browser. The Technical details disclosure sits outside the live
+region, so an open disclosure and its focus survive every poll. A lost poll shows a reconnecting
+notice and leaves the panel in place. A second start is refused while one runs. On completion the
 operation leads to `/ui/wizard/result`, which names every camera and its own picture check, or names
 the failing step, the restored generation, the state of every camera, and the next action after a
 failure or rollback. A camera the appliance refuses at apply time is named there and again on its
@@ -109,6 +111,7 @@ The BIT-020 column is the route's responsive flag. Regenerate the table from `ag
 | GET | `/ui/status/updates/rollback` | `update-rollback` | Yes | Yes |
 | POST | `/ui/status/updates/rollback` | - | Yes | No |
 | GET | `/ui/status/fragment` | `status-panel` | Yes | No |
+| GET | `/ui/status/updates/fragment` | `update-card-fragment` | Yes | No |
 | GET | `/ui/static/` | - | No | No |
 | * | `/ui/` | `error` | Yes | Yes |
 
@@ -120,9 +123,11 @@ that flag the status page uses the real BIT-006 builder, and the setup network a
 read the same builder through `ui.AgentChecks`. `--ui-mock` keeps the sample `ui.MockChecks` data.
 The status page is one column at phone width and a two-column card grid from 60rem. The overall
 state, configuration, render checks, network interfaces and hardware cards span both columns; the
-remaining cards pair up. The fragment carries the same grid wrapper, so the HTMX refresh keeps the
-layout. The status fragment polls every 15 seconds, or every 2 seconds while an update or rollback
-is running, so the update card's current step is refreshed without a second progress surface.
+remaining cards pair up. Only the Updates card is live. Its facts and actions refresh every 15
+seconds, or every 2 seconds while an update or rollback is running, so the current step updates
+without a second progress surface. The rest of the status page, including the Technical details
+disclosure and the table scroll regions, stays in place. A lost poll shows a reconnecting notice
+beside the live card and leaves the last content visible until the next successful poll.
 
 The Updates card is the browser update surface. It names the running version, the factory version
 on a kit baseline, the last check time and result, the verified offered version and update number,
@@ -266,9 +271,10 @@ and screenshot requirement are in
 
 HTMX is version 2.0.11, vendored as `static/htmx-2.0.11.min.js` with its license in
 `static/htmx-2.0.11.LICENSE` (version and checksum checked against the vendored file on
-2026-11-21). The setup fragment reader is `static/setup-fragment.js`, and the
-slow-action busy state is `static/form-busy.js`. Both are local scripts allowed by the self-only
-CSP, and there is no inline script. The SHA-256 of the HTMX script is
+2026-11-21). The setup fragment reader is `static/setup-fragment.js`, the slow-action busy state is
+`static/form-busy.js`, and `static/reconnect-panel.js` shows the reconnecting notice after a failed
+poll. All are local scripts allowed by the self-only CSP, and there is no inline script. The SHA-256
+of the HTMX script is
 `d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717`. Bittern never loads it from the
 network. Record the version and checksum in the app bundle manifest when that manifest exists.
 

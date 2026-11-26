@@ -699,7 +699,7 @@ func (h *handler) showApplyOperationFragment(w http.ResponseWriter, r *http.Requ
 		w.Header().Set("HX-Redirect", h.operationDestination())
 		return
 	}
-	h.render(w, r, http.StatusOK, "operation-panel", pageData{
+	h.render(w, r, http.StatusOK, "operation-live", pageData{
 		Operation: operationView(record, h.now(), false),
 	})
 }

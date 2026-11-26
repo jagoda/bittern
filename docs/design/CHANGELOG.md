@@ -1,7 +1,7 @@
 # Design system changelog
 
 - Date: 2026-11-21
-- Status: Accepted; v0.17 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
+- Status: Accepted; v0.18 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
   implemented in `ui/static/bittern.css` and the templates; the v0.3 flow layer is binding from v0.6,
   when [ADR 0027](../adr/0027-flow-layer-above-patterns.md) was accepted with amendments P1 and P3.
 - Applies to: every change to a token, a component, a pattern, a flow, or a rule in
@@ -18,6 +18,28 @@ like at vN, and why is it different now".
 Versions are internal to the design documents. Bittern does not publish a package and has no
 second consumer, so there is no SemVer promise, no changeset tooling, and no codemod. A version is
 a date-stamped batch of class changes; the date is how it maps to an app release.
+
+## v0.18: 2026-11-26
+
+- Class: pattern and component
+- What changed: live updates now replace only the volatile region. The status page polls the Updates
+  card's facts and actions, not the whole status panel. The operation page polls a live region that
+  excludes the Technical details disclosure. The update card and operation panel carry stable ids,
+  preserve user-toggled forms and disclosures, leave table wrappers in place, and show a reconnecting
+  notice beside the live region when a poll cannot reach the daemon. A fragment request with no
+  session now gets a 401 with `HX-Redirect` instead of a 303 that swaps the login page into the
+  panel. [patterns.md](patterns.md#status-page) records S6, S11 and S13;
+  [patterns.md](patterns.md#long-running-operation) records O10; [flows.md](flows.md#signed-in-destinations)
+  records the fragment auth handoff.
+- Why: a whole-panel `innerHTML` swap closed the Technical details disclosure, moved focus, reset
+  table scroll, and re-announced unchanged content on every poll. After an update restarted
+  `bitternd`, the lost session turned the next poll into a login page inside the status panel. The
+  owner had to reload to recover.
+- Evidence: [the live refresh state loss note](../notes/2026-11-26-live-refresh-state-loss.md);
+  `TestFragmentAuthFailureUsesHXRedirectAndNeverReturnsLoginHTML`,
+  `TestStatusPagePollsOnlyTheUpdateCard`, `TestOperationFragmentPollsOnlyTheLiveRegion`; the browser
+  check's `live-refresh` variant with two real polls and an aborted fragment request; the four-width
+  screenshots `status-live-refresh-<width>.png` and `status-live-reconnect-<width>.png`.
 
 ## v0.17: 2026-11-22
 

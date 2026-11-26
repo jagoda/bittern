@@ -1456,8 +1456,9 @@ run finished green. A rerun is not a fix and does not close this ticket.
 **Depends on.** None. **Size.** S.
 
 ### BIT-044 Preserve owner state across live refreshes
-**Status.** New on 2026-11-26 from
-[the live refresh state loss note](../notes/2026-11-26-live-refresh-state-loss.md). Unqueued.
+**Status.** Implemented on 2026-11-26 from
+[the live refresh state loss note](../notes/2026-11-26-live-refresh-state-loss.md). Code, tests, and
+browser evidence are in the same change.
 **Goal.** Keep the live status and operation updates without closing disclosures, moving focus,
 changing scroll or selection, or discarding unsaved input that the owner controls.
 **Evidence.** The bench report in the note records expanded cards collapsing on every refresh. The
@@ -1496,7 +1497,8 @@ The current check loads each route once and opens disclosures only after the scr
 ### BIT-045 Keep the administrator session across a daemon restart
 **Status.** New on 2026-11-26 from
 [the live refresh state loss note](../notes/2026-11-26-live-refresh-state-loss.md). Blocked on
-[OQ-37](../open-questions.md#register).
+[OQ-37](../open-questions.md#register). Not implemented in the 2026-11-26 change; BIT-046 makes the
+lost-session path a single top-level sign-in instead of an injected login page.
 **Goal.** An authenticated administrator session survives the `bitternd` restart that an update
 performs, without weakening the session lifetime, logout, password change, or reset behavior.
 **Evidence.** Sessions are an in-memory map at [auth.go](../../agent/internal/auth/auth.go):93,129,
@@ -1530,8 +1532,9 @@ test never reopens the store ([auth_test.go](../../agent/internal/auth/auth_test
 **Depends on.** OQ-37. **Size.** M.
 
 ### BIT-046 Keep sign-in out of live fragments
-**Status.** New on 2026-11-26 from
-[the live refresh state loss note](../notes/2026-11-26-live-refresh-state-loss.md). Unqueued.
+**Status.** Implemented on 2026-11-26 from
+[the live refresh state loss note](../notes/2026-11-26-live-refresh-state-loss.md). Code and tests
+are in the same change.
 **Goal.** A fragment request with no session, an expired session, or a session lost to a daemon
 restart causes a top-level sign-in, not an in-page login form. The full-page redirect behavior stays
 as it is.

@@ -29,7 +29,7 @@
   </dl>
   {{if .Status.Sections.Config.Errors}}
   <p class="table-caption" id="status-config-problems">Configuration problems</p>
-  <div class="table-wrap stack-at-phone" role="region" tabindex="0" aria-labelledby="status-config-problems">
+  <div id="status-config-problems-scroll" class="table-wrap stack-at-phone" role="region" tabindex="0" aria-labelledby="status-config-problems">
     <table class="table-wide" aria-labelledby="status-config-problems">
       <thead>
         <tr>
@@ -80,7 +80,7 @@
   </dl>
   {{if .Status.Sections.Render.Validation}}
   <p class="table-caption" id="status-render-checks">Configuration file checks</p>
-  <div class="table-wrap stack-at-phone" role="region" tabindex="0" aria-labelledby="status-render-checks">
+  <div id="status-render-checks-scroll" class="table-wrap stack-at-phone" role="region" tabindex="0" aria-labelledby="status-render-checks">
     <table class="render-checks table-wide" aria-labelledby="status-render-checks">
       <thead>
         <tr>
@@ -176,7 +176,7 @@
   </div>
   {{if ne .Status.Sections.Network.State "unknown"}}
   <p class="table-caption" id="status-network-connections">Network connections</p>
-  <div class="table-wrap stack-at-phone" role="region" tabindex="0" aria-labelledby="status-network-connections">
+  <div id="status-network-connections-scroll" class="table-wrap stack-at-phone" role="region" tabindex="0" aria-labelledby="status-network-connections">
     <table aria-labelledby="status-network-connections">
       <thead>
         <tr>
@@ -238,8 +238,8 @@
   {{end}}
 </section>
 
-<details class="disclosure status-wide">
-  <summary>Technical details</summary>
+<details id="status-technical-details" class="disclosure status-wide" hx-preserve="true">
+  <summary id="status-technical-summary">Technical details</summary>
   <dl class="facts">
     <dt>Overall state</dt>
     <dd><code>{{.Status.State}}</code></dd>

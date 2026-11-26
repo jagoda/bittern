@@ -212,7 +212,7 @@ type pageData struct {
 	Message                string
 	NextStep               string
 	Status                 status.Document
-	StatusFragmentURL      string
+	UpdateFragmentURL      string
 	StatusQuery            string
 	StatusRefresh          string
 	UpdateCard             updateView
@@ -301,7 +301,7 @@ func (h *handler) showStatus(w http.ResponseWriter, r *http.Request) {
 	h.render(w, r, http.StatusOK, "status", pageData{
 		Title:             "Status",
 		Status:            document,
-		StatusFragmentURL: BasePath + "/status/fragment" + query,
+		UpdateFragmentURL: BasePath + "/status/updates/fragment" + query,
 		StatusQuery:       query,
 		StatusRefresh:     h.statusRefresh(document),
 		UpdateCard:        h.updateCard(document),
@@ -312,11 +312,26 @@ func (h *handler) showStatus(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) showStatusFragment(w http.ResponseWriter, r *http.Request) {
 	document := h.buildStatus(r)
+	query := h.statusQuery(r, document.State)
 	h.render(w, r, http.StatusOK, "status-panel", pageData{
-		Status:       document,
-		UpdateCard:   h.updateCard(document),
-		MockPreview:  h.preview,
-		StateOptions: mockStateOptions(document.State),
+		Status:            document,
+		UpdateFragmentURL: BasePath + "/status/updates/fragment" + query,
+		StatusQuery:       query,
+		StatusRefresh:     h.statusRefresh(document),
+		UpdateCard:        h.updateCard(document),
+		MockPreview:       h.preview,
+		StateOptions:      mockStateOptions(document.State),
+	})
+}
+
+func (h *handler) showUpdateFragment(w http.ResponseWriter, r *http.Request) {
+	document := h.buildStatus(r)
+	h.render(w, r, http.StatusOK, "update-card-fragment", pageData{
+		Status:        document,
+		StatusQuery:   h.statusQuery(r, document.State),
+		StatusRefresh: h.statusRefresh(document),
+		UpdateCard:    h.updateCard(document),
+		MockPreview:   h.preview,
 	})
 }
 

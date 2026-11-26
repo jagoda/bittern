@@ -1,8 +1,8 @@
 # Live refresh resets owner state and swaps the sign-in page into the panel
 
 - Date: 2026-11-26
-- Status: diagnosed on the code at `0db2b56`; no code or test changed. Three defects are filed as
-  BIT-044 to BIT-046, and session continuity is OQ-37.
+- Status: diagnosed on the code at `0db2b56`. BIT-044 and BIT-046 are implemented on 2026-11-26
+  with tests and browser evidence. BIT-045 remains blocked on OQ-37.
 - Type: bug, UX, and auth.
 - Evidence: maintainer report from a bench box running generation 1 and then updating from the
   status card. The report has three points: expanded cards collapse on every live refresh, the
@@ -167,13 +167,21 @@ parent-page `next` value.
 | [auth_test.go](../../agent/internal/auth/auth_test.go):138-143 | The password survives a store reopen. | It only checks that setup is not required again. It does not check a session. |
 | [tests/browser/routes.json](../../tests/browser/routes.json):95-177 | Status and update-card screens at four widths. | Every entry is a single page load. No entry waits for a fragment poll. |
 | [check.mjs](../../tests/browser/check.mjs):109-148 `captureExpandedDisclosures` | Opens closed disclosures for the expanded screenshot. | It runs after the screenshot and assertions, for review only, and never waits for a poll. |
-| [assertions.mjs](../../tests/browser/assertions.mjs):130-307 | Overflow, focusability, and scroll into view. | It measures one loaded page. It does not compare focus or scroll before and after a swap. |
+| [assertions.mjs](../../tests/browser/assertions.mjs):130-307 | Overflow, focusability, and scroll into view. | It measures one loaded page. It did not compare focus or scroll before and after a swap. |
+| [auth_test.go](../../agent/internal/ui/auth_test.go) `TestFragmentAuthFailureUsesHXRedirectAndNeverReturnsLoginHTML` | A missing or expired session on a fragment gets 401 and `HX-Redirect`, with no login body; a normal navigation still gets 303. | New with BIT-046. |
+| [ui_test.go](../../agent/internal/ui/ui_test.go) `TestStatusPagePollsOnlyTheUpdateCard` | The status panel does not poll; the update card does; the fragment has no disclosure or table. | New with BIT-044. |
+| [ui_test.go](../../agent/internal/ui/ui_test.go) `TestOperationFragmentPollsOnlyTheLiveRegion` | The operation panel does not poll; the live region does; Technical details is outside it. | New with BIT-044. |
+| [tests/browser/routes.json](../../tests/browser/routes.json) `live-refresh` | Two real polls keep the open disclosure, focused summary, table scroll, and table wrapper; an aborted fragment shows the reconnecting notice without clobbering the card. | New with BIT-044 and BIT-046. |
 
-No test asserts that a poll preserves open or closed state, focus, scroll, selection, or input.
+The pre-fix suite had no test for poll state preservation. The new tests assert the behaviour, not
+the markup, and the browser check fails on the old whole-panel swap.
 
 ## Destination
 
-- BIT-044 keeps the live updates and preserves owner state in both polled regions.
-- BIT-045 keeps an administrator session across a daemon restart. Its storage choice is OQ-37.
-- BIT-046 keeps the sign-in page out of a live fragment and makes the fragment fail safely.
+- BIT-044 is implemented: the status page polls only the update card, the operation page polls only
+  its live region, and the browser check proves the disclosure, focus, table scroll, and table
+  wrapper survive two real polls.
+- BIT-045 remains blocked on OQ-37. The session store is still lost on a daemon restart.
+- BIT-046 is implemented: HTMX auth failures get a non-2xx response and `HX-Redirect`, and the
+  fragment never returns login HTML.
 - UX-14 records the principle candidate: live updates must not disturb state the user owns.

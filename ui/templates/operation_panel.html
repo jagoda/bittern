@@ -7,16 +7,44 @@
 </div>
 {{else if .Operation.Running}}
 <div class="card">
+  <div id="operation-live" hx-get="{{.OperationFragmentURL}}" hx-trigger="every 2s" hx-target="this" hx-swap="innerHTML" data-live-reconnect="operation-reconnect">
+    {{template "operation-live" .}}
+  </div>
+  <p id="operation-reconnect" class="notice live-reconnect" role="status" hidden="hidden">Bittern is restarting. Reconnecting when it is ready.</p>
+  <details id="operation-technical-details" class="disclosure" hx-preserve="true">
+    <summary id="operation-technical-summary">Technical details</summary>
+    <dl class="facts">
+      {{if .Operation.ImageReference}}<dt>Recording software</dt>
+      <dd>{{.Operation.ImageReference}}</dd>{{end}}
+      {{if .Operation.ImageDigest}}<dt>Recording software digest</dt>
+      <dd><code>{{.Operation.ImageDigest}}</code></dd>{{end}}
+      {{if .Operation.CurrentStep}}<dt>Current step</dt>
+      <dd>{{.Operation.CurrentStep}}</dd>{{end}}
+    </dl>
+  </details>
+</div>
+{{else}}
+<div class="card">
+  <h2>Apply finished</h2>
+  <p>The apply has finished. Open the result to see what happened.</p>
+  <p class="action-links"><a href="/ui/wizard/result">Open the result</a> <a href="/ui/status">Open status</a></p>
+</div>
+{{end}}
+{{end}}
+
+{{define "operation-live"}}
   {{if .Operation.Busy}}
   <div class="alert" role="alert">
     <h2>An apply is already running</h2>
     <p>Bittern did not start another apply. This page shows the one that is already running.</p>
   </div>
   {{end}}
-  {{if .Operation.StepsTotal}}
-  <progress class="operation-progress" value="{{.Operation.StepsCompleted}}" max="{{.Operation.StepsTotal}}" aria-label="Steps completed">{{.Operation.StepsCompleted}} of {{.Operation.StepsTotal}} steps completed</progress>
-  {{end}}
-  <p><strong>{{.Operation.CurrentLabel}}</strong></p>
+  <div class="operation-progress-live" role="status" aria-live="polite">
+    {{if .Operation.StepsTotal}}
+    <progress class="operation-progress" value="{{.Operation.StepsCompleted}}" max="{{.Operation.StepsTotal}}" aria-label="Steps completed">{{.Operation.StepsCompleted}} of {{.Operation.StepsTotal}} steps completed</progress>
+    {{end}}
+    <p><strong>{{.Operation.CurrentLabel}}</strong></p>
+  </div>
   {{if .Operation.Cameras}}
   <h2>Cameras in this apply</h2>
   <ul>
@@ -32,19 +60,6 @@
     <p>Starting the recording service can take a few minutes, especially the first time. You can leave this page; the appliance keeps working.</p>
   </div>
   {{end}}
-  {{if or .Operation.ImageStep .Operation.ServiceStart}}
-  <details class="disclosure">
-    <summary>Technical details</summary>
-    <dl class="facts">
-      {{if .Operation.ImageReference}}<dt>Recording software</dt>
-      <dd>{{.Operation.ImageReference}}</dd>{{end}}
-      {{if .Operation.ImageDigest}}<dt>Recording software digest</dt>
-      <dd><code>{{.Operation.ImageDigest}}</code></dd>{{end}}
-      {{if .Operation.CurrentStep}}<dt>Current step</dt>
-      <dd>{{.Operation.CurrentStep}}</dd>{{end}}
-    </dl>
-  </details>
-  {{end}}
   <dl class="facts">
     <dt>Status</dt>
     <dd><span class="state-badge state-{{.Operation.StateClass}}">{{.Operation.StateLabel}}</span></dd>
@@ -56,12 +71,4 @@
     <dd>{{if .Operation.StepsTotal}}{{.Operation.StepsCompleted}} of {{.Operation.StepsTotal}} steps done; {{.Operation.StepsRemaining}} remaining{{else}}Starting the first step{{end}}</dd>
   </dl>
   <p>It is safe to close this page. The apply continues on the appliance; open status or return to this page to see the result.</p>
-</div>
-{{else}}
-<div class="card">
-  <h2>Apply finished</h2>
-  <p>The apply has finished. Open the result to see what happened.</p>
-  <p class="action-links"><a href="/ui/wizard/result">Open the result</a> <a href="/ui/status">Open status</a></p>
-</div>
-{{end}}
 {{end}}

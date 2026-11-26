@@ -343,6 +343,18 @@ separate CSRF token, and every mutating UI request must submit it. Guest
 sessions carry the CSRF token for the login and setup forms. The setup and login
 flows work without JavaScript.
 
+A normal navigation with no valid session gets a 303 to the login route with
+`next=<original page>`. An HTMX request, including a fragment poll, gets a 401
+with `HX-Redirect` to the login route with `next=<owning page>`, and the
+response contains no login or setup HTML. HTMX therefore performs one
+top-level navigation instead of swapping the login page into the live region.
+The same rule covers a fragment request while setup is still required.
+
+The session store is in memory, so a daemon restart signs out every browser.
+[BIT-045](plan/implementation-plan.md#bit-045-keep-the-administrator-session-across-a-daemon-restart)
+is blocked on [OQ-37](open-questions.md#register), which decides whether sessions are persisted and
+where.
+
 Failed login and setup attempts are limited per remote address and globally
 with a short lockout: five failures per address or 20 globally in a 10 minute
 window trigger a five minute lockout. Unknown user and wrong password return the

@@ -1,5 +1,16 @@
 {{define "update-card"}}
-<section class="card" aria-labelledby="status-updates" data-update-state="{{.UpdateCard.StateName}}">
+<section class="card" id="update-card" aria-labelledby="status-updates">
+  <div id="update-card-live" hx-get="{{.UpdateFragmentURL}}" hx-trigger="{{.StatusRefresh}}" hx-target="this" hx-swap="innerHTML" data-live-reconnect="update-card-reconnect">
+    {{template "update-card-live" .}}
+  </div>
+  <p id="update-card-reconnect" class="notice live-reconnect" role="status" hidden="hidden">Bittern is restarting. Reconnecting when it is ready.</p>
+  <div id="update-card-actions" class="action-links update-actions">
+    {{template "update-card-actions" .}}
+  </div>
+</section>
+{{end}}
+
+{{define "update-card-live"}}
   <div class="section-heading">
     <h2 id="status-updates">Updates</h2>
     <span class="state-badge state-{{.UpdateCard.StateClass}}">{{.UpdateCard.StateLabel}}</span>
@@ -7,11 +18,13 @@
   <p><strong>{{.UpdateCard.Headline}}</strong></p>
   {{if .UpdateCard.Summary}}<p>{{.UpdateCard.Summary}}</p>{{end}}
   {{if .UpdateCard.Running}}
-  <p>{{.UpdateCard.CurrentStep}}</p>
-  {{if .UpdateCard.StepsTotal}}
-  <progress class="operation-progress" value="{{.UpdateCard.StepsDone}}" max="{{.UpdateCard.StepsTotal}}" aria-label="Update steps completed">{{.UpdateCard.StepsDone}} of {{.UpdateCard.StepsTotal}} steps completed</progress>
-  <p class="meta">{{.UpdateCard.StepsDone}} of {{.UpdateCard.StepsTotal}} steps completed.</p>
-  {{end}}
+  <div class="update-progress-live" role="status" aria-live="polite">
+    <p>{{.UpdateCard.CurrentStep}}</p>
+    {{if .UpdateCard.StepsTotal}}
+    <progress class="operation-progress" value="{{.UpdateCard.StepsDone}}" max="{{.UpdateCard.StepsTotal}}" aria-label="Update steps completed">{{.UpdateCard.StepsDone}} of {{.UpdateCard.StepsTotal}} steps completed</progress>
+    <p class="meta">{{.UpdateCard.StepsDone}} of {{.UpdateCard.StepsTotal}} steps completed.</p>
+    {{end}}
+  </div>
   {{end}}
   <dl class="facts">
     {{if .UpdateCard.ShowCurrent}}
@@ -50,24 +63,29 @@
   {{if .UpdateCard.RolledBack}}
   <p>{{.UpdateCard.NextUpdateRule}}</p>
   {{end}}
-  {{if or .UpdateCard.CanCheck .UpdateCard.CanInstall .UpdateCard.CanRollback}}
-  <div class="action-links update-actions">
-    {{if .UpdateCard.CanInstall}}
-    <form method="post" action="/ui/status/updates/install{{.StatusQuery}}" data-busy="true" data-busy-label="Starting the update">
-      {{template "csrf" .}}
-      <button type="submit">{{.UpdateCard.InstallLabel}}</button>
-    </form>
-    {{end}}
-    {{if .UpdateCard.CanCheck}}
-    <form method="post" action="/ui/status/updates/check{{.StatusQuery}}" data-busy="true" data-busy-label="Checking for updates">
-      {{template "csrf" .}}
-      <button type="submit" class="button secondary">Check for updates</button>
-    </form>
-    {{end}}
-    {{if .UpdateCard.CanRollback}}
-    <a href="/ui/status/updates/rollback{{.StatusQuery}}">{{.UpdateCard.RollbackLabel}}</a>
-    {{end}}
-  </div>
+{{end}}
+
+{{define "update-card-actions"}}
+  {{if .UpdateCard.CanInstall}}
+  <form id="update-action-install-{{.UpdateCard.StateName}}" hx-preserve="true" method="post" action="/ui/status/updates/install{{.StatusQuery}}" data-busy="true" data-busy-label="Starting the update">
+    {{template "csrf" .}}
+    <button type="submit">{{.UpdateCard.InstallLabel}}</button>
+  </form>
   {{end}}
-</section>
+  {{if .UpdateCard.CanCheck}}
+  <form id="update-action-check-{{.UpdateCard.StateName}}" hx-preserve="true" method="post" action="/ui/status/updates/check{{.StatusQuery}}" data-busy="true" data-busy-label="Checking for updates">
+    {{template "csrf" .}}
+    <button type="submit" class="button secondary">Check for updates</button>
+  </form>
+  {{end}}
+  {{if .UpdateCard.CanRollback}}
+  <a id="update-action-rollback-{{.UpdateCard.StateName}}" hx-preserve="true" href="/ui/status/updates/rollback{{.StatusQuery}}">{{.UpdateCard.RollbackLabel}}</a>
+  {{end}}
+{{end}}
+
+{{define "update-card-fragment"}}
+{{template "update-card-live" .}}
+<div id="update-card-actions" class="action-links update-actions" hx-swap-oob="outerHTML">
+  {{template "update-card-actions" .}}
+</div>
 {{end}}

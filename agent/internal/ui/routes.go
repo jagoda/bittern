@@ -206,6 +206,10 @@ var uiRoutes = []route{
 		Auth: true, Status: http.StatusOK, Handler: routeHandler((*handler).showStatusFragment),
 	},
 	{
+		Name: "status-updates-fragment", Method: http.MethodGet, Pattern: "/ui/status/updates/fragment", Template: "update-card-fragment",
+		Auth: true, Status: http.StatusOK, Handler: routeHandler((*handler).showUpdateFragment),
+	},
+	{
 		Name: "static", Method: http.MethodGet, Pattern: "/ui/static/", Status: http.StatusOK,
 		Handler: func(h *handler) http.Handler { return h.staticFiles() },
 	},

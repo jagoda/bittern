@@ -149,6 +149,134 @@ async function captureExpandedDisclosures({ page, screenshot, result }) {
   }
 }
 
+async function runLiveRefreshCheck({ page, width, result }) {
+  const reconnectScreenshot = path.join(
+    SCREENSHOT_DIR,
+    `status-live-reconnect-${width.width}x${width.height}.png`,
+  );
+
+  const readState = () =>
+    page.evaluate(() => {
+      const details = document.getElementById("status-technical-details");
+      const table = document.getElementById("status-config-problems-scroll");
+      const card = document.getElementById("update-card-live");
+      return {
+        open: Boolean(details && details.open),
+        focus: document.activeElement ? document.activeElement.id : "",
+        left: table ? table.scrollLeft : 0,
+        top: table ? table.scrollTop : 0,
+        marker: table ? table.dataset.liveMarker : "",
+        card: card ? card.textContent.trim() : "",
+      };
+    });
+
+  const initial = await page.evaluate(() => {
+    const details = document.getElementById("status-technical-details");
+    const summary = document.getElementById("status-technical-summary");
+    const table = document.getElementById("status-config-problems-scroll");
+    if (!details || !summary) {
+      throw new Error("the status technical details disclosure is missing");
+    }
+    details.open = true;
+    summary.focus();
+    if (table) {
+      table.dataset.liveMarker = "kept";
+      table.scrollLeft = Math.min(24, table.scrollWidth - table.clientWidth);
+      table.scrollTop = Math.min(12, table.scrollHeight - table.clientHeight);
+    }
+    window.__bitternLivePolls = 0;
+    document.body.addEventListener("htmx:afterRequest", (event) => {
+      const element = event.detail.elt;
+      if (
+        element &&
+        element.id === "update-card-live" &&
+        event.detail.successful
+      ) {
+        window.__bitternLivePolls += 1;
+      }
+    });
+    const card = document.getElementById("update-card-live");
+    return {
+      open: details.open,
+      focus: document.activeElement ? document.activeElement.id : "",
+      left: table ? table.scrollLeft : 0,
+      top: table ? table.scrollTop : 0,
+      marker: table ? table.dataset.liveMarker : "",
+      card: card ? card.textContent.trim() : "",
+    };
+  });
+
+  if (!initial.open || initial.focus !== "status-technical-summary") {
+    throw new Error("the disclosure did not open or keep focus before the poll");
+  }
+
+  await page.waitForFunction(() => window.__bitternLivePolls >= 2, null, {
+    timeout: 15_000,
+  });
+  const afterPolls = await readState();
+  if (!afterPolls.open) {
+    throw new Error("the disclosure closed after two live polls");
+  }
+  if (afterPolls.focus !== "status-technical-summary") {
+    throw new Error(`focus moved to ${afterPolls.focus || "nothing"} after two live polls`);
+  }
+  if (afterPolls.left !== initial.left || afterPolls.top !== initial.top) {
+    throw new Error("the table scroll position changed after two live polls");
+  }
+  if (afterPolls.marker !== "kept") {
+    throw new Error("the table wrapper was replaced by the live poll");
+  }
+
+  const abortFragment = (route) => route.abort("failed");
+  await page.route("**/ui/status/updates/fragment*", abortFragment);
+  await page.locator("#update-card-reconnect").waitFor({
+    state: "visible",
+    timeout: 10_000,
+  });
+  const duringOutage = await readState();
+  if (!duringOutage.open) {
+    throw new Error("the disclosure closed while the live poll was offline");
+  }
+  if (duringOutage.focus !== "status-technical-summary") {
+    throw new Error("focus was lost while the live poll was offline");
+  }
+  if (
+    duringOutage.left !== initial.left ||
+    duringOutage.top !== initial.top ||
+    duringOutage.marker !== "kept"
+  ) {
+    throw new Error("the table state changed while the live poll was offline");
+  }
+  if (duringOutage.card !== afterPolls.card) {
+    throw new Error("the live card content was clobbered while the poll was offline");
+  }
+  await page.screenshot({ path: reconnectScreenshot, fullPage: true });
+  result.liveScreenshot = true;
+
+  await page.unroute("**/ui/status/updates/fragment*", abortFragment);
+  const pollsBeforeRecovery = await page.evaluate(() => window.__bitternLivePolls);
+  await page.waitForFunction(
+    (count) => window.__bitternLivePolls > count,
+    pollsBeforeRecovery,
+    { timeout: 15_000 },
+  );
+  await page.locator("#update-card-reconnect").waitFor({
+    state: "hidden",
+    timeout: 5_000,
+  });
+  const recovered = await readState();
+  if (!recovered.open || recovered.focus !== "status-technical-summary") {
+    throw new Error("the disclosure or focus was lost after the poll recovered");
+  }
+  if (
+    recovered.left !== initial.left ||
+    recovered.top !== initial.top ||
+    recovered.marker !== "kept"
+  ) {
+    throw new Error("the table state changed after the poll recovered");
+  }
+}
+
 async function runEntry({ page, entry, width, baseURL, results }) {
   const slug = slugFor(entry);
   const label = `${width.name} ${slug} (${entry.path})`;
@@ -187,6 +315,13 @@ async function runEntry({ page, entry, width, baseURL, results }) {
     const layout = await checkLayout(page);
     result.failures.push(...layout.failures);
     result.warnings.push(...layout.warnings);
+    if (entry.live === "refresh") {
+      try {
+        await runLiveRefreshCheck({ page, width, result });
+      } catch (error) {
+        result.failures.push(`live refresh check failed: ${error.message}`);
+      }
+    }
     await captureExpandedDisclosures({ page, screenshot, result });
   } catch (error) {
     result.failures.push(`could not load the page: ${error.message}`);

@@ -359,14 +359,14 @@ func TestOperationPageShowsTheImageStepWhileItWaits(t *testing.T) {
 		"Technical details",
 		"Recording software digest",
 	)
-	summary := strings.Index(body, "<summary>Technical details</summary>")
-	if summary < 0 {
+	details := strings.Index(body, "id=\"operation-technical-details\"")
+	if details < 0 {
 		t.Fatal("the operation page has no technical details disclosure")
 	}
-	if strings.Contains(body[:summary], "ghcr.io") {
+	if strings.Contains(body[:details], "ghcr.io") {
 		t.Fatal("the operation page put the image reference in primary copy")
 	}
-	if !strings.Contains(body[summary:], "ghcr.io") {
+	if !strings.Contains(body[details:], "ghcr.io") {
 		t.Fatal("the operation page technical details do not carry the image reference")
 	}
 

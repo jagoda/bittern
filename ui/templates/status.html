@@ -1,7 +1,7 @@
 {{define "status"}}{{template "head" .}}
 <h1>Appliance status</h1>
 <p class="lede">This page shows what the appliance last checked. A value stays unknown until a check reports it.</p>
-<div id="status-panel" hx-get="{{.StatusFragmentURL}}" hx-trigger="{{.StatusRefresh}}" hx-target="this" hx-swap="innerHTML">
+<div id="status-panel">
 {{template "status-panel" .}}
 </div>
 <p class="action-links"><a href="/ui/status{{.StatusQuery}}">Refresh now</a> <a href="/ui/cameras">Open cameras</a> <a href="/ui/wizard">Back to setup</a></p>

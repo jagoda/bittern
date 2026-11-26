@@ -31,10 +31,13 @@ type authServer struct {
 	secrets    string
 	state      string
 	setupToken string
+	clock      *time.Time
 }
 
 func newAuthTestServer(t *testing.T, token string, policy auth.RateLimitPolicy) *authServer {
 	t.Helper()
+	clock := new(time.Time)
+	*clock = testNow
 	base := t.TempDir()
 	secretsPath := filepath.Join(base, "secrets.yaml")
 	statePath := filepath.Join(base, "auth.json")
@@ -57,13 +60,13 @@ func newAuthTestServer(t *testing.T, token string, policy auth.RateLimitPolicy) 
 		Iterations:  1000,
 		SessionTTL:  time.Hour,
 		RateLimit:   policy,
-		Now:         func() time.Time { return testNow },
+		Now:         func() time.Time { return *clock },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	handler, err := NewHandler(Options{
-		Status:                 MockStatusProvider{Now: func() time.Time { return testNow }},
+		Status:                 MockStatusProvider{Now: func() time.Time { return *clock }},
 		Checks:                 MockChecks{},
 		Applier:                &fakeApplier{},
 		Updates:                &MockUpdateService{},
@@ -88,6 +91,7 @@ func newAuthTestServer(t *testing.T, token string, policy auth.RateLimitPolicy) 
 		secrets:    secretsPath,
 		state:      statePath,
 		setupToken: token,
+		clock:      clock,
 	}
 }
 
@@ -451,5 +455,93 @@ func TestShortCodeCompletesSetupAndCannotBeReused(t *testing.T) {
 	}
 	if document.SetupToken != "" || document.SetupShortCodeHash != "" || document.SetupShortCodeExpires != "" {
 		t.Fatal("setup credentials remain after the short-code flow")
+	}
+}
+
+func TestFragmentAuthFailureUsesHXRedirectAndNeverReturnsLoginHTML(t *testing.T) {
+	const token = "setup-token-value-0123456789"
+	server := newAuthTestServer(t, token, auth.DefaultRateLimitPolicy())
+	completeSetup(t, server)
+	login(t, server)
+
+	disableRedirects(server.client)
+	*server.clock = server.clock.Add(2 * time.Hour)
+
+	fragmentPath := server.server.URL + "/ui/status/updates/fragment?state=degraded&update=installing"
+	fragmentNext := "/ui/status?state=degraded&update=installing"
+	request := func(client *http.Client) (int, http.Header, string) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, fragmentPath, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("HX-Request", "true")
+		req.Header.Set("HX-Current-URL", server.server.URL+fragmentNext)
+		response, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, response.Header, responseBody(t, response)
+	}
+
+	for _, testCase := range []struct {
+		name   string
+		client *http.Client
+	}{
+		{name: "no cookie", client: server.server.Client()},
+		{name: "expired session", client: server.client},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			disableRedirects(testCase.client)
+			statusCode, header, body := request(testCase.client)
+			if statusCode != http.StatusUnauthorized {
+				t.Fatalf("fragment status = %d, want %d\n%s", statusCode, http.StatusUnauthorized, body)
+			}
+			wantRedirect := BasePath + "/login?next=" + url.QueryEscape(fragmentNext)
+			if got := header.Get("HX-Redirect"); got != wantRedirect {
+				t.Fatalf("HX-Redirect = %q, want %q", got, wantRedirect)
+			}
+			for _, unwanted := range []string{"<!DOCTYPE html>", "<html", "Sign in", "Administrator account"} {
+				if strings.Contains(body, unwanted) {
+					t.Errorf("fragment auth failure returned login content %q: %s", unwanted, body)
+				}
+			}
+		})
+	}
+
+	response, err := server.client.Get(server.server.URL + "/ui/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusSeeOther {
+		t.Fatalf("normal navigation status = %d, want 303", response.StatusCode)
+	}
+	if want := BasePath + "/login?next=" + url.QueryEscape("/ui/status"); response.Header.Get("Location") != want {
+		t.Fatalf("normal navigation Location = %q, want %q", response.Header.Get("Location"), want)
+	}
+}
+
+func TestFragmentSetupRedirectUsesHXRedirect(t *testing.T) {
+	server := newAuthTestServer(t, "setup-token-value-0123456789", auth.DefaultRateLimitPolicy())
+	disableRedirects(server.client)
+	req, err := http.NewRequest(http.MethodGet, server.server.URL+"/ui/status/updates/fragment", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("HX-Request", "true")
+	response, err := server.client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := responseBody(t, response)
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("fragment setup status = %d, want %d\n%s", response.StatusCode, http.StatusUnauthorized, body)
+	}
+	if got := response.Header.Get("HX-Redirect"); got != BasePath+"/setup" {
+		t.Fatalf("HX-Redirect = %q, want %q", got, BasePath+"/setup")
+	}
+	if strings.Contains(body, "Set up Bittern") || strings.Contains(body, "<html") {
+		t.Fatalf("fragment setup redirect returned setup HTML: %s", body)
 	}
 }

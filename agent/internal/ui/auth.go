@@ -28,7 +28,7 @@ func (h *handler) authenticate(next http.Handler) http.Handler {
 		switch {
 		case setup:
 			if !setupPath {
-				http.Redirect(w, r, BasePath+"/setup", http.StatusSeeOther)
+				h.redirectToAuth(w, r, BasePath+"/setup")
 				return
 			}
 			if session == nil {
@@ -64,10 +64,12 @@ func (h *handler) authenticate(next http.Handler) http.Handler {
 			}
 		case !authenticated:
 			target := SafeNext("")
-			if r.Method == http.MethodGet {
+			if isHXRequest(r) {
+				target = hxReturnPath(r)
+			} else if r.Method == http.MethodGet {
 				target = SafeNext(r.URL.RequestURI())
 			}
-			http.Redirect(w, r, BasePath+"/login?next="+url.QueryEscape(target), http.StatusSeeOther)
+			h.redirectToAuth(w, r, BasePath+"/login?next="+url.QueryEscape(target))
 			return
 		case setupPath:
 			http.Redirect(w, r, BasePath+"/status", http.StatusSeeOther)
@@ -82,6 +84,48 @@ func (h *handler) authenticate(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// redirectToAuth keeps a normal navigation as a 303 so the browser renders the
+// destination as a page. An HTMX request gets a non-2xx response and
+// HX-Redirect, because a 303 would be followed inside the XHR and the login or
+// setup HTML would be swapped into the live region.
+func (h *handler) redirectToAuth(w http.ResponseWriter, r *http.Request, target string) {
+	if !isHXRequest(r) {
+		http.Redirect(w, r, target, http.StatusSeeOther)
+		return
+	}
+	w.Header().Set("HX-Redirect", target)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusUnauthorized)
+}
+
+func isHXRequest(r *http.Request) bool {
+	return strings.EqualFold(r.Header.Get("HX-Request"), "true")
+}
+
+// hxReturnPath returns the page that owns an HTMX request. HTMX sends the
+// current page in HX-Current-URL; the fragment path is only a fallback for a
+// client that omits the header.
+func hxReturnPath(r *http.Request) string {
+	if current := strings.TrimSpace(r.Header.Get("HX-Current-URL")); current != "" {
+		if parsed, err := url.Parse(current); err == nil && parsed.Path != "" {
+			if next := SafeNext(parsed.RequestURI()); next != "" {
+				return next
+			}
+		}
+	}
+	if r.Method != http.MethodGet {
+		return SafeNext("")
+	}
+	fallback := r.URL.RequestURI()
+	switch r.URL.Path {
+	case BasePath + "/status/fragment", BasePath + "/status/updates/fragment":
+		fallback = BasePath + "/status"
+	case BasePath + "/wizard/apply/fragment":
+		fallback = BasePath + "/wizard/apply"
+	}
+	return SafeNext(fallback)
 }
 
 func (h *handler) showLogin(w http.ResponseWriter, r *http.Request) {

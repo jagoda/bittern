@@ -1214,6 +1214,100 @@ func TestStatusFragmentIsASinglePanel(t *testing.T) {
 	}
 }
 
+func TestStatusPagePollsOnlyTheUpdateCard(t *testing.T) {
+	server, client := newTestServer(t, Options{
+		Status:      MockStatusProvider{Now: func() time.Time { return testNow }},
+		MockPreview: true,
+	})
+	statusCode, body := getPage(t, client, server.URL+"/ui/status?state=ready&update=installing")
+	if statusCode != http.StatusOK {
+		t.Fatalf("status page: %d", statusCode)
+	}
+	assertContains(t, body,
+		`<div id="status-panel">`,
+		`id="update-card-live" hx-get="/ui/status/updates/fragment?state=updating&amp;update=installing"`,
+		`hx-trigger="every 2s"`,
+		`id="status-technical-details"`,
+		`hx-preserve="true"`,
+		`id="status-render-checks-scroll"`,
+		`id="status-network-connections-scroll"`,
+	)
+	if strings.Contains(body, `id="status-panel" hx-get`) {
+		t.Fatal("the status panel still polls the whole page region")
+	}
+	if strings.Contains(body, `hx-get="/ui/status/fragment`) {
+		t.Fatal("the status page still points at the whole-panel fragment")
+	}
+
+	statusCode, fragment := getPage(t, client, server.URL+"/ui/status/updates/fragment?state=ready&update=installing")
+	if statusCode != http.StatusOK {
+		t.Fatalf("update fragment: %d\n%s", statusCode, fragment)
+	}
+	assertContains(t, fragment, "Installing update", `id="update-card-actions"`, `hx-swap-oob="outerHTML"`)
+	for _, unwanted := range []string{"<details", "table-wrap", "status-panel", "<html", "<main"} {
+		if strings.Contains(fragment, unwanted) {
+			t.Errorf("update fragment contains %q", unwanted)
+		}
+	}
+}
+
+func TestOperationFragmentPollsOnlyTheLiveRegion(t *testing.T) {
+	applier := newBlockingOperationApplier()
+	stateRoot := t.TempDir()
+	server, client := newTestServer(t, Options{
+		Applier:   applier,
+		StateRoot: stateRoot,
+	})
+	completeToReview(t, client, server.URL)
+	disableRedirects(client)
+
+	response, err := client.PostForm(server.URL+"/ui/wizard/apply", url.Values{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	select {
+	case <-applier.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the apply operation did not start")
+	}
+	released := false
+	defer func() {
+		if !released {
+			close(applier.release)
+		}
+	}()
+
+	statusCode, body := getPage(t, client, server.URL+"/ui/wizard/apply")
+	if statusCode != http.StatusOK {
+		t.Fatalf("operation page: %d\n%s", statusCode, body)
+	}
+	assertContains(t, body,
+		`<div id="operation-panel">`,
+		`id="operation-live" hx-get="/ui/wizard/apply/fragment"`,
+		`hx-trigger="every 2s"`,
+		`id="operation-technical-details"`,
+		`hx-preserve="true"`,
+	)
+	if strings.Contains(body, `id="operation-panel" hx-get`) {
+		t.Fatal("the operation panel still polls the whole page region")
+	}
+
+	statusCode, fragment := getPage(t, client, server.URL+"/ui/wizard/apply/fragment")
+	if statusCode != http.StatusOK {
+		t.Fatalf("operation fragment: %d\n%s", statusCode, fragment)
+	}
+	assertContains(t, fragment, "Starting the recording service", `class="operation-progress"`)
+	for _, unwanted := range []string{"<details", "Technical details", "operation-panel", "<html", "<main"} {
+		if strings.Contains(fragment, unwanted) {
+			t.Errorf("operation fragment contains %q", unwanted)
+		}
+	}
+	close(applier.release)
+	released = true
+	waitForTerminalOperation(t, stateRoot)
+}
+
 func TestVendoredHTMXIsPinned(t *testing.T) {
 	const want = "d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717"
 	data, err := assets.UI.ReadFile("ui/static/htmx-2.0.11.min.js")
