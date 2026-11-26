@@ -32,6 +32,7 @@ tracker.
 | UX-11 | Show a visual progress indicator after about 250ms | Level 2 hardware run |
 | UX-12 | A passing geometric check is not proof a screen looks right | Level 2 hardware run, BIT-020 |
 | UX-13 | Read every changed screen's full-page screenshots before human review | Level 2 hardware run, BIT-033 |
+| UX-14 (candidate) | Live updates must not disturb state the user owns | Live refresh bench report, BIT-044 |
 | EN-1 | A bug fix carries the regression test that reproduces it | GK41 bug ledger, ADR 0012 |
 | EN-2 | Tests assert structure and values, not user-facing copy, because copy is expected to change | QEMU adoption fixture note, BIT-035 |
 | EN-3 | A regression test starts from the state that failed in the field, and says so | Reboot failures, field parity |
@@ -65,6 +66,8 @@ does not apply gets a one-line reason in the review.
 - **Progress for anything slow.** Show the current step and elapsed time, survive a refresh or a
   reopened tab, and refuse a second operation while one runs. Start a visible indicator after about
   250ms; do not flash it for instant work.
+- **Live updates preserve owner state.** A poll may update server-owned data, but it must not close a
+  disclosure, move focus, change scroll or selection, or discard unsaved input the owner controls.
 - **Mobile and desktop.** Check the screen at phone width, around 390 by 844, and at desktop width, at
   least 1280 by 800, with no page-level horizontal scrolling, clipped text, or unreachable controls.
 - **Visual quality, not only geometry.** Check wrapping, sizing, spacing, hierarchy, density, and
@@ -348,6 +351,32 @@ does not apply gets a one-line reason in the review.
 - Check: The [UX review checklist](#ux-review-checklist) asks for the screenshots to be read at every
   width before human review, and [tests/browser/README.md](../tests/browser/README.md) names the
   screenshots as the implementing agent's review artifact.
+
+### UX-14 Live updates must not disturb state the user owns
+
+- Date: 2026-11-26 (candidate, confirm at the next principles review)
+- Rule: A live update may replace server-owned data. It must not close a disclosure, move focus,
+  change scroll or selection, or discard unsaved input that the owner controls. Update the smallest
+  region that changed, preserve stable elements across the swap, or restore the client state after
+  the swap. Keep the live update; do not solve the conflict by disabling it.
+- Evidence: [the live refresh state loss note](notes/2026-11-26-live-refresh-state-loss.md) records a
+  bench report where expanded cards collapsed on every refresh and the sign-in page appeared inside
+  the status panel after an update. The status poll at
+  [status.html](../ui/templates/status.html):4 and the operation poll at
+  [operation.html](../ui/templates/operation.html):6 replace whole panels with `innerHTML`, including
+  the disclosures at [status_panel.html](../ui/templates/status_panel.html):241 and
+  [operation_panel.html](../ui/templates/operation_panel.html):36. [Pattern S6](design/patterns.md#status-page)
+  already requires the refresh not to move focus or steal scroll, and
+  [flow F3](design/flows.md#f3-an-interrupted-flow-can-be-resumed-or-restarted-without-losing-work)
+  already requires input to survive an expired session and a daemon restart.
+- Do: Keep the panel and its stable controls in place, update only the values or cards that changed,
+  or mark the stable nodes with a stable id and `hx-preserve` so the swap keeps them.
+- Don't: Replace a whole panel that contains a disclosure, a focused control, a scroll region, or a
+  form on a timer.
+- Check: [BIT-044](plan/implementation-plan.md#bit-044-preserve-owner-state-across-live-refreshes)
+  requires a browser test that opens Technical details, focuses a control, scrolls a table region,
+  waits for at least two polls, and asserts the state is unchanged while the values still update.
+  The [UX review checklist](#ux-review-checklist) applies the same rule to every live update.
 
 ## Engineering
 

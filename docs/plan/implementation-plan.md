@@ -1454,6 +1454,118 @@ run finished green. A rerun is not a fix and does not close this ticket.
 - `make check` passes.
 **Depends on.** None. **Size.** S.
 
+### BIT-044 Preserve owner state across live refreshes
+**Status.** New on 2026-11-26 from
+[the live refresh state loss note](../notes/2026-11-26-live-refresh-state-loss.md). Unqueued.
+**Goal.** Keep the live status and operation updates without closing disclosures, moving focus,
+changing scroll or selection, or discarding unsaved input that the owner controls.
+**Evidence.** The bench report in the note records expanded cards collapsing on every refresh. The
+status poll at [status.html](../../ui/templates/status.html):4 and the operation poll at
+[operation.html](../../ui/templates/operation.html):6 replace whole panels with `innerHTML`, and the
+fragments render every `details` element closed at [status_panel.html](../../ui/templates/status_panel.html):241
+and [operation_panel.html](../../ui/templates/operation_panel.html):36. [Pattern S6](../design/patterns.md#status-page)
+already requires the refresh not to move focus or steal scroll.
+**Scope.**
+- Keep the 15 second status refresh and the 2 second update and operation refresh. Do not solve this
+  by disabling live updates or by reloading the page.
+- Update only server-owned values. A stable disclosure, control, table scroll region, or input inside
+  the polled region must keep its client state across a swap. Use stable ids and `hx-preserve`, a
+  smaller swap target, out-of-band updates, or an equivalent mechanism. Do not add a dependency.
+- Cover `/ui/status`, including the update card, and `/ui/wizard/apply` while an operation runs.
+- Keep the fragment a fragment. Do not turn a poll into a full page response.
+**Acceptance.**
+- On `/ui/status`, open Technical details, focus a control inside the panel, and scroll a table scroll
+  region. After at least two poll cycles the disclosure is still open, focus is on the same control,
+  the table scroll offset is unchanged, and the status values still update when the document changes.
+- On `/ui/wizard/apply` with a running operation, open Technical details, focus a control, and scroll.
+  After at least two 2 second polls the disclosure, focus, and scroll are unchanged, and the operation
+  progress still updates.
+- A text field placed inside the polled region by a fixture keeps its value across a poll. The current
+  status and operation regions have no text field, so the test also proves the mechanism for the next
+  one.
+- The preservation test runs at phone and desktop width in `make ui-browser-check`.
+- `make check` passes.
+**Test that would have caught it.** A browser scenario that loads the page, opens a disclosure,
+focuses a control, scrolls a table region, waits for a real poll, and asserts the state is unchanged.
+The current check loads each route once and opens disclosures only after the screenshot
+([check.mjs](../../tests/browser/check.mjs):109-148), and the fragment test asserts markup only
+([ui_test.go](../../agent/internal/ui/ui_test.go):1202-1216).
+**Depends on.** None. **Size.** M.
+
+### BIT-045 Keep the administrator session across a daemon restart
+**Status.** New on 2026-11-26 from
+[the live refresh state loss note](../notes/2026-11-26-live-refresh-state-loss.md). Blocked on
+[OQ-37](../open-questions.md#register).
+**Goal.** An authenticated administrator session survives the `bitternd` restart that an update
+performs, without weakening the session lifetime, logout, password change, or reset behavior.
+**Evidence.** Sessions are an in-memory map at [auth.go](../../agent/internal/auth/auth.go):93,129,
+and the only persistent auth file is the password record at [auth.go](../../agent/internal/auth/auth.go):158-182,241,453-460.
+The update stops and restarts the unit at [engine.go](../../agent/internal/update/engine.go):340,347.
+The bench report shows the owner signed out after the update.
+**Scope.**
+- Implement the option chosen by OQ-37. The provisional smallest reversible default is a mode 0600
+  session file under `/var/lib/bittern`, written atomically and pruned on load.
+- Keep the 12 hour absolute lifetime. A session is invalid after logout, password change, setup, or
+  reset, and expired sessions are removed on load and on access.
+- Do not put a session id or CSRF token in status, logs, the support bundle, or an error page. A
+  corrupt or unreadable session store fails closed by discarding sessions, not by granting access.
+- Do not change the cookie attributes or CSRF behavior in this ticket.
+**Acceptance.**
+- Log in, restart the daemon or reopen the auth store with the same state root, and request an
+  authenticated page with the old cookie. The request is authenticated and a mutating request with the
+  old CSRF token still passes.
+- Log out, restart, and request with the old cookie. The session is rejected.
+- Expire the session, restart, and request with the old cookie. The session is rejected.
+- Change the administrator password, restart, and request with the old cookie. The session is
+  rejected. The same holds after reset and after a new setup.
+- A corrupt session file is discarded and no request is authenticated.
+- No session id, CSRF token, or session file content appears in status output or logs.
+**Test that would have caught it.** `TestSessionSurvivesStoreReopen` in
+[auth_test.go](../../agent/internal/auth/auth_test.go): login, capture the cookie, call `Open` again
+with the same state path, and assert `Session` returns the authenticated session. Add the logout,
+expiry, password-change, and corrupt-file cases. The existing reopen test only checks that setup is
+not required again ([auth_test.go](../../agent/internal/auth/auth_test.go):138-143), and the session
+test never reopens the store ([auth_test.go](../../agent/internal/auth/auth_test.go):167-205).
+**Depends on.** OQ-37. **Size.** M.
+
+### BIT-046 Keep sign-in out of live fragments
+**Status.** New on 2026-11-26 from
+[the live refresh state loss note](../notes/2026-11-26-live-refresh-state-loss.md). Unqueued.
+**Goal.** A fragment request with no session, an expired session, or a session lost to a daemon
+restart causes a top-level sign-in, not an in-page login form. The full-page redirect behavior stays
+as it is.
+**Evidence.** The auth middleware redirects every unauthenticated GET at
+[auth.go](../../agent/internal/ui/auth.go):65-71 without checking `HX-Request`. The browser follows
+the 303 inside the XHR, and HTMX swaps the 200 login page into `#status-panel`. The code already uses
+`HX-Request` and `HX-Redirect` for the operation fragment at
+[wizard.go](../../agent/internal/ui/wizard.go):263,699, so the pattern exists elsewhere.
+**Scope.**
+- On an authenticated fragment route, detect `HX-Request: true` and return a response that HTMX will
+  not swap, with `HX-Redirect` to `/ui/login?next=<owning page>`. A 401 with an empty body and
+  `HX-Redirect` is the recommended shape. Do not return login or setup HTML in a fragment response.
+- Use the owning page for `next`: `/ui/status` for the status fragment and `/ui/wizard/apply` for the
+  operation fragment. Do not return the fragment URL in `next`.
+- Keep the full-page behavior: a normal GET to `/ui/status` still redirects to
+  `/ui/login?next=/ui/status`.
+- Apply the same rule to the setup-required branch for a fragment, so a setup page is not injected
+  either.
+**Acceptance.**
+- `GET /ui/status/fragment` with `HX-Request: true` and no valid session returns a non-2xx status,
+  carries `HX-Redirect: /ui/login?next=/ui/status`, and contains no `<html`, `<main`, sign-in form, or
+  setup form.
+- The same response shape holds for an expired session and for a stale cookie after the auth store is
+  reopened.
+- `GET /ui/wizard/apply/fragment` with `HX-Request: true` and no valid session redirects to
+  `/ui/login?next=/ui/wizard/apply` with no fragment content.
+- A full-page GET to `/ui/status` with no session still returns 303 to `/ui/login?next=/ui/status`.
+- In the browser check, clear the session cookie, wait for the next poll, and assert the browser is on
+  the login page and `#status-panel` does not contain a sign-in form.
+**Test that would have caught it.** A handler test that sends `HX-Request: true` with no cookie or a
+stale cookie to the fragment route and asserts the status, `HX-Redirect`, and an empty body. The
+current fragment test has no auth store ([ui_test.go](../../agent/internal/ui/ui_test.go):1202-1216),
+and the route table test also uses a nil store ([routes_test.go](../../agent/internal/ui/routes_test.go):233).
+**Depends on.** None. Interacts with BIT-045. **Size.** S.
+
 ### BIT-022 Tailscale remote access and Frigate UI support path
 **Goal.** Make Tailscale remote access an owner-managed, audited feature of the Bittern UI, and use a
 tailnet-only `tailscale serve` endpoint for the loopback Frigate UI as the interim review, event and
