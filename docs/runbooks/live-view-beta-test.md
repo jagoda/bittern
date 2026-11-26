@@ -1,17 +1,20 @@
 # Live view beta test
 
 - Date: 2026-11-26
-- Status: maintainer checklist for the first live view beta generation. Not run yet. The live view is
+- Status: maintainer checklist for the generation 3 live view beta. Not run yet. The live view is
   verified on the QEMU fixture; this is the first run on a real camera, a real phone, and the
-  published beta channel.
+  published beta channel with the sizing, full-width shell and landing changes.
 - Bench: Debian 13 amd64, one management NIC on the house LAN, the camera NIC on the camera network,
   one to four cameras, a local console, and a phone on the house LAN.
-- Payload: the published `app-beta-000002` release and the device's installed generation 1
-  (`app-beta-000001`). Generation 2 carries the live view and the Frigate 0.18.3 pin.
+- Payload: the published `app-beta-000003` release and the device's installed generation 1
+  (`app-beta-000001`). Generation 2 introduced the live view and the Frigate 0.18.3 pin. Generation
+  3 adds the live view sizing fix, the full-width shell and the state-aware landing.
 - Related: [ADR 0034](../adr/0034-live-view-owned-by-bittern.md),
   [BIT-023](../plan/implementation-plan.md#bit-023-live-view),
   [live view slice 1a](../notes/2026-11-26-live-view-slice-1a.md),
   [live view slice 1b](../notes/2026-11-26-live-view-slice-1b.md),
+  [live view sizing](../notes/2026-11-26-live-view-sizing.md),
+  [full-width shell and landing](../notes/2026-11-26-full-width-shell-and-landing.md),
   [beta bench rollout](beta-bench-rollout.md),
   [update card](../notes/2026-11-22-update-card-ui.md),
   [0.18.3 pin](../notes/2026-11-26-frigate-0.18.3-pin.md),
@@ -27,8 +30,9 @@ generation 1, signed in, with at least one camera in the configuration.
 
 The live view MVP is the grid at `/ui/live`, the single-camera page at `/ui/live/{camera}`, the
 authenticated MSE and HLS proxy, the snapshot fallback, and the per-device layout with the 1, 4 and
-9 device ceilings. Generation 2 is also the first published bundle that carries the Frigate 0.18.3
-pin, which fixes a critical security issue.
+9 device ceilings. Generation 2 introduced it and the Frigate 0.18.3 pin. Generation 3 makes the
+player fit the space it is given, fills the page shell to the device width, and resolves the root
+and post-sign-in landing from setup state and the configured camera count.
 
 ## Preconditions
 
@@ -36,7 +40,7 @@ Run the checks in order and do not work around a failed one.
 
 - [ ] The device is on generation 1, prepared from the `app-beta-000001` kit, and updated through the
       beta bench rollout. That kit's baseline pins 0.18.2, which the rollback check depends on. Do
-      not rebuild the device from the generation 2 kit for this run.
+      not rebuild the device from the generation 3 kit for this run.
 
 ```sh
 sudo bittern update status
@@ -46,8 +50,8 @@ curl -fsS http://127.0.0.1:8080/api/version
 
 Expected: `committed: generation 1 (0.0.0-beta.1-<short>), channel beta` and
 `running: generation 1 (0.0.0-beta.1-<short>)`; the pointer file contains `1`; the version endpoint
-reports `baseline: false` and the same version. If the pointer contains `2`, the device is already on
-generation 2. Roll it back first, or restart from the beta bench rollout.
+reports `baseline: false` and the same version. If the pointer contains `2` or `3`, the device is
+not on the generation 1 baseline. Roll it back or restart from the beta bench rollout.
 
 - [ ] The maintainer is signed in at `https://<lan0-address>/ui/status` and the Updates card shows
       generation 1 as the installed version.
@@ -56,6 +60,10 @@ generation 2. Roll it back first, or restart from the beta bench rollout.
       cameras are needed for the tile assignment check, and four make the four-tile grid a full
       grid. With one camera, checks 2 and 4 are limited to empty tiles and the assignment rule
       cannot be observed; record that as not covered.
+
+- [ ] Record the stream resolution of each camera before the live checks. Use a 1080p camera for the
+      fit check and a 4K camera as well when one is available. If the bench has no 4K camera, run
+      the 1080p case and record 4K as not covered; do not claim it from the browser stub.
 
 - [ ] The camera network is connected and the camera is reachable on `cam0`. The live view uses the
       appliance's camera network, not the house LAN.
@@ -79,10 +87,11 @@ sudo cat /etc/bittern/install-channel
 
 Expected: `beta`.
 
-- [ ] A desktop browser at 1280 by 800 and a phone at 390 by 844 are on the house LAN and can open
-      the appliance certificate. Accept the certificate once on each device.
+- [ ] A desktop browser at 1280 by 800, the same desktop at 1920 by 1080 or in a device mode at
+      1920 by 1080, and a phone at 390 by 844 are on the house LAN and can open the appliance
+      certificate. Accept the certificate once on each device.
 
-- [ ] The generation 2 release is published and approved. The beta bench rollout records the release
+- [ ] The generation 3 release is published and approved. The beta bench rollout records the release
       URL and the approval. The live view test starts after the release is public.
 
 Record the run as you go:
@@ -92,44 +101,56 @@ Record the run as you go:
 | Date and maintainer | |
 | Bench box and management address | |
 | Generation 1 version | |
-| Generation 2 version and release URL | |
-| Generation 2 release run URL | |
-| Generation 2 publish run URL | |
+| Generation 3 version and release URL | |
+| Generation 3 release run URL | |
+| Generation 3 publish run URL | |
 | Apply result and running image digest | |
 | Startup time, one camera, desktop | |
 | Startup time, one camera, phone | |
+| 1080p fit and full-screen result | |
+| 4K fit and full-screen result | |
+| Full-width shell result, status and live | |
+| Landing result, all cases | |
+| Status, wizard and login empty and error result | |
 | Offline camera result | |
 | Camera network loss result | |
 | Rollback result and running image digest | |
 
-## What generation 2 changes
+## What generation 3 changes
 
-| Area | Generation 1 | Generation 2 |
+| Area | Generation 1 | Generation 3 |
 | --- | --- | --- |
-| Live view | No page | `/ui/live` grid, `/ui/live/{camera}`, MSE and HLS through `bitternd`, snapshot fallback, per-device layout |
+| Live view | No page | `/ui/live` grid, `/ui/live/{camera}`, MSE and HLS through `bitternd`, snapshot fallback, per-device layout, and a player sized from the space it is given on both axes |
+| Full screen | None | A player control that contains the video, keeps the controls and status reachable, and leaves through the control, Escape or Back |
+| Page shell | 68rem centered maximum | Full device width with the layout gutter; prose, hints and controls keep their measures; the status grid and live wall use the extra room |
+| Landing | Fixed destination | `/ui/wizard` before setup completes, `/ui/live` with at least one camera, `/ui/status` with none; the next visit follows the current state |
 | Frigate image | 0.18.2 | 0.18.3, which fixes CVE-2026-123007 |
 | Renderer | No `go2rtc` block | `go2rtc.streams` and `cameras.<name>.live.streams` for every camera |
 | Device ceilings | None | 1 on a phone, 4 on a tablet, 9 on a desktop, 9 hard media sessions |
 
+Generation 2 introduced the live view, the `go2rtc` renderer and the 0.18.3 pin. Generation 3 adds
+the sizing fix, the full-width shell and the state-aware landing. A device on generation 1 receives
+all of it in one update.
+
 The update transaction installs the bundle and restarts the daemon and the recording service. The
 generated Frigate configuration and compose file are written by an apply, not by the update.
-Generation 2 therefore has two parts: the card install, then one apply from the new bundle. The
-bundle carries the 0.18.3 pin; the apply writes it to the compose file and pulls the image. Until the
-apply runs, the container keeps 0.18.2 even though the card reports generation 2. This is a known gap
-in the update path, recorded in
+Generation 3 therefore has two parts: the card install, then one apply from the new bundle. The
+bundle carries the 0.18.3 pin; the apply writes it to the compose file, adds the `go2rtc` block and
+pulls the image. Until the apply runs, the container keeps 0.18.2 even though the card reports
+generation 3. This is a known gap in the update path, recorded in
 [the update apply gap note](../notes/2026-11-26-live-view-beta-update-gap.md). One camera apply below
 is a temporary bridge, not a product procedure.
 
-## Install generation 2
+## Install generation 3
 
 ### Before
 
 The Updates card shows the installed generation 1 version. It reads "Up to date" if no check has
-run since the release, or "Update available" for generation 2 if one has. Select Check for updates
+run since the release, or "Update available" for generation 3 if one has. Select Check for updates
 to make the card current.
 
-Expected: "Update available", "Version `0.0.0-beta.2-<short>` is available. The appliance is running
-version `0.0.0-beta.1-<short>`.", update number 2, and an Install update button. The release is
+Expected: "Update available", "Version `0.0.0-beta.3-<short>` is available. The appliance is running
+version `0.0.0-beta.1-<short>`.", update number 3, and an Install update button. The release is
 public and the check is not rate limited.
 
 If the card offers a different version, stop. The tag is computed from the published releases, and a
@@ -139,7 +160,7 @@ different generation means the channel or the device is not in the state this ru
 
 Select Install update.
 
-Expected: "Installing update `0.0.0-beta.2-<short>`", the current step, "N of M steps completed", and
+Expected: "Installing update `0.0.0-beta.3-<short>`", the current step, "N of M steps completed", and
 a two-second refresh. The steps read in this order: checking the appliance, checking the update,
 preparing the update, saving the current settings, stopping the recording service, switching to the
 new version, preparing the recording software, starting the appliance, starting the recording
@@ -157,7 +178,7 @@ update.
 
 ### After
 
-Expected: the card reads "Up to date", the installed version is `0.0.0-beta.2-<short>`, and the card
+Expected: the card reads "Up to date", the installed version is `0.0.0-beta.3-<short>`, and the card
 offers "Roll back to version `0.0.0-beta.1-<short>`". Collect:
 
 ```sh
@@ -166,9 +187,9 @@ sudo cat /var/lib/bittern/app/current
 curl -fsS http://127.0.0.1:8080/api/version
 ```
 
-Expected: `committed: generation 2 (0.0.0-beta.2-<short>)` and
-`running: generation 2 (0.0.0-beta.2-<short>)`; the pointer file contains `2`; the version endpoint
-reports `baseline: false` and the generation 2 version. The update journal is absent and the newest
+Expected: `committed: generation 3 (0.0.0-beta.3-<short>)` and
+`running: generation 3 (0.0.0-beta.3-<short>)`; the pointer file contains `3`; the version endpoint
+reports `baseline: false` and the generation 3 version. The update journal is absent and the newest
 history record is `committed`.
 
 On the status page, open Technical details. "Recording software digest" now names the 0.18.3 digest
@@ -177,7 +198,7 @@ from the new bundle. That is the pin the daemon expects, not the image the conta
 ### Apply the new bundle
 
 Open Cameras, open any camera, and select Apply camera change without changing a value. This runs
-an apply with the generation 2 daemon. It renders the new `go2rtc` block, writes the compose file
+an apply with the generation 3 daemon. It renders the new `go2rtc` block, writes the compose file
 with the 0.18.3 image, pulls the image, and restarts the recording service.
 
 The page can take minutes and has no step list. Leave it open. Do not select Apply again and do not
@@ -209,11 +230,16 @@ On the status page, Technical details should show the 0.18.3 recording software 
 Open `https://<lan0-address>/ui/live` for the checks below. Use the same browser at 1280 by 800
 until the phone check. Record the observed time and the exact sentence for every failure.
 
-### 1. One camera, full width
+### 1. One camera, full width and fit
 
-Open Live. If the grid opens, open Layout and choose One camera. The single tile spans the page. The
+At 1280 by 800, open Live. If the grid opens, open Layout and choose One camera. The single tile
+spans the page and the player fills the space left by the heading, controls and status. The
 single-camera page at `/ui/live/<camera-id>` is the same view with the main profile; the camera id is
 in the address bar of the camera's edit page. With one camera, Live opens on that camera directly.
+
+Repeat the view at 1920 by 1080. The tile uses the extra width instead of stopping at the old 68rem
+shell, and the player still fits the available height. The page has no horizontal or vertical
+document scroll, and the footer is absent on the live grid page.
 
 Start timing when the page starts loading or when you select the preset. Stop when the badge reads
 "Live" and the picture moves. Record the seconds.
@@ -280,7 +306,9 @@ scroll jump, or a video that stops while the badge stays "Live".
 
 ### 6. One tile full width and back
 
-On the four-tile grid, select Open full width on tile 1. Wait for "Live", then select Back to grid.
+On the four-tile grid, select Open full width on tile 1. Wait for "Live". The tile spans the grid,
+switches to the main profile and fits the viewport without page scrolling or overflow. Select Back
+to grid.
 
 Expected: tile 1 spans the grid and switches to the main profile; the other three tiles keep
 playing. Back to grid returns tile 1 to its place on the sub profile, and the other three are still
@@ -303,6 +331,86 @@ live tile in bounded order, so exactly one media connection is active.
 
 A failure looks like more than one tile playing, no ceiling note, error badges on the idle tiles,
 horizontal overflow, controls off screen, or two media connections after starting a second tile.
+
+### 8. Player fit and browser full screen at 1080p and 4K
+
+This check uses the native stream size, not the tile size. Use a 1080p camera first. If a 4K camera
+is available, repeat the whole check with it and record both results. If no 4K camera is available,
+record 4K as not covered.
+
+On the four-tile grid, open the 1080p camera full width and wait for "Live". Confirm the media box
+fits the available width and height and the picture is contained, not shown at its native size. At
+1280 by 800 and at 1920 by 1080, the document has no horizontal or vertical overflow: the video,
+heading, status and controls all stay inside the viewport.
+
+Select Full screen. Expected: the player fills the screen, the video is contained with no cropping
+or overflow, the page underneath does not scroll, and the status, profile and exit controls stay
+reachable. Leave full screen with the control, enter again and leave with Escape, then enter again
+and leave with Back. Each exit returns to the same tile in the same grid state.
+
+Repeat with the 4K camera if one is available. The stream size must not change the geometry: a 4K
+stream fits the same box as a 1080p stream, and the page does not grow to the native resolution.
+
+A failure looks like a picture that runs past the card or viewport, a vertical or horizontal
+scrollbar on the grid or in full screen, a video that is cropped instead of contained, controls or
+status pushed off screen, Escape or Back leaving the page locked or scrolled, or a 4K stream that
+sizes the page differently from a 1080p stream. A browser without the Fullscreen API hides or
+rejects the control; record that and use Open full width for the geometry check.
+
+### 9. Full-width shell on status and live
+
+Open `/ui/status` and `/ui/live` at 1280 by 800, then at 1920 by 1080, and finally at 390 by 844.
+Look at the left and right edges of the header and the main content, not only the middle of the
+page.
+
+Expected: the header and main content share the same full-width shell and stop only at the layout
+gutter, 16 pixels at phone width and 24 pixels at 1280 and 1920. At 1920 the status card grid and the
+live wall use the extra room; they do not stay at a centered 68rem column. Paragraphs and ledes stop
+at the 65ch reading measure, hints at 60ch, and form controls at 32rem, so text does not run the
+full width of a wide monitor. Long paths and digests wrap, and a comparison table scrolls inside
+its `.table-wrap` instead of widening the page. At phone width the header navigation wraps below
+the brand and nothing is cut off.
+
+A failure looks like a narrow centered column at 1920, a header that is narrower than the page, a
+paragraph or hint that runs the full width, a form control stretched across the monitor, a table
+that widens the page, horizontal scrolling, or text pressed against the viewport edge.
+
+### 10. Landing rules
+
+Use the root `/ui` and the sign-in result, not a bookmarked page. The rule is: setup before the
+device is initialized, live when it is initialized and has a camera, status when it is initialized
+and has none. A requested local `/ui` target still wins over the default.
+
+| Case | How to reach it | Expected |
+| --- | --- | --- |
+| Not set up | A fresh device before the first-run apply, or the QEMU firstboot fixture. Do not delete or edit the setup marker on the bench to simulate this. | Signed out, `/ui` goes to `/ui/setup` while the administrator password is absent. After the password exists but before the first apply succeeds, `/ui` and sign-in go to `/ui/wizard`, not live or status. No default landing skips setup. |
+| Set up with cameras | The bench after the update and apply. Visit `/ui` signed out, then sign in. | Sign-in opens `/ui/live`. The header marks Live as the current section, offers Live and omits Setup. A direct `/ui/login?next=/ui/status` still returns to status after sign-in. |
+| Set up with no cameras | On Cameras, remove the last camera. Then visit `/ui` and sign out and in again. | The next visit lands on `/ui/status`, not a stale live page. The header omits Live and marks Status. A direct `/ui/live` says "No cameras to watch" and offers Add camera. |
+| Last camera removed | Start on a set-up device with one camera and the live page open. Remove that camera on Cameras, then visit `/ui` or sign out and in. | The next visit lands on `/ui/status`. The removed camera does not keep the live landing, and Live disappears from the header. A reload of the old live URL shows the no-camera state, not a broken player. |
+
+The no-camera case is created by the last-camera removal, so run them together. Restore the camera
+at the end of the check if the rest of the run needs it; removing and re-adding a camera is a normal
+configuration apply, not a hand edit.
+
+A failure looks like a signed-in root visit that stays on live with no camera, a no-camera device
+that lands on live, a half-finished setup that lands on status, a sign-in that ignores the resolver,
+or a last-camera removal that leaves the next visit on the old live page.
+
+### 11. Empty and error states on status, wizard and login
+
+Widening the shell can break pages that were not part of the live view work, especially when their
+content is empty or an error is present. Check each page at 390 by 844 and 1280 by 800, and check
+status at 1920 by 1080 as well.
+
+| Page | State to reach | What to look at |
+| --- | --- | --- |
+| Status | A set-up device with no cameras, and an unknown or failed section if one is already present. Do not stop a service only to create an error on the bench. | The page fills the width, cards stack at phone width and use two columns at 1280 and above, the update card alert wraps instead of forcing a scrollbar, and long error text and tables stay inside their cards. Prose keeps its measure, and the page has no horizontal scroll. |
+| Wizard | `/ui/wizard` and the camera step with an empty camera list. Open the step, do not select Apply on the bench. | The stepper and cards fit both widths, the empty camera list offers Add camera without a broken row, hints and fields keep their measures, and the next action is visible without horizontal scrolling. A validation error, if you reach one safely, stays inside its field and does not widen the page. |
+| Login | The normal sign-in page and one failed sign-in with a wrong password. | The card and fields stay readable at both widths, the "Sign-in failed" alert wraps above the form, the primary action stays visible, and the error does not stretch the page or push the form off screen. |
+
+A failure looks like an empty state with no next action, an error alert that widens the page, a
+field or table cut off at phone width, a form that stretches to the full width of a 1920 monitor,
+or a page that scrolls horizontally only when the empty or error state is visible.
 
 ## The two failure modes worth naming
 
@@ -351,8 +459,8 @@ two-second refresh. The daemon restarts and the session ends; sign in again.
 
 Expected after: "Rolled back to version `0.0.0-beta.1-<short>`", the summary "You rolled back from
 the status page. Configuration and recordings were not reverted.", "Last installed version
-`0.0.0-beta.2-<short>`", and "The next update must be newer than version
-`0.0.0-beta.2-<short>`." The rollback link is gone. Collect:
+`0.0.0-beta.3-<short>`", and "The next update must be newer than version
+`0.0.0-beta.3-<short>`." The rollback link is gone. Collect:
 
 ```sh
 sudo bittern update status
@@ -360,16 +468,17 @@ sudo cat /var/lib/bittern/app/current
 curl -fsS http://127.0.0.1:8080/api/version
 ```
 
-Expected: `committed: generation 2 (0.0.0-beta.2-<short>)` and
+Expected: `committed: generation 3 (0.0.0-beta.3-<short>)` and
 `running: generation 1 (0.0.0-beta.1-<short>)`; the pointer file contains `1`; the version endpoint
 reports the generation 1 version with `baseline: false`; the newest history record is `rolled-back`
-with `restored_generation` 1. The committed version stays at 2. Do not edit
+with `restored_generation` 1. The committed version stays at 3. Do not edit
 `/var/lib/bittern/update/state.json`, the pointer, or the history to make the card look clean. A
-republished generation 1 or 2 is not a valid next update; the next tag must be generation 3 or later.
+republished generation 1, 2 or 3 is not a valid next update; the next tag must be generation 4 or
+later.
 
 ### Return the image to 0.18.2
 
-The rollback restarts the recording service with the compose file the generation 2 apply wrote, so
+The rollback restarts the recording service with the compose file the generation 3 apply wrote, so
 the container is still on 0.18.3 until the rolled-back bundle applies. Select Apply camera change on
 a camera again, as in the apply step. The image step returns the compose file and the running
 container to 0.18.2. Verify:
@@ -383,9 +492,10 @@ Expected: `ghcr.io/blakeblackshear/frigate:0.18.2@sha256:fd60f99ffd4eb6c42360ed4
 This is the security consequence of the rollback. 0.18.2 is vulnerable to CVE-2026-123007
 (GHSA-7822-v38f-8p44): an unauthenticated nginx HTTP/2 remote code execution as root, CVSS 9.8,
 affecting 0.18.0 to 0.18.2 and fixed in 0.18.3. Running the 0.18.2 image reintroduces that exposure
-until generation 3 carries 0.18.3 again. Do this on the bench appliance on the house LAN, not on a
-device exposed beyond it. If you stop before the post-rollback apply, the bundle is rolled back but
-the engine stays on 0.18.3; record which state you left.
+until a generation newer than 3 is installed with 0.18.3; the next tag must be generation 4 or later
+and must keep the 0.18.3 pin. Do this on the bench appliance on the house LAN, not on a device
+exposed beyond it. If you stop before the post-rollback apply, the bundle is rolled back but the
+engine stays on 0.18.3; record which state you left.
 
 ## If something fails
 
@@ -423,8 +533,8 @@ sudo journalctl -u bittern-image-prewarm.service -n 100 --no-pager
 sudo docker inspect --format '{{.Config.Image}}' frigate
 ```
 
-- The run URLs: the generation 2 release run, the called publish run, and the release URL. The
-  release URL is `https://github.com/jagoda/bittern/releases/tag/app-beta-000002`.
+- The run URLs: the generation 3 release run, the called publish run, and the release URL. The
+  release URL is `https://github.com/jagoda/bittern/releases/tag/app-beta-000003`.
 
 Never include `/etc/bittern/secrets.yaml`, a camera URL with credentials, the administrator
 password, the setup token, the short code, or the setup URL fragment in a report or a support
@@ -444,8 +554,8 @@ bundle. Read the daemon log before sharing it.
 | Kiosk mode | No full-screen kiosk. | OQ-25 |
 | Frigate UI proxy | No embedded or proxied Frigate UI; the support path remains loopback. | OQ-38 |
 | Account-level layout | The layout is a per-device cookie. It is lost in private browsing, after a cookie clear, or on a new device. | ADR 0034 |
-| A wide 1920 wall | The page shell caps the grid at 68rem, so the tiles keep their 1280 width at 1920. | OQ-40 |
-| An apply after update | The update installs the bundle but does not write the generated configuration. This runbook uses one camera apply as a temporary bridge. | [update apply gap](../notes/2026-11-26-live-view-beta-update-gap.md) |
+| A real 4K camera | The browser check stubs 3840x2160 and the QEMU fixture serves 1920x1080. If the bench has no 4K camera, the 4K fit and full-screen case is not covered in the field. | BIT-023 |
+| An apply after update | The update installs the bundle but does not write the generated configuration. This runbook uses one camera apply as a temporary bridge. Generation 3's UI changes need no apply; the apply is what writes the 0.18.3 pin and the `go2rtc` block introduced in generation 2. | [update apply gap](../notes/2026-11-26-live-view-beta-update-gap.md) |
 
 ## What this runbook does not cover
 
@@ -455,6 +565,8 @@ bundle. Read the daemon log before sharing it.
   configuration.
 - Nine simultaneous real streams. The desktop ceiling is nine, but this run uses at most four
   cameras. The nine-tile decode load, CPU, memory and LAN bitrate are not measured here.
+- A real 4K camera when the bench does not have one. The browser check covers 3840x2160, but that is
+  a stub, not a decode or bandwidth measurement.
 - Long-run stability. The checks are minutes long, not hours.
 - A power cut during the update. The per-step matrix is covered by the update engine tests, not by
   this run.
