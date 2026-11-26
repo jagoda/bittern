@@ -49,8 +49,8 @@ Expected: `committed: generation 1 (0.0.0-beta.1-<short>), channel beta` and
 reports `baseline: false` and the same version. If the pointer contains `2`, the device is already on
 generation 2. Roll it back first, or restart from the beta bench rollout.
 
-- [ ] The maintainer is signed in at `https://<lan0-address>/ui/status` and the Updates card reads
-      "Up to date".
+- [ ] The maintainer is signed in at `https://<lan0-address>/ui/status` and the Updates card shows
+      generation 1 as the installed version.
 
 - [ ] At least one camera is configured and its latest picture is visible on the Cameras page. Two
       cameras are needed for the tile assignment check, and four make the four-tile grid a full
@@ -111,20 +111,22 @@ Record the run as you go:
 | Renderer | No `go2rtc` block | `go2rtc.streams` and `cameras.<name>.live.streams` for every camera |
 | Device ceilings | None | 1 on a phone, 4 on a tablet, 9 on a desktop, 9 hard media sessions |
 
-The update transaction installs the bundle and restarts the appliance. The generated Frigate
-configuration and compose file are written by an apply, not by the update. Generation 2 therefore
-has two parts: the card install, then one apply from the new bundle. The bundle carries the 0.18.3
-pin; the apply writes it to the compose file and pulls the image. Until the apply runs, the
-container keeps 0.18.2 even though the card reports generation 2. This is a known gap in the update
-path, recorded in [the update apply gap note](../notes/2026-11-26-live-view-beta-update-gap.md). The
-camera save below is a temporary bridge, not a product procedure.
+The update transaction installs the bundle and restarts the daemon and the recording service. The
+generated Frigate configuration and compose file are written by an apply, not by the update.
+Generation 2 therefore has two parts: the card install, then one apply from the new bundle. The
+bundle carries the 0.18.3 pin; the apply writes it to the compose file and pulls the image. Until the
+apply runs, the container keeps 0.18.2 even though the card reports generation 2. This is a known gap
+in the update path, recorded in
+[the update apply gap note](../notes/2026-11-26-live-view-beta-update-gap.md). One camera apply below
+is a temporary bridge, not a product procedure.
 
 ## Install generation 2
 
 ### Before
 
-The Updates card reads "Up to date" and shows the installed generation 1 version. Select Check for
-updates.
+The Updates card shows the installed generation 1 version. It reads "Up to date" if no check has
+run since the release, or "Update available" for generation 2 if one has. Select Check for updates
+to make the card current.
 
 Expected: "Update available", "Version `0.0.0-beta.2-<short>` is available. The appliance is running
 version `0.0.0-beta.1-<short>`.", update number 2, and an Install update button. The release is
@@ -174,11 +176,11 @@ from the new bundle. That is the pin the daemon expects, not the image the conta
 
 ### Apply the new bundle
 
-Open Cameras, open any camera, and select Save camera without changing a value. This runs an apply
-with the generation 2 daemon. It renders the new `go2rtc` block, writes the compose file with the
-0.18.3 image, pulls the image, and restarts the recording service.
+Open Cameras, open any camera, and select Apply camera change without changing a value. This runs
+an apply with the generation 2 daemon. It renders the new `go2rtc` block, writes the compose file
+with the 0.18.3 image, pulls the image, and restarts the recording service.
 
-The page can take minutes and has no step list. Leave it open. Do not select Save again and do not
+The page can take minutes and has no step list. Leave it open. Do not select Apply again and do not
 start another apply. The apply keeps running if the browser gives up; reload the status page and
 check Technical details. To follow the pull, run `sudo journalctl -u bitternd -f` in a terminal
 before selecting Apply; the apply logs the image step and any download failure.
@@ -250,14 +252,14 @@ reload.
 
 ### 4. A different camera in a tile
 
-This check needs a camera that is not already in the grid. With five or more cameras, use Nine
-cameras and put the spare camera in tile 5. With exactly four cameras, first clear tile 4 (Change
-camera, No camera, Show in this tile), then put that camera in tile 5 under Nine cameras. The point
-is the rule, not the tile number: a tile replacement must not disturb the other tiles.
+This check needs an empty tile and a camera that is not in the grid. Choose Nine cameras so there
+are empty tiles. Clear one occupied tile (Change camera, No camera, Show in this tile); that camera
+is now unassigned. Put it in an empty tile (Change camera, the camera, Show in this tile). The point
+is the rule, not the tile numbers: a tile replacement must not disturb the other tiles.
 
 Expected: only the chosen tile changes. It shows "Switching" and then "Live" with the new camera
-name. Tiles 1 to 3 (and tile 4 when it was not the one cleared) keep their pictures, badges and
-media connections. The page does not reload.
+name. The other playing tiles keep their pictures, badges and media connections, and the page does
+not reload.
 
 A failure looks like another tile stopping, reconnecting or losing its picture, the whole page
 reloading, the chosen tile not changing, or the new assignment disappearing after a reload.
@@ -307,13 +309,12 @@ horizontal overflow, controls off screen, or two media connections after startin
 ### One camera offline
 
 With four tiles playing, power off one camera, or unplug its cable from the camera network. Wait up
-to 30 seconds.
+to a minute.
 
-Expected: that tile reads "Offline" with "<Camera> is offline" and the sentence "Bittern could not
-start the live stream after 3 attempts. The camera may be offline, or the recording service may be
-stopped. Try again, or open cameras." The other three tiles stay "Live" and keep their pictures.
-Restore the camera and select Try again on the failed tile; it returns to "Live" without a page
-reload.
+Expected: that tile reads "Offline" and its sentence names the camera and says it may be offline or
+the recording service may be stopped, with Try again and Open cameras as the next actions. The other
+three tiles stay "Live" and keep their pictures. Restore the camera and select Try again on the
+failed tile; it returns to "Live" without a page reload.
 
 A failure looks like the whole grid stopping, the failed tile spinning or staying on "Connecting",
 one camera's failure changing another tile's state, or Try again doing nothing after the camera is
@@ -325,7 +326,7 @@ With four tiles playing, unplug the camera network cable at the appliance (`cam0
 management link. Wait and watch one tile.
 
 Expected: the tile shows "Stalled", then "Reconnecting to <Camera>" with "Trying again in 1 second.
-Attempt 1 of 3.", then attempts 2 and 3 with their delays. Within about 30 seconds each tile either
+Attempt 1 of 3.", then attempts 2 and 3 with their delays. Within about a minute each tile either
 falls back to HLS or shows the snapshot with "Offline". There is no endless spinner and no page
 reload loop. Reconnect `cam0`, wait for the camera to come back, and select Try again; the tile
 returns to "Live".
@@ -369,9 +370,9 @@ republished generation 1 or 2 is not a valid next update; the next tag must be g
 ### Return the image to 0.18.2
 
 The rollback restarts the recording service with the compose file the generation 2 apply wrote, so
-the container is still on 0.18.3 until the rolled-back bundle applies. Save a camera unchanged
-again, as in the apply step. The image step returns the compose file and the running container to
-0.18.2. Verify:
+the container is still on 0.18.3 until the rolled-back bundle applies. Select Apply camera change on
+a camera again, as in the apply step. The image step returns the compose file and the running
+container to 0.18.2. Verify:
 
 ```sh
 sudo docker inspect --format '{{.Config.Image}}' frigate
@@ -437,14 +438,14 @@ bundle. Read the daemon log before sharing it.
 | Audio | The player is muted and has no audio control. A stream with audio is played with the audio track ignored. | OQ-21 |
 | Playback and timeline | No route and no control. The live view is live only. | BIT-025 |
 | Event review | No event list, no clips, no review page. | BIT-024 |
-| Camera configuration | The live page is read-only. Add, edit and disable cameras on the Cameras pages; there are no camera settings in live. | BIT-023 scope |
-| Sub-streams | `main` and `sub` resolve to the one configured RTSP path, so every tile pulls the camera's full stream. The profile switch is a label, not a second stream and not a bandwidth saving. | BIT-027 |
-| Real-vendor interoperability | The QEMU fixture serves two streams from one virtual camera guest. There is no second vendor, no real ONVIF profile, and no hardware decode or phone HLS evidence beyond the browser check. | BIT-027, camera matrix |
+| Camera configuration | The live page is read-only. Add, edit and disable cameras on the Cameras pages; there are no camera settings in live. | Out of scope, ADR 0034 |
+| Sub-streams | `main` and `sub` resolve to the one configured RTSP path, which is the main stream's path, so every tile pulls the camera's full stream. The profile switch is a label, not a second stream and not a bandwidth saving. | BIT-027 |
+| Real-vendor interoperability | The QEMU fixture serves two streams from one virtual camera guest. There is no second vendor, no real ONVIF profile, and no hardware decode or phone HLS evidence beyond the browser check. | BIT-027 |
 | Kiosk mode | No full-screen kiosk. | OQ-25 |
 | Frigate UI proxy | No embedded or proxied Frigate UI; the support path remains loopback. | OQ-38 |
 | Account-level layout | The layout is a per-device cookie. It is lost in private browsing, after a cookie clear, or on a new device. | ADR 0034 |
 | A wide 1920 wall | The page shell caps the grid at 68rem, so the tiles keep their 1280 width at 1920. | OQ-40 |
-| An apply after update | The update installs the bundle but does not write the generated configuration. This runbook uses the camera save as a temporary bridge. | [update apply gap](../notes/2026-11-26-live-view-beta-update-gap.md) |
+| An apply after update | The update installs the bundle but does not write the generated configuration. This runbook uses one camera apply as a temporary bridge. | [update apply gap](../notes/2026-11-26-live-view-beta-update-gap.md) |
 
 ## What this runbook does not cover
 
