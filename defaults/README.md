@@ -54,7 +54,7 @@ mount point, and `storage.recording.retention_days` stay in `appliance.yaml`.
 
 | Section | Decision |
 | --- | --- |
-| `image` | Frigate `0.18.2` pinned by tag and GHCR index digest, re-verified on 2026-11-14 |
+| `image` | Frigate `0.18.3` pinned by tag and GHCR index digest, re-verified on 2026-11-26 |
 | `runtime` | Host networking companion policy: 1 GiB `shm_size`, `unless-stopped`, `no-new-privileges`, bounded json-file logs, and a 1 GiB cache tmpfs |
 | `config` | MQTT off, analytics and version check off, authentication on without forced password reset, loopback listeners, the media database path, 5 fps detection, continuous plus event recording, snapshots, and provisional `person` tracking |
 | `detectors` | Detector config name, Frigate detector type, and the compose device and group list for `cpu`, `openvino`, `coral_usb`, and `hailo8` |

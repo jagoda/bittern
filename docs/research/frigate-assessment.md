@@ -4,10 +4,12 @@ Assessed 2026-11-14. Re-verify before relying on versions, ports, flags or UI be
 figure below came from that assessment session and was not re-verified while writing this document, so
 treat versions, defaults and UI details as claims to check before they become fixtures or code.
 
-Re-checked for live view on 2026-11-26 against the pinned 0.18.2 release and its bundled go2rtc
+Re-checked for live view on 2026-11-26 against the 0.18.2 release and its bundled go2rtc
 1.9.14. The quoted facts, URLs and access dates are in
-[the live view verification note](../notes/2026-11-26-live-view-upstream-verification.md). Two statements
-below are now stale: 8971 binds loopback, not the LAN, under
+[the live view verification note](../notes/2026-11-26-live-view-upstream-verification.md). The pin
+moved to 0.18.3 on 2026-11-26; the release-note review and digest are in
+[the 0.18.3 pin note](../notes/2026-11-26-frigate-0.18.3-pin.md). Two statements below are now
+stale: 8971 binds loopback, not the LAN, under
 [ADR 0016](../adr/0016-bittern-owns-frigate-config.md), and live video is decided by
 [ADR 0034](../adr/0034-live-view-owned-by-bittern.md), not by the 0.18.2 WebRTC recommendation.
 The rest of the assessment remains dated 2026-11-14.
@@ -19,7 +21,7 @@ Bittern release on upstream advisories and on config-migration tests for the pin
 | --- | --- |
 | Use Frigate as the engine? | Yes, see [ADR 0003](../adr/0003-frigate-as-nvr-engine.md). |
 | Fork or vendor the source? | No. Use the public API, UI and config as shipped. |
-| Which version? | Latest stable at build time, pinned by digest, never `latest`. v1 floor is 0.18.2, the first release with the viewer-to-root RCE fix. |
+| Which version? | Latest stable at build time, pinned by digest, never `latest`. v1 floor is 0.18.3, the current stable release that fixes CVE-2026-123007. |
 | Exposed to the LAN? | Only 8971, authenticated and TLS. 5000 and 1984 stay on loopback. |
 
 ## Provenance and project health
@@ -34,8 +36,9 @@ Bittern release on upstream advisories and on config-migration tests for the pin
   an SLA, and no support contract Bittern could buy.
 - Namespace: repository and images sit under a personal GitHub and GHCR namespace
   (`blakeblackshear/frigate`), which is a supply-chain and continuity risk, not a naming detail.
-- Cadence: 0.17.0 on 2026-02-27, 0.17.2 on 2026-06-28, 0.18.0 on 2026-09-12, 0.18.2 on 2026-10-15.
-  Roughly two feature releases a year with patches between, and only the latest minor gets fixes.
+- Cadence: 0.17.0 on 2026-02-27, 0.17.2 on 2026-06-28, 0.18.0 on 2026-09-12, 0.18.2 on 2026-10-15,
+  0.18.3 on 2026-11-19. Roughly two feature releases a year with patches between, and only the
+  latest minor gets fixes.
   Sitting on an old pin quietly transfers upstream security risk onto us and the owner.
 
 ## Capabilities relevant to Bittern
@@ -65,8 +68,9 @@ provides neither, so each exposure becomes a control or an accepted risk with an
 | 1984/tcp | go2rtc, unauthenticated | Loopback only, firewall drop, absent from templates | runtime |
 | Container user | Runs as root | Accepted risk; minimal mounts, no Docker socket | runtime |
 | Admin password | Printed in logs at start | Redact in log views and support bundles | agent |
-| Auth/RBAC bugs | 2026 cluster, viewer-to-root RCE fixed in 0.18.2 | Pin floor 0.18.2, no viewer accounts | release |
-| Advisories | 30 published, none actively exploited | Advisory gate before every release | release |
+| Auth/RBAC bugs | 2026 cluster, viewer-to-root RCE fixed in 0.18.2 | Pin floor 0.18.3, no viewer accounts | release |
+| NGINX2Root | CVE-2026-123007, unauthenticated HTTP/2 RCE as root, fixed in 0.18.3 | Pin floor 0.18.3, loopback listeners, firewall drop | release |
+| Advisories | Published upstream, none recorded as actively exploited here | Advisory gate before every release | release |
 
 Frigate runs as root in its container because device access and the legacy port push it there. We
 shrink the blast radius with a minimal root filesystem, no Docker socket, no host mounts beyond
@@ -137,7 +141,7 @@ inheriting whatever upstream ships. Local-first is not offline, so the appliance
 
 1. Advisory gate: block releases with an open high or critical advisory against the pinned version,
    and record any exception.
-2. Pin 0.18.2 or later by digest, mirror images, and treat tracking the latest minor as a release gate.
+2. Pin 0.18.3 or later by digest, mirror images, and treat tracking the latest minor as a release gate.
 3. Never publish 5000 or 1984. Template `listen.internal: 127.0.0.1:5000` and
    `listen.external: <lan-ip>:8971`, and drop both at the host firewall.
 4. Allow only 8971, plus 8555 where WebRTC needs it, from LAN and tailnet; default-deny elsewhere.

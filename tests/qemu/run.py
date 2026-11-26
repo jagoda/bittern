@@ -3464,7 +3464,7 @@ rm -f /tmp/bittern-frigate.cookies
             ("/var/lib/bittern/frigate/config.yml", "camera_1"),
             ("/var/lib/bittern/frigate/config.yml", "enabled: true"),
             ("/var/lib/bittern/frigate/config.yml", "FRIGATE_CAMERA_CAMERA_1_RTSP_URL"),
-            ("/var/lib/bittern/compose/compose.yaml", "ghcr.io/blakeblackshear/frigate:0.18.2@sha256:"),
+            ("/var/lib/bittern/compose/compose.yaml", "ghcr.io/blakeblackshear/frigate:0.18.3@sha256:"),
             ("/var/lib/bittern/compose/compose.yaml", "/var/lib/bittern/media:/media/frigate"),
             ("/var/lib/bittern/compose/compose.yaml", "/var/lib/bittern/frigate/cameras.env"),
             ("/var/lib/bittern/compose/compose.yaml", "/var/lib/bittern/frigate:/config"),
@@ -6624,7 +6624,7 @@ def firewall(args: argparse.Namespace) -> int:
             raise HarnessError(f"Frigate UI is listening beyond loopback: {line.strip()}")
     log("  Frigate UI listens on 127.0.0.1:8971 only")
 
-    # In the pinned 0.18.2 image /api/version answers 401, so the HTTP answer is
+    # In the pinned 0.18.3 image /api/version answers 401, so the HTTP answer is
     # the unauthenticated positive check for the loopback UI. The fixture serves
     # the login page; the applied product config may answer 400 when plain HTTP
     # reaches its TLS listener, which still proves the loopback listener is up.

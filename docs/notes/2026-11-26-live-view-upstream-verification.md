@@ -22,12 +22,16 @@ Frigate repository and from the `v1.9.14` tag in the go2rtc repository. The curr
 only to locate the corresponding pages. This distinction matters: a claim about 0.18.2 is quoted
 from 0.18.2, and the 0.18.3 release is treated separately.
 
+**Pin update, 2026-11-26.** The pin moved from 0.18.2 to 0.18.3 after this verification. The live
+view facts below are still the 0.18.2 quotes; the release-note review, the new digest and the test
+result are in [the 0.18.3 pin note](2026-11-26-frigate-0.18.3-pin.md).
+
 ## Summary
 
 | Item | Result |
 | --- | --- |
-| Pinned release | 0.18.2, published 2026-10-15, digest `sha256:fd60f99ffd4eb6c42360ed4e14953e270586f239309ab3983e55b2e97ffac09a`. The digest in `defaults/frigate.yaml` matches the GHCR image index on the access date. |
-| Later release | 0.18.3, published 2026-11-19. It is a security release for an unauthenticated nginx HTTP/2 RCE as root (CVE-2026-123007). The pin is one patch behind it. |
+| Pinned release | 0.18.3, published 2026-11-19, digest `sha256:d1a3e0008557bb3f3314d442ecd4ba68e9b16ab7872d64612649f7a6e5156635`, pinned 2026-11-26. The live view facts below were verified against 0.18.2, published 2026-10-15, digest `sha256:fd60f99ffd4eb6c42360ed4e14953e270586f239309ab3983e55b2e97ffac09a`. |
+| Security release | 0.18.3 is the current stable release and fixes an unauthenticated nginx HTTP/2 RCE as root (CVE-2026-123007). The advisory covers `>= 0.18.0, <= 0.18.2` and names `>= 0.18.3` as patched. |
 | Embedded streaming | Frigate bundles go2rtc 1.9.14. go2rtc's HTTP API and web player default to port 1984. |
 | Live transport | go2rtc offers WebRTC, MSE, HLS, MP4 and MJPEG. Frigate's live view defaults to MSE when go2rtc is configured, uses jsmpeg without go2rtc, and reserves WebRTC for cases that need it. |
 | Camera stream names | There are no default `main` and `sub` names. Streams are keys under `go2rtc.streams`; `cameras.<name>.live.streams` maps a friendly name to one of those keys. The first entry is the default for the All Cameras dashboard. |
@@ -41,17 +45,16 @@ from 0.18.2, and the 0.18.3 release is treated separately.
 
 | Claim | Evidence and quote | Source |
 | --- | --- | --- |
-| 0.18.2 is the pinned release. | `defaults/frigate.yaml` sets `tag: 0.18.2`, `digest: sha256:fd60f99f...`, `verified: 2026-11-14`. | [defaults/frigate.yaml](../../defaults/frigate.yaml) |
+| 0.18.2 is the release the live view facts were checked against. | The 0.18.2 release was published on 2026-10-15 and its digest was `sha256:fd60f99f...`. The 0.18.3 pin resolves to a different digest because the image changed. | [defaults/frigate.yaml](../../defaults/frigate.yaml) |
 | 0.18.2 was published on 2026-10-15. | The release page is titled "Release 0.18.2" and its body begins "This is a maintenance release for Frigate 0.18 that includes some security fixes." The API reports `published_at: 2026-10-15T22:41:47Z`. | <https://github.com/blakeblackshear/frigate/releases/tag/v0.18.2> |
-| The pinned digest is the current GHCR index digest for 0.18.2. | The OCI manifest request for `ghcr.io/blakeblackshear/frigate:0.18.2` returned `docker-content-digest: sha256:fd60f99ffd4eb6c42360ed4e14953e270586f239309ab3983e55b2e97ffac09a` and `content-type: application/vnd.oci.image.index.v1+json`. | <https://ghcr.io/v2/blakeblackshear/frigate/manifests/0.18.2> |
-| 0.18.3 is later and is a security release. | The release body says: "Security fixes - NGINX2Root (CVE-2026-123007): bundled nginx 1.27.4 with HTTP/2 enabled allows unauthenticated RCE as root". It was published on 2026-11-19. | <https://github.com/blakeblackshear/frigate/releases/tag/v0.18.3> |
+| 0.18.3 is the current stable release. | The GitHub releases latest endpoint returned `v0.18.3`, not a draft or prerelease, on 2026-11-26. | <https://api.github.com/repos/blakeblackshear/frigate/releases/latest> |
+| 0.18.3 fixes CVE-2026-123007 and is pinned. | The advisory says the vulnerable range is `>= 0.18.0, <= 0.18.2` and the patched version is `>= 0.18.3`; its CVSS v3 score is 9.8 critical. The release body names "NGINX2Root (CVE-2026-123007): bundled nginx 1.27.4 with HTTP/2 enabled allows unauthenticated RCE as root" and was published on 2026-11-19. The GHCR index digest for `0.18.3` is `sha256:d1a3e0008557bb3f3314d442ecd4ba68e9b16ab7872d64612649f7a6e5156635`. | <https://github.com/blakeblackshear/frigate/security/advisories/GHSA-7822-v38f-8p44>, <https://github.com/blakeblackshear/frigate/releases/tag/v0.18.3> and <https://ghcr.io/v2/blakeblackshear/frigate/manifests/0.18.3> |
 
-**Triage.** This is a release-gate finding, not a live view design fact. The advisory gate in
+**Triage.** This was a release-gate finding, not a live view design fact. The advisory gate in
 [AGENTS.md](../../AGENTS.md) and [ADR 0012](../adr/0012-testing-and-release-gates.md) blocks a release
-on a high or critical advisory against the pin. The pin must move to 0.18.3, or a later release that
-contains the fix, in a separate bundle change with the digest, renderer and golden updates and the
-usual verification. No live view claim below depends on the 0.18.2 to 0.18.3 difference; the design
-must be true for the version that ships.
+on a high or critical advisory against the pin. The pin moved to 0.18.3 on 2026-11-26 in a separate
+bundle change with the digest, renderer and golden updates. No live view claim below depends on the
+0.18.2 to 0.18.3 difference; the design must be true for the version that ships.
 
 ## 2. Live streams, go2rtc and ports
 
@@ -180,14 +183,14 @@ when it touches the firewall assertion. No product file was changed in this veri
 | That the QEMU virtual camera can exercise MSE or HLS. | Not confirmed. The fixture is RTSP only; Frigate and go2rtc must restream it. The harness has host forwards for 11984 and 18556, but the firewall test expects them dropped. | BIT-023 needs a fixture path that proves the proxy and player, not just RTSP reachability. |
 | The exact 0.18.2 behavior of every `/live/...` nginx path. | The paths are in the source and are used by the Frigate UI, but they are not documented as a stable API. | Do not depend on them. Use go2rtc's documented API. |
 | A documented Frigate HTTP endpoint for PTZ movement. | None found in the v0.18.2 OpenAPI. | The PTZ command path is OQ-39. |
-| That 0.18.3 contains no live view regression. | Not reviewed beyond the release notes. | The pin bump is a separate bundle change with the full test suite. |
+| That 0.18.3 contains no live view regression. | The release notes were reviewed on 2026-11-26. They restrict go2rtc exec and variable expansion, update nginx and the VOD HLS paths, and add a live view troubleshooting note; no live view regression is named. The pin note records the test evidence. | The pin bump is a separate bundle change with the full test suite. |
 
 ## 9. Triage
 
 | Finding | Destination |
 | --- | --- |
 | Live view can be owned by Bittern and served on 443 using go2rtc MSE/HLS and the Frigate snapshot API, with no 8555 and no embedded Frigate UI. | [ADR 0034](../adr/0034-live-view-owned-by-bittern.md) |
-| The pinned 0.18.2 is behind the 0.18.3 security release for CVE-2026-123007. | Release gate. Bump the pin in a separate bundle change before any release. The live view ADR does not change the pin. |
+| The pinned 0.18.2 was behind the 0.18.3 security release for CVE-2026-123007. | Resolved 2026-11-26. The pin moved to 0.18.3 at `sha256:d1a3e0008557bb3f3314d442ecd4ba68e9b16ab7872d64612649f7a6e5156635` in [the 0.18.3 pin note](2026-11-26-frigate-0.18.3-pin.md). |
 | Frigate's documented PTZ movement path is MQTT, and product MQTT is disabled. | [OQ-39](../open-questions.md); BIT-027. |
 | A gated proxy of Frigate's own UI for the long tail would reopen the control-surface and single-writer questions. | [OQ-38](../open-questions.md); no default. |
 | The nftables template comment names OQ-03 for live video. | BIT-023 updates it with the golden. |
@@ -229,5 +232,9 @@ All accessed 2026-11-26.
 - go2rtc 1.9.14 README: <https://github.com/AlexxIT/go2rtc/blob/v1.9.14/README.md>
 - go2rtc 1.9.14 API docs: <https://github.com/AlexxIT/go2rtc/blob/v1.9.14/api/README.md>
 - GHCR image index for 0.18.2: <https://ghcr.io/v2/blakeblackshear/frigate/manifests/0.18.2>
+- GHCR image index for 0.18.3: <https://ghcr.io/v2/blakeblackshear/frigate/manifests/0.18.3>
+- Frigate latest release endpoint: <https://api.github.com/repos/blakeblackshear/frigate/releases/latest>
+- Frigate security advisory GHSA-7822-v38f-8p44:
+  <https://github.com/blakeblackshear/frigate/security/advisories/GHSA-7822-v38f-8p44>
 - Frigate documentation site (renders the latest release, used to locate pages only):
   <https://docs.frigate.video/>

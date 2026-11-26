@@ -5,12 +5,13 @@ one synthetic camera, that the config check rejects bad config before start, and
 Docker port publishing, is the boundary. The compose files and config are hand-written; the firewall is
 the renderer's four-camera golden plus one QEMU-only SSH rule. It is not the product bundle.
 
-Status: executed inside the QEMU appliance guest on 2026-11-14. The config check, compose start, health
-wait, authenticated snapshot, unauthenticated rejection, and the host firewall probe all pass. The
-Frigate UI and internal API bind loopback only (ADR 0016). The image was pulled in the guest from the
-pinned digest. It is still a fixture, not a product bundle. The product renderer now emits its own
-Frigate config, compose file, and unit; this hand-written bundle is deliberately kept as the
-independent QEMU check until a separate change switches the harness to renderer output.
+Status: re-executed inside the QEMU appliance guest on 2026-11-26 with 0.18.3. The config check,
+compose start, health wait, authenticated snapshot, unauthenticated rejection, and the host firewall
+probe all pass. The earlier 0.18.2 run on 2026-11-14 also passed. The Frigate UI and internal API
+bind loopback only (ADR 0016). The image is pulled in the guest from the pinned digest. It is still
+a fixture, not a product bundle. The product renderer now emits its own Frigate config, compose
+file, and unit; this hand-written bundle is deliberately kept as the independent QEMU check until a
+separate change switches the harness to renderer output.
 
 ## Files
 
@@ -43,10 +44,10 @@ back to `/config`.
 The image is pinned by tag and digest in `manifest.json`:
 
 ```text
-ghcr.io/blakeblackshear/frigate:0.18.2@sha256:fd60f99ffd4eb6c42360ed4e14953e270586f239309ab3983e55b2e97ffac09a
+ghcr.io/blakeblackshear/frigate:0.18.3@sha256:d1a3e0008557bb3f3314d442ecd4ba68e9b16ab7872d64612649f7a6e5156635
 ```
 
-The digest was resolved on 2026-11-14 through the OCI registry API with curl and an anonymous GHCR
+The digest was resolved on 2026-11-26 through the OCI registry API with curl and an anonymous GHCR
 token, not by Docker and not from a blog post:
 
 ```sh
@@ -54,18 +55,18 @@ TOKEN=$(curl -fsS 'https://ghcr.io/token?scope=repository:blakeblackshear/frigat
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 curl -fsSI -H "Authorization: Bearer $TOKEN" \
   -H 'Accept: application/vnd.oci.image.index.v1+json' \
-  https://ghcr.io/v2/blakeblackshear/frigate/manifests/0.18.2
+  https://ghcr.io/v2/blakeblackshear/frigate/manifests/0.18.3
 ```
 
 The response included:
 
 ```text
 content-type: application/vnd.oci.image.index.v1+json
-docker-content-digest: sha256:fd60f99ffd4eb6c42360ed4e14953e270586f239309ab3983e55b2e97ffac09a
+docker-content-digest: sha256:d1a3e0008557bb3f3314d442ecd4ba68e9b16ab7872d64612649f7a6e5156635
 ```
 
-The amd64 platform manifest is `sha256:9ebab4801be69ab4ebc7f6ab1d582c859ff7412d457a3fa550056894e8444dad`
-and its config blob is `sha256:d8c79fd30635c830c5972dbc61c8c6c789af2373c654e7f4de1073eef435c982`.
+The amd64 platform manifest is `sha256:52ee4a7b4aa403347c1f31974d4faafc7157f97933c08c905c08ec6599f4f27a`
+and its config blob is `sha256:8d11818e18d6b6ff01f60063a637617956b1285430fc47982c0339079effa70e`.
 The manifest records these for audit; the compose files use the index digest. There is no Docker CLI
 in this container, so the image has not been pulled by Docker here.
 
@@ -77,14 +78,14 @@ The check is the upstream invocation, with the fixture config mounted read-only 
 docker run --rm --network none --platform linux/amd64 \
   -v "$PWD/config:/config:ro" \
   --entrypoint python3 \
-  ghcr.io/blakeblackshear/frigate:0.18.2@sha256:fd60f99ffd4eb6c42360ed4e14953e270586f239309ab3983e55b2e97ffac09a \
+  ghcr.io/blakeblackshear/frigate:0.18.3@sha256:d1a3e0008557bb3f3314d442ecd4ba68e9b16ab7872d64612649f7a6e5156635 \
   -u -m frigate --validate-config
 ```
 
-The check below was run in the appliance guest on 2026-11-14 and printed "Your config file is valid".
-That run also pulled the image; the check itself is a few seconds, the whole command took 225 s.
-Frigate logs `Config file is read-only, unable to migrate config file.` because the mount is `:ro`;
-that is expected for the check and does not change the verdict.
+The check was rerun in the appliance guest on 2026-11-26 against the pinned 0.18.3 digest and
+printed "Your config file is valid". That run pulled the image from the digest. Frigate logs
+`Config file is read-only, unable to migrate config file.` because the mount is `:ro`; that is
+expected for the check and does not change the verdict.
 
 ## Smoke test
 
@@ -108,10 +109,9 @@ snapshot request without a session is not served. The password is kept in a temp
 never printed or committed.
 
 The health check goes green before Frigate has created the admin user, so the script polls the logs
-for the password for up to 60 s instead of reading them once. The first 2026-11-14 run returned
-`smoke: ok: healthy, authenticated snapshot HTTP 200, 51868 bytes, image/jpeg` in 10.1 s with the
-image already pulled, and 4 min 5 s including the pull. The warm run after the M1 join returned
-11519 bytes in 3.3 s with the loopback-only config.
+for the password for up to 60 s instead of reading them once. The 2026-11-26 run against 0.18.3
+returned `smoke: ok: healthy, authenticated snapshot HTTP 200, 11688 bytes, image/jpeg` in 3.9 s
+with the image already pulled. The cold pull in the same session was not separately timed.
 
 The fixture config sets `auth.reset_admin_password: true` so each start prints a fresh password for
 the smoke test. That is a fixture convenience, not a product default. The product config pins
@@ -144,9 +144,10 @@ The only `lan0` inbound rule the harness adds is the management SSH rule. It is 
 golden and is not a product rule. The Bittern UI on 443 is a rendered product rule, not a harness
 rule.
 
-The rendered rules were loaded in the appliance guest on 2026-11-14. `nft -c -f` accepts them with
-nftables 1.1.3. With them loaded, 8971 answered on `127.0.0.1` inside the guest and 5000, 1984,
-8554, and 8555 gave no answer through the host forwards. The guest's live table matched the golden
+The rendered rules were loaded in the appliance guest on 2026-11-26 with the 0.18.3 container
+running. `nft -c -f` accepts them with nftables 1.1.3. With them loaded, 8971 answered on
+`127.0.0.1` inside the guest and 5000, 1984, 8554, and 8555 gave no answer through the host
+forwards. The guest's live table matched the golden
 except for the substituted SSH rule. `ss -lntp` showed Frigate's UI and internal API on
 `127.0.0.1:8971` and `127.0.0.1:5000`, and go2rtc on 1984 and 8554 on all interfaces. That is the
 firewall being the boundary, not Docker.

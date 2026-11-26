@@ -152,7 +152,7 @@ or test output.
 
 ### Camera RTSP URL contract
 
-Frigate 0.18.2 substitutes `{FRIGATE_*}` references in `cameras[].ffmpeg.inputs[].path` from the
+Frigate 0.18.3 substitutes `{FRIGATE_*}` references in `cameras[].ffmpeg.inputs[].path` from the
 container environment. Bittern uses one complete RTSP URL per camera, never a username or password
 fragment. The `credentials_ref` key names that URL in the secrets file:
 

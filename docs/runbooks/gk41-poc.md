@@ -276,7 +276,7 @@ the service from the local image instead of downloading it.
 systemctl show -p ActiveState -p Result bittern-image-prewarm.service
 sudo bittern image status
 sudo docker image inspect --format '{{.Id}}' \
-  ghcr.io/blakeblackshear/frigate:0.18.2@sha256:fd60f99ffd4eb6c42360ed4e14953e270586f239309ab3983e55b2e97ffac09a
+  ghcr.io/blakeblackshear/frigate:0.18.3@sha256:d1a3e0008557bb3f3314d442ecd4ba68e9b16ab7872d64612649f7a6e5156635
 ```
 
 - [ ] The unit reports `ActiveState=active` and `Result=success`, `bittern image status` prints

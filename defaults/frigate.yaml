@@ -5,17 +5,18 @@
 # renderer, tests and documentation in the same change. Owner choices such as
 # cameras, addresses and retention live in appliance.yaml.
 #
-# The image digest was re-verified against GHCR on 2026-11-14 through the OCI
-# registry API with an anonymous pull token. Re-verify both the tag and digest
-# before changing the pin.
+# The image digest was re-verified against GHCR on 2026-11-26 through the OCI
+# registry API with an anonymous pull token. 0.18.3 is the current stable
+# release and fixes CVE-2026-123007. Re-verify both the tag and digest before
+# changing the pin.
 schema_version: 1
 
 image:
   registry: ghcr.io
   repository: blakeblackshear/frigate
-  tag: 0.18.2
-  digest: sha256:fd60f99ffd4eb6c42360ed4e14953e270586f239309ab3983e55b2e97ffac09a
-  verified: 2026-11-14
+  tag: 0.18.3
+  digest: sha256:d1a3e0008557bb3f3314d442ecd4ba68e9b16ab7872d64612649f7a6e5156635
+  verified: 2026-11-26
 
 runtime:
   shm_size: 1gb
