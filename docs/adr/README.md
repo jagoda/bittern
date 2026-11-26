@@ -81,6 +81,7 @@ need an ADR. When in doubt, write a short one.
 | 0032 | [Continuous integration and build pipeline](./0032-continuous-integration-and-build-pipeline.md) | Accepted | 2026-11-22 | CI phase one checks and bundle artifact; tag publish later. |
 | 0033 | [Dispatch-driven release trigger](./0033-dispatch-driven-release-trigger.md) | Accepted | 2026-11-22 | Manual dispatch triggers release; tag after build; tag push fallback. |
 | 0034 | [Live view owned by Bittern](./0034-live-view-owned-by-bittern.md) | Accepted | 2026-11-26 | Bittern live view uses go2rtc MSE/HLS and Frigate snapshots on 443. |
+| 0035 | [The appliance is the time authority for the camera network](./0035-appliance-as-time-authority.md) | Accepted | 2026-11-26 | Appliance is the camera-network time authority; NTP preferred, ONVIF push fallback. |
 
 ## Related documents
 

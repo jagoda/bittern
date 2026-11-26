@@ -69,6 +69,9 @@ Blocking status, stated honestly:
   [the implementation plan](plan/implementation-plan.md). OQ-19 (recording-drive redundancy),
   OQ-20 (upstream time sources), OQ-21 (audio capture), OQ-22 (device I/O boundary), OQ-38 (the
   gated advanced view) and OQ-39 (the PTZ command path) are not blocking the shipped surfaces.
+  OQ-41 to OQ-43 (camera time capability, the ONVIF authentication window and the POSIX zone shape)
+  do not block adoption either: [ADR 0035](adr/0035-appliance-as-time-authority.md) adopts a camera
+  whether or not it accepts time, and the camera matrix supplies the evidence later.
   OQ-23 (live video path) was resolved on 2026-11-26 by
   [ADR 0034](adr/0034-live-view-owned-by-bittern.md); the kiosk question remains deferred under
   OQ-25 and does not block v1. The renderer uses provisional defaults where it needs an answer.
@@ -109,6 +112,9 @@ Blocking status, stated honestly:
 | OQ-38 | Should a gated advanced view proxy Frigate's own UI for the long tail? | **Not blocking, no default chosen.** The Bittern live view and native screens will not cover every Frigate setting and diagnostic. A proxy would reach the long tail, but it adds a second UI and authentication behavior, couples Bittern to Frigate's frontend and release cadence, and risks a second writer to `config.yml`. Not proxying leaves some settings as a support task. | No advanced view, with the tailnet or console Frigate UI as the documented support path; a gated, read-only advanced view proxy on a separate host and session, with no config writes; a curated set of native Bittern screens for named long-tail settings; a tailnet-only Frigate UI link with a support procedure. | Decide after BIT-023 to BIT-026, using evidence from the support path. Any proxy needs a new ADR that supersedes the exposure clause of [ADR 0016](adr/0016-bittern-owns-frigate-config.md) and preserves the one-writer rule. See the note below. Owner: frontend and security. |
 | OQ-39 | How does Bittern send PTZ commands to a camera? | **Not blocking, no default chosen.** Frigate's documented movement commands are MQTT on `frigate/<camera_name>/ptz`, and product config sets `mqtt.enabled: false`. The HTTP API exposes `GET /api/<camera_name>/ptz/info` for capability and presets, not movement. go2rtc has no PTZ API. A continuous move without a verified stop path can leave a camera moving. | Enable a local MQTT broker behind Frigate and use its dispatcher; add an ONVIF client in `bitternd`; use a future documented Frigate HTTP PTZ command; ship no PTZ. | [BIT-027](plan/implementation-plan.md#bit-027-robust-onvif-profiles-ptz-and-field-interoperability) decides with a real PTZ camera, firmware and stream topology. The docs do not promise that a camera behind go2rtc accepts ONVIF commands. See the note below. Owner: runtime and frontend. |
 | OQ-40 | Should the live grid use a wider page measure than the 68rem reading shell? | [ADR 0034](adr/0034-live-view-owned-by-bittern.md) reasons about tiles about 400 pixels wide at 1280 and wider at 1920, while the shared page shell caps every page at 68rem. The grid fits three columns either way; at 1920 the tiles stay the 1280 width. | Keep 68rem everywhere; add a live-only wide maximum as a layout token; widen the shell for every page. | Provisional for slice 1b: keep 68rem, because the grid still fits three columns and a new page measure is a design-system token change with its own evidence. Decide with measured wall screenshots and the first hardware run; owner: frontend and maintainer. |
+| OQ-41 | Which cameras support NTP mode, pushed time, both, or neither, and which honour DHCP option 42? | The time policy in [ADR 0035](adr/0035-appliance-as-time-authority.md) depends on per-camera capability, and the camera matrix has no tested product row. A camera that supports neither is adopted but needs its clock set by hand. | A capability matrix maintained from field runs; a vendor list; a manual per-camera setting. | Record the time mechanism, the NTP result, the pushed result and the evidence for every row in [the camera matrix](notes/camera-matrix.md), starting with the Axis reference device in BIT-027. Owner: QA. |
+| OQ-42 | What clock skew do cameras accept on authenticated ONVIF requests, and must the header always use the camera's clock? | A camera that is hours off rejects a timestamp from the appliance, so the first authenticated time write may fail before it can fix the camera. The ten second Axis figure is a client library report, not vendor documentation. | Timestamp the first request from the camera's unauthenticated time read; timestamp from the appliance and rely on a normal window; a per-model offset rule. | Measure the accepted window on the reference camera in BIT-027, and keep the camera-clock timestamp as the provisional default until then. Owner: runtime. |
+| OQ-43 | Do cameras accept a fixed-offset POSIX time zone string, and do they apply DST from the `TimeZone` field? | The ONVIF `TimeZone` is a POSIX string, not an IANA name. The push path sends the offset in force now and re-pushes at a transition; that only works if cameras accept a string with no DST rule. | Fixed-offset string with re-push; a generated DST rule string; send no zone and rely on the camera's own zone. | Test both push shapes on the reference camera and a second vendor in BIT-027. Owner: runtime. |
 
 **OQ-37 session continuity.** The default above is deliberately the smallest change: it reuses the
 existing session records and cookie format, adds one mode 0600 file under the state root that already
@@ -142,6 +148,13 @@ its reasoning. A live-only maximum would be a new layout token and a `Token valu
 shell-wide change would affect every page. Slice 1b keeps 68rem and records the gap rather than
 choosing a new measure without measured wall screenshots. The screenshots are
 `live-<width>.png` and `live-nine-tiles-<width>.png` in the browser-check output.
+
+**OQ-41 to OQ-43 camera time capability.** [ADR 0035](adr/0035-appliance-as-time-authority.md) fixes
+the mechanism order and the safety rules, but not what a given camera does. OQ-41 is the capability
+matrix; OQ-42 is the authentication window that decides whether a badly skewed camera can be fixed at
+all; OQ-43 is the POSIX zone shape that the push path sends. None blocks the adoption path, because a
+camera is adopted whether or not it accepts time. All three need the Axis reference device and at
+least one other vendor before the matrix can claim a supported pattern.
 
 **OQ-10 reference device.** The reference device for
 [BIT-027](plan/implementation-plan.md#bit-027-robust-onvif-profiles-ptz-and-field-interoperability) is

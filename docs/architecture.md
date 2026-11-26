@@ -84,6 +84,14 @@ firewall instead of bypassing it through NAT.
 for NTP, and a gateway option pointing at the appliance for camera compatibility, with no forwarding
 and no general DNS. `chrony` is a client on `lan0` and an NTP server on `cam0`.
 
+The appliance is the time authority for the camera segment
+([ADR 0035](adr/0035-appliance-as-time-authority.md)). `chrony` consumes time on `lan0` only and
+serves it on `cam0` only, and it carries a local reference so an appliance with no internet still
+gives every camera one clock. Cameras are pointed at the appliance by NTP where they support it, and
+by an ONVIF time write where they do not. A camera that refuses is still adopted and reported. The
+decision is accepted and not built yet; the status `time` section and the per-camera time state are
+part of the same work.
+
 ## Runtime components
 
 Trust: low is unprivileged and network-facing, medium is reduced, high is root-equivalent.
@@ -120,8 +128,10 @@ the owner. Storage faults never resolve into a healthy-looking page. The render 
 reports the applied generation and the last apply state from `apply.Inspect`, so a failed or
 rolled-back transaction stays visible without inventing a new current generation. Update and reset
 data are explicitly unknown until BIT-009 and BIT-010 implement their records. Hardware detection
-adds CPU, memory, and accelerator evidence when the probe succeeds. The schema, fields, redaction
-rules, and API are in [status.md](status.md).
+adds CPU, memory, and accelerator evidence when the probe succeeds. The contract does not yet carry a
+`time` section; [ADR 0035](adr/0035-appliance-as-time-authority.md) decides one for the appliance
+clock and each camera's time state. The schema, fields, redaction rules, and API are in
+[status.md](status.md).
 
 ## Configuration flow
 
