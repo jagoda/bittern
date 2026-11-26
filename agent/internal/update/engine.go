@@ -149,6 +149,9 @@ func normalizeOptions(options Options) Options {
 	if options.Reason == "" {
 		options.Reason = "manual rollback requested"
 	}
+	if options.ConfigApplier == nil {
+		options.ConfigApplier = ExecConfigApplier{}
+	}
 	return options
 }
 
@@ -344,6 +347,7 @@ func installSteps(cfg *config.Config) []Step {
 	if frigateConfigured(cfg) {
 		steps = append(steps, Step{Key: StepEnsureImage, Kind: kindEnsureImage, TimeoutSeconds: int((60 * time.Minute).Seconds())})
 	}
+	steps = append(steps, Step{Key: StepApplyConfig, Kind: kindApplyConfig, TimeoutSeconds: int(applyConfigTimeout.Seconds())})
 	steps = append(steps, Step{Key: StepStartAgent, Kind: kindStart, Unit: "bitternd.service", TimeoutSeconds: 60})
 	if frigateConfigured(cfg) {
 		steps = append(steps, Step{Key: StepStartFrigate, Kind: kindStart, Unit: "bittern-frigate.service"})
@@ -351,6 +355,7 @@ func installSteps(cfg *config.Config) []Step {
 	return append(steps,
 		Step{Key: StepHealth, Kind: kindHealth, TimeoutSeconds: int((5 * time.Minute).Seconds())},
 		Step{Key: StepCommit, Kind: kindCommit},
+		Step{Key: StepPersistConfig, Kind: kindPersistConfig, TimeoutSeconds: int((persistConfigTimeout + time.Minute).Seconds())},
 		Step{Key: StepRecord, Kind: kindRecord},
 		Step{Key: StepPrune, Kind: kindPrune},
 		Step{Key: StepFinish, Kind: kindFinish},
@@ -429,7 +434,7 @@ func resumeIndex(journal *Journal) (int, error) {
 
 func isLiveKind(kind string) bool {
 	switch kind {
-	case kindStop, kindStart, kindActivate, kindMigrate, kindEnsureImage:
+	case kindStop, kindStart, kindActivate, kindMigrate, kindEnsureImage, kindApplyConfig:
 		return true
 	default:
 		return false
@@ -557,7 +562,7 @@ func (r *runner) fail(step Step, cause error) (Result, error) {
 		if err := writeJournal(r.paths.journal, r.journal); err != nil {
 			cleanup = append(cleanup, fmt.Errorf("write rollback-failed journal: %w", err))
 		}
-		if step.Kind == kindRollbackVerify || (step.Kind == kindRollbackPointer && causesRule(cause, "rollback.previous")) {
+		if step.Kind == kindRollbackVerify || step.Kind == kindRollbackConfig || (step.Kind == kindRollbackPointer && causesRule(cause, "rollback.previous")) {
 			manifest, manifestBytes := r.candidateForHistory()
 			record := r.buildHistory(ResultStateUnknown, manifest, manifestBytes, r.options.Now().UTC())
 			if err := r.writeHistory(record); err != nil {
@@ -703,6 +708,8 @@ func (r *runner) executeStep(step Step) error {
 		return r.migrate()
 	case kindEnsureImage:
 		return r.ensureImage(step)
+	case kindApplyConfig:
+		return r.applyConfig()
 	case kindStart:
 		if r.journal.Phase == PhaseRollback && r.journal.PreviousGeneration == 0 {
 			return nil
@@ -712,6 +719,8 @@ func (r *runner) executeStep(step Step) error {
 		return r.health(false)
 	case kindCommit:
 		return r.commit()
+	case kindPersistConfig:
+		return r.persistConfig()
 	case kindRecord:
 		return r.record(ResultCommitted)
 	case kindPrune:
@@ -850,7 +859,7 @@ func (r *runner) rollbackPrune() error {
 	if err := removeAll(r.paths.stagingDir(r.journal.OperationID)); err != nil {
 		return err
 	}
-	if err := os.Remove(r.paths.pendingConfig(r.journal.OperationID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := removePendingMigration(r.paths.pendingMigration(r.journal.OperationID)); err != nil {
 		return err
 	}
 	keep := map[int64]bool{

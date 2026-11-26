@@ -108,7 +108,11 @@ latest generation manifest. It is one of `not-applied`, `applied`, `applying`,
 independent of the overall state: a failed or rolled-back attempt leaves the
 previous applied generation running, so the overall state still reflects the
 current configuration and runtime. `render.generation` names the applied
-generation only; it does not advance until the transaction commits.
+generation only; it does not advance until the transaction commits. An update transaction runs the
+same apply pipeline inside its own transaction, so `render.generation` and `render.apply_state` can
+advance to the applied configuration generation while `updates.committed_generation` still names the
+previous bundle. The update's own commit point is `updates.committed_generation`; the applied
+configuration generation is `last_operation.apply.generation`.
 
 `render.validation` reports only checks the daemon can run in memory: file
 count, sorted and unique relative paths, and the generated file header. The
@@ -177,6 +181,15 @@ generation 0 to generation 1.
 | `last_operation.to_generation` | Candidate or restored generation |
 | `last_operation.restored_generation` | Generation restored by a rollback, 0 for a baseline revert |
 | `last_operation.baseline` | True when the rollback target was the baseline |
+| `last_operation.apply.result` | `applied`, `failed`, `rolled-back`, or `not-run`; absent on a manual bundle rollback, which runs no apply |
+| `last_operation.apply.generation` | Configuration apply generation the update wrote; null when no apply ran |
+| `last_operation.apply.changed_files` | Number of live targets the apply wrote or removed |
+| `last_operation.apply.failed_step` | Failing apply-internal step, such as `check:dnsmasq/dnsmasq.conf` |
+| `last_operation.apply.reason` | Redacted apply failure |
+| `last_operation.migration.result` | `none`, `applied`, `config-pending`, or `discarded` |
+| `last_operation.migration.from` | Source appliance schema version, or null |
+| `last_operation.migration.to` | Target appliance schema version, or null |
+| `last_operation.migration.reason` | Redacted reason when the record is still pending |
 | `current_operation.operation_id` | Operation id from the running journal |
 | `current_operation.kind` | `app-bundle-update` or `app-bundle-rollback` |
 | `current_operation.phase` | `install`, `rollback`, or `manual-rollback` |

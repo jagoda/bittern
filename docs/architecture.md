@@ -216,10 +216,14 @@ the OS.
    signature and verify them against a pinned key before trusting any manifest field.
 3. Download the payload and verify its digest and file list.
 4. Back up `appliance.yaml`, the Frigate config, and the Frigate database.
-5. Stop Frigate gracefully, activate the staged generation, and run schema and database migrations.
-6. Pull the pinned Frigate digest, start services, and run the health gate.
-7. Commit on success. On failure, restore the previous generation and database backup, then re-run
-   health. Prune old bundles and record the outcome in the update history shown in the UI.
+5. Stop Frigate gracefully, activate the staged generation, and stage the schema migration and the
+   candidate renderer.
+6. Run the candidate renderer's render, native-check, and atomic-write pipeline for the generated
+   configuration, ensure the pinned Frigate digest, start services, and run the health gate.
+7. Commit on success, then let the agent persist the staged schema migration and restart it to
+   consume the record. On failure, restore the previous bundle, the previous configuration
+   generation, and the database backup, then re-run health. Prune old bundles and record the outcome
+   in the update history shown in the UI.
 
 The app bundle channel is GitHub Releases in `jagoda/bittern`, published from a tag with immutable
 releases and a draft as the atomic publish step ([ADR 0031](adr/0031-update-channel-on-github-releases.md)).
@@ -245,8 +249,9 @@ These hold for the app bundle transaction and for any later OS image provider.
 - **The transaction writes only under `/var/lib/bittern` and the bounded subsystem allowlist in
   [ADR 0036](adr/0036-update-bundles-deliver-subsystem-changes.md).** It never assumes a general
   writable root and never assumes knowledge of OS slots. The allowlist is the declared unit
-  namespace, the apply live targets, and the snapshot that covers them; it is not a general `/etc`
-  write.
+  namespace, the apply live targets, and the restore of the previous configuration generation; it
+  is not a general `/etc` write. The helper unit's `ReadWritePaths` names the directories that an
+  atomic replacement needs, but the fixed apply target map is the code-enforced allowlist.
 - **The agent records a base fingerprint in the status contract.** It covers the Debian version, the
   kernel, the Docker version, device availability, and firmware presence. It is recorded evidence,
   not a trust input; compatibility checks still use the root-owned image metadata.

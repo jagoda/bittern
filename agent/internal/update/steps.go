@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -722,20 +724,221 @@ func (r *runner) migrate() error {
 	}
 	r.journal.SchemaBefore = migration.From
 	r.journal.SchemaAfter = migration.To
-	pending := r.paths.pendingConfig(r.journal.OperationID)
+	pending := r.paths.pendingMigration(r.journal.OperationID)
 	if !migration.Changed || migration.From == migration.To {
-		if err := os.Remove(pending); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := removePendingMigration(pending); err != nil {
 			return err
+		}
+		r.journal.Migration = MigrationRecord{Result: MigrationNone, From: migration.From, To: migration.To}
+		return nil
+	}
+	if r.journal.CandidateGeneration == 0 {
+		return errorf("migrate.candidate", "the journal has no verified candidate generation for the pending migration")
+	}
+	record := PendingMigration{
+		SchemaVersion:  pendingMigrationSchemaVersion,
+		OperationID:    r.journal.OperationID,
+		MigrationID:    pendingMigrationID(migration.From, migration.To),
+		Target:         PendingTargetAppliance,
+		Generation:     r.journal.CandidateGeneration,
+		From:           migration.From,
+		To:             migration.To,
+		SourceSHA256:   sha256Hex(r.configBytes),
+		DocumentSHA256: sha256Hex(migration.Document),
+		Document:       string(migration.Document),
+		CreatedAt:      r.options.Now().UTC().Format(time.RFC3339),
+	}
+	if err := os.MkdirAll(r.paths.pendingDir(), 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(r.paths.pendingDir(), 0o700); err != nil {
+		return err
+	}
+	if err := writePendingMigration(pending, record); err != nil {
+		return err
+	}
+	r.journal.Migration = MigrationRecord{Result: MigrationConfigPending, From: migration.From, To: migration.To}
+	return nil
+}
+
+// applyConfig runs the candidate bundle's renderer and the shared apply
+// pipeline after activation and before the agent and Frigate start steps. The
+// previous apply generation is recorded before the first live write so a
+// resume or a rollback can restore it after a process cut.
+const applyConfigTimeout = 75 * time.Minute
+
+var (
+	persistConfigTimeout      = 30 * time.Second
+	persistConfigPollInterval = 200 * time.Millisecond
+)
+
+// readApplyCurrent reads the configuration apply pointer. It is separate from
+// the app bundle pointer in app/current.
+func readApplyCurrent(stateRoot string) (int, error) {
+	data, err := os.ReadFile(filepath.Join(stateRoot, "current"))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	text := strings.TrimSpace(string(data))
+	generation, err := strconv.Atoi(text)
+	if err != nil || generation < 0 || strconv.Itoa(generation) != text {
+		return 0, fmt.Errorf("invalid configuration generation %q", text)
+	}
+	return generation, nil
+}
+
+func (r *runner) applyConfig() error {
+	manifest, err := r.candidateManifest()
+	if err != nil {
+		return err
+	}
+	binary, err := candidateRenderer(manifest)
+	if err != nil {
+		return err
+	}
+	if !r.journal.ApplyAttempted {
+		previous, err := readApplyCurrent(r.paths.stateRoot)
+		if err != nil {
+			return errorf("apply.previous", "read the current configuration generation: %v", err)
+		}
+		r.journal.ApplyAttempted = true
+		r.journal.ApplyPreviousGeneration = previous
+		r.journal.UpdatedAt = r.options.Now().UTC().Format(time.RFC3339)
+		if err := writeJournal(r.paths.journal, r.journal); err != nil {
+			return err
+		}
+	}
+	request := ApplyConfigRequest{
+		StateRoot:    r.paths.stateRoot,
+		BundleDir:    r.paths.bundleDir(r.journal.CandidateGeneration),
+		OperationID:  r.journal.OperationID,
+		Generation:   r.journal.CandidateGeneration,
+		BinarySHA256: binary.SHA256,
+		BinaryMode:   binary.Mode,
+		Timeout:      time.Duration(stepTimeoutSeconds(r.journal.Steps, StepApplyConfig)) * time.Second,
+	}
+	result, err := r.options.ConfigApplier.ApplyConfig(request)
+	r.journal.ConfigApply = ConfigApplyRecord{
+		Result:             result.Result,
+		Generation:         result.Generation,
+		PreviousGeneration: result.PreviousGeneration,
+		Wrote:              result.Wrote,
+		ChangedFiles:       append([]string(nil), result.ChangedFiles...),
+		RestartedUnits:     append([]string(nil), result.RestartedUnits...),
+		Checks:             append([]ConfigApplyCheck(nil), result.Checks...),
+		FailedStep:         result.FailedStep,
+		Failure:            r.redactor.String(result.Failure),
+	}
+	if err != nil {
+		if r.journal.ConfigApply.Result == "" {
+			r.journal.ConfigApply.Result = "failed"
+		}
+		if r.journal.ConfigApply.Failure == "" {
+			r.journal.ConfigApply.Failure = r.redactor.String(err.Error())
+		}
+		detail := r.journal.ConfigApply.Failure
+		if result.FailedStep != "" && !strings.Contains(detail, result.FailedStep) {
+			detail = result.FailedStep + ": " + detail
+		}
+		return errorf("apply.config", "the candidate configuration apply failed: %s", detail)
+	}
+	if r.journal.ConfigApply.Result == "" {
+		r.journal.ConfigApply.Result = "applied"
+	}
+	return nil
+}
+
+// candidateRenderer returns the candidate bundle's bittern binary record. The
+// engine refuses a bundle without it rather than falling back to the running
+// baseline renderer, which is the mismatch ADR 0036 closes.
+func candidateRenderer(manifest *release.Manifest) (release.File, error) {
+	for _, file := range manifest.Files {
+		if file.Path == "usr/bin/bittern" {
+			return file, nil
+		}
+	}
+	return release.File{}, errorf("apply.binary", "the candidate bundle has no usr/bin/bittern renderer")
+}
+
+func stepTimeoutSeconds(steps []Step, key string) int {
+	for _, step := range steps {
+		if step.Key == key {
+			return step.TimeoutSeconds
+		}
+	}
+	return 0
+}
+
+// persistConfig runs after commit. It restarts the agent only when a durable
+// pending migration exists for the committed generation, and it records
+// config-pending instead of failing a committed update when the agent has not
+// consumed the record yet. The agent retries at every start and at the next
+// boot; nothing here rolls a committed update back.
+func (r *runner) persistConfig() error {
+	records, err := PendingMigrations(r.paths.stateRoot, r.journal.CandidateGeneration)
+	if err != nil {
+		r.journal.Migration = MigrationRecord{Result: MigrationConfigPending, Reason: r.redactor.String(err.Error())}
+		return nil
+	}
+	if len(records) == 0 {
+		// A resume after the agent already consumed the record has no file to
+		// read. The live configuration's schema is the committed evidence that
+		// the migration reached the target, so the history records applied
+		// rather than a stale config-pending from before the cut.
+		if r.journal.Migration.Result == MigrationConfigPending && r.journal.Migration.To > 0 {
+			if live, readErr := os.ReadFile(r.options.ConfigPath); readErr == nil {
+				if cfg, validationErrors := config.Parse(live); len(validationErrors) == 0 && cfg.SchemaVersion == r.journal.Migration.To {
+					r.journal.Migration.Result = MigrationApplied
+				}
+			}
+		}
+		if r.journal.Migration.Result == "" {
+			r.journal.Migration = MigrationRecord{Result: MigrationNone}
 		}
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(pending), 0o700); err != nil {
+	record := records[0]
+	r.journal.Migration = MigrationRecord{Result: MigrationConfigPending, From: record.From, To: record.To}
+	if err := r.restartAgentForPersist(); err != nil {
+		r.journal.Migration.Reason = r.redactor.String(err.Error())
+		return nil
+	}
+	deadline := time.Now().Add(persistConfigTimeout)
+	for {
+		remaining, err := PendingMigrations(r.paths.stateRoot, r.journal.CandidateGeneration)
+		if err == nil && len(remaining) == 0 {
+			live, readErr := os.ReadFile(r.options.ConfigPath)
+			if readErr == nil && sha256Hex(live) == record.DocumentSHA256 {
+				r.journal.Migration = MigrationRecord{Result: MigrationApplied, From: record.From, To: record.To}
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			r.journal.Migration.Reason = "the agent did not persist the pending migration before the wait ended; it retries at every start"
+			return nil
+		}
+		time.Sleep(persistConfigPollInterval)
+	}
+}
+
+func (r *runner) restartAgentForPersist() error {
+	if err := r.options.System.RestartUnit("bitternd.service"); err != nil {
 		return err
 	}
-	if err := os.Chmod(filepath.Dir(pending), 0o700); err != nil {
-		return err
+	if waiter, ok := r.options.System.(UnitWaiter); ok {
+		if err := waiter.WaitUnitActive("bitternd.service", 60*time.Second); err != nil {
+			return err
+		}
 	}
-	return writeFileAtomic(pending, migration.Document, 0o600)
+	probe := apply.Probe{Name: StepPersistConfig, Kind: apply.ProbeUnit, Target: "bitternd.service"}
+	result := r.options.System.ProbeHealth(probe)
+	if result.Status != apply.ProbePassed {
+		return errorf("unit.start", "bitternd.service did not report a positive health result: %s (%s)", result.Status, result.Reason)
+	}
+	return nil
 }
 
 func (r *runner) activate() error {
@@ -1010,6 +1213,23 @@ func requireBackupDigest(digests map[string]string, name string) (string, error)
 }
 
 func (r *runner) rollbackRestoreConfig() error {
+	// An attempt is enough to require the restore: a cut, or a failed step
+	// whose write landed before its error, may have changed a live target
+	// without the journal recording Wrote. RollbackStaged is a no-op when the
+	// apply never staged a newer generation.
+	if r.journal.ApplyAttempted {
+		if err := r.options.ConfigApplier.RollbackConfig(RollbackConfigRequest{
+			StateRoot:          r.paths.stateRoot,
+			LiveRoot:           "/",
+			PreviousGeneration: r.journal.ApplyPreviousGeneration,
+		}); err != nil {
+			return errorf("rollback.config", "restore the previous configuration generation %d: %v", r.journal.ApplyPreviousGeneration, err)
+		}
+		r.journal.ConfigApply.Result = "rolled-back"
+	}
+	if r.journal.Migration.Result == MigrationConfigPending || r.journal.Migration.Result == MigrationApplied {
+		r.journal.Migration.Result = MigrationDiscarded
+	}
 	backup := r.paths.backupDir(r.journal.OperationID)
 	_, digests, err := verifyBackup(backup)
 	if err != nil {
@@ -1026,8 +1246,7 @@ func (r *runner) rollbackRestoreConfig() error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	pending := r.paths.pendingConfig(r.journal.OperationID)
-	if err := os.Remove(pending); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := removePendingMigration(r.paths.pendingMigration(r.journal.OperationID)); err != nil {
 		return err
 	}
 	return nil

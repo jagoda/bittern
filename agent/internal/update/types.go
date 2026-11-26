@@ -77,10 +77,12 @@ const (
 	StepActivate             = "activate"
 	StepMigrate              = "migrate"
 	StepEnsureImage          = "ensure-image"
+	StepApplyConfig          = "apply-config"
 	StepStartAgent           = "start-agent"
 	StepStartFrigate         = "start-frigate"
 	StepHealth               = "health"
 	StepCommit               = "commit"
+	StepPersistConfig        = "persist-config"
 	StepRecord               = "record"
 	StepPrune                = "prune"
 	StepFinish               = "finish"
@@ -127,8 +129,10 @@ const (
 	kindActivate        = "activate"
 	kindMigrate         = "migrate"
 	kindEnsureImage     = "ensure-image"
+	kindApplyConfig     = "apply-config"
 	kindHealth          = "health"
 	kindCommit          = "commit"
+	kindPersistConfig   = "persist-config"
 	kindRecord          = "record"
 	kindPrune           = "prune"
 	kindFinish          = "finish"
@@ -294,6 +298,14 @@ type Journal struct {
 	SchemaBefore int            `json:"schema_before"`
 	SchemaAfter  int            `json:"schema_after"`
 	Health       []HealthRecord `json:"health,omitempty"`
+	// ConfigApply records the apply-config step and the migration the
+	// post-commit step persisted. ApplyAttempted and ApplyPreviousGeneration
+	// are written before the first live apply, so a resume or rollback knows
+	// which configuration generation to restore even after a process cut.
+	ApplyAttempted          bool              `json:"apply_attempted,omitempty"`
+	ApplyPreviousGeneration int               `json:"apply_previous_generation,omitempty"`
+	ConfigApply             ConfigApplyRecord `json:"apply,omitempty"`
+	Migration               MigrationRecord   `json:"migration,omitempty"`
 }
 
 // State is the committed update state, the authority for the committed
@@ -308,6 +320,84 @@ type State struct {
 	Base                    Base     `json:"base"`
 	Platform                Platform `json:"platform"`
 	LastHistoryID           string   `json:"last_history_id"`
+}
+
+// ConfigApplyRecord is the update transaction's record of the apply-config
+// step and its result. It is recorded in the journal while the transaction
+// runs and in the history after it finishes.
+type ConfigApplyRecord struct {
+	Result             string             `json:"result"`
+	Generation         int                `json:"generation,omitempty"`
+	PreviousGeneration int                `json:"previous_generation,omitempty"`
+	Wrote              bool               `json:"wrote,omitempty"`
+	ChangedFiles       []string           `json:"changed_files,omitempty"`
+	RestartedUnits     []string           `json:"restarted_units,omitempty"`
+	Checks             []ConfigApplyCheck `json:"checks,omitempty"`
+	FailedStep         string             `json:"failed_step,omitempty"`
+	Failure            string             `json:"failure,omitempty"`
+}
+
+// ConfigApplyCheck is one native validation result from the apply pipeline.
+type ConfigApplyCheck struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// MigrationRecord is the outcome of the staged appliance.yaml migration. The
+// result is none when the bundle needs no schema change, applied when the
+// agent persisted the migrated document after commit, and config-pending when
+// the committed update still has a durable pending record.
+type MigrationRecord struct {
+	Result string `json:"result"`
+	From   int    `json:"from,omitempty"`
+	To     int    `json:"to,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// ApplyConfigResult is the result record the candidate renderer writes for the
+// apply-config step. It is the only result channel between the candidate
+// process and the fixed helper.
+type ApplyConfigResult struct {
+	SchemaVersion      int                `json:"schema_version"`
+	OperationID        string             `json:"operation_id"`
+	Result             string             `json:"result"`
+	Generation         int                `json:"generation,omitempty"`
+	PreviousGeneration int                `json:"previous_generation,omitempty"`
+	Wrote              bool               `json:"wrote,omitempty"`
+	ChangedFiles       []string           `json:"changed_files,omitempty"`
+	RestartedUnits     []string           `json:"restarted_units,omitempty"`
+	Checks             []ConfigApplyCheck `json:"checks,omitempty"`
+	FailedStep         string             `json:"failed_step,omitempty"`
+	Failure            string             `json:"failure,omitempty"`
+}
+
+// ApplyConfigRequest is the fixed helper's request to the candidate renderer.
+// The binary digest and mode come from the verified candidate manifest.
+type ApplyConfigRequest struct {
+	StateRoot    string
+	BundleDir    string
+	OperationID  string
+	Generation   int64
+	BinarySHA256 string
+	BinaryMode   string
+	Timeout      time.Duration
+}
+
+// RollbackConfigRequest restores the apply generation that was current before
+// the update's apply-config step.
+type RollbackConfigRequest struct {
+	StateRoot          string
+	LiveRoot           string
+	PreviousGeneration int
+}
+
+// ConfigApplier runs the candidate renderer and the apply pipeline for the
+// activated bundle. ExecConfigApplier is the production implementation; tests
+// supply a fake that calls apply.ApplyStaged in-process.
+type ConfigApplier interface {
+	ApplyConfig(ApplyConfigRequest) (ApplyConfigResult, error)
+	RollbackConfig(RollbackConfigRequest) error
 }
 
 // HealthRecord is one health probe result without URLs or credentials.
@@ -363,26 +453,28 @@ type PayloadRecord struct {
 // History is one committed, rolled-back, rejected or failed transaction
 // record. It is support input, not trust input.
 type History struct {
-	SchemaVersion int            `json:"schema_version"`
-	OperationID   string         `json:"operation_id"`
-	Kind          string         `json:"kind"`
-	Result        string         `json:"result"`
-	Source        string         `json:"source"`
-	Channel       string         `json:"channel"`
-	From          *Endpoint      `json:"from"`
-	To            *Endpoint      `json:"to"`
-	StartedAt     string         `json:"started_at"`
-	FinishedAt    string         `json:"finished_at"`
-	FailedStep    string         `json:"failed_step"`
-	Failure       string         `json:"failure"`
-	Reason        string         `json:"reason,omitempty"`
-	Rollback      RollbackRecord `json:"rollback"`
-	Backup        BackupRecord   `json:"backup"`
-	Health        []HealthRecord `json:"health"`
-	Base          Base           `json:"base"`
-	Platform      Platform       `json:"platform"`
-	Schema        SchemaRecord   `json:"schema"`
-	Payload       PayloadRecord  `json:"payload"`
+	SchemaVersion int               `json:"schema_version"`
+	OperationID   string            `json:"operation_id"`
+	Kind          string            `json:"kind"`
+	Result        string            `json:"result"`
+	Source        string            `json:"source"`
+	Channel       string            `json:"channel"`
+	From          *Endpoint         `json:"from"`
+	To            *Endpoint         `json:"to"`
+	StartedAt     string            `json:"started_at"`
+	FinishedAt    string            `json:"finished_at"`
+	FailedStep    string            `json:"failed_step"`
+	Failure       string            `json:"failure"`
+	Reason        string            `json:"reason,omitempty"`
+	Rollback      RollbackRecord    `json:"rollback"`
+	Backup        BackupRecord      `json:"backup"`
+	Health        []HealthRecord    `json:"health"`
+	Base          Base              `json:"base"`
+	Platform      Platform          `json:"platform"`
+	Schema        SchemaRecord      `json:"schema"`
+	Payload       PayloadRecord     `json:"payload"`
+	Apply         ConfigApplyRecord `json:"apply"`
+	Migration     MigrationRecord   `json:"migration"`
 }
 
 // Result is the caller-facing outcome without reading the journal.
@@ -422,6 +514,7 @@ type Options struct {
 	SecretsPath      string
 	Reason           string
 	BaselineBinary   string
+	ConfigApplier    ConfigApplier
 	BeforeStep       func(Step) error
 	AfterStep        func(Step) error
 	Logger           func(format string, args ...any)

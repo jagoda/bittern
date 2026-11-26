@@ -2,6 +2,8 @@ package status
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -344,6 +346,94 @@ func TestStatusDocumentReportsCheckRollbackAndLastOperation(t *testing.T) {
 	}
 	if section.LastOperation.FromGeneration == nil || *section.LastOperation.FromGeneration != 1 {
 		t.Fatalf("last operation from = %v, want 1", section.LastOperation.FromGeneration)
+	}
+}
+
+func TestStatusDocumentReportsApplyAndPendingMigration(t *testing.T) {
+	stateRoot := t.TempDir()
+	writeUpdateState(t, stateRoot, update.State{
+		SchemaVersion:       1,
+		Channel:             "beta",
+		CommittedGeneration: 2,
+		CommittedVersion:    "0.1.2",
+	})
+	writeRunningBundle(t, stateRoot, 2, "0.1.2")
+	history := update.History{
+		SchemaVersion: update.SchemaVersion,
+		OperationID:   "20261122T110000Z-g000002-deadbeef",
+		Kind:          "app-bundle-update",
+		Result:        update.ResultCommitted,
+		Channel:       "beta",
+		FinishedAt:    "2026-11-22T11:00:00Z",
+		From:          &update.Endpoint{Generation: 1, Version: "0.1.1"},
+		To:            &update.Endpoint{Generation: 2, Version: "0.1.2"},
+		Apply: update.ConfigApplyRecord{
+			Result:       "applied",
+			Generation:   3,
+			ChangedFiles: []string{"etc/dnsmasq.d/bittern.conf"},
+		},
+		Migration: update.MigrationRecord{Result: update.MigrationApplied, From: 1, To: 2},
+	}
+	data, err := json.Marshal(history)
+	if err != nil {
+		t.Fatal(err)
+	}
+	historyDir := filepath.Join(stateRoot, "update", "history")
+	if err := os.MkdirAll(historyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(historyDir, history.OperationID+".json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	probes := healthyProbes(t)
+	probes.Updates = nil
+	section := New("", Options{StateRoot: stateRoot, Probes: probes}).Build(context.Background()).Sections.Updates
+	if section.LastOperation == nil || section.LastOperation.Apply == nil {
+		t.Fatalf("last operation has no apply section: %+v", section.LastOperation)
+	}
+	if section.LastOperation.Apply.Result != "applied" || section.LastOperation.Apply.ChangedFiles != 1 {
+		t.Fatalf("apply section = %+v", section.LastOperation.Apply)
+	}
+	if section.LastOperation.Apply.Generation == nil || *section.LastOperation.Apply.Generation != 3 {
+		t.Fatalf("apply generation = %v, want 3", section.LastOperation.Apply.Generation)
+	}
+	if section.LastOperation.Migration == nil || section.LastOperation.Migration.Result != update.MigrationApplied {
+		t.Fatalf("migration section = %+v", section.LastOperation.Migration)
+	}
+	// A durable record for the committed generation overrides the history's
+	// applied result, so status distinguishes a committed update whose
+	// migration is still pending.
+	document := "schema_version: 2\n"
+	digest := sha256.Sum256([]byte(document))
+	record := update.PendingMigration{
+		SchemaVersion:  1,
+		OperationID:    history.OperationID,
+		MigrationID:    "appliance-schema-1-to-2",
+		Target:         update.PendingTargetAppliance,
+		Generation:     2,
+		From:           1,
+		To:             2,
+		SourceSHA256:   strings.Repeat("a", 64),
+		DocumentSHA256: hex.EncodeToString(digest[:]),
+		Document:       document,
+	}
+	pendingDir := filepath.Join(stateRoot, "update", "pending")
+	if err := os.MkdirAll(pendingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data, err = json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pendingDir, history.OperationID+".json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	section = New("", Options{StateRoot: stateRoot, Probes: probes}).Build(context.Background()).Sections.Updates
+	if section.LastOperation == nil || section.LastOperation.Migration == nil {
+		t.Fatal("the pending record hid the migration section")
+	}
+	if section.LastOperation.Migration.Result != update.MigrationConfigPending {
+		t.Fatalf("migration result = %q, want config-pending", section.LastOperation.Migration.Result)
 	}
 }
 

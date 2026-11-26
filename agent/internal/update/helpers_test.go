@@ -62,6 +62,7 @@ type fakeSystem struct {
 	probeDelay    time.Duration
 	waitErr       map[string]error
 	waitDuration  time.Duration
+	restartHook   func(unit string) error
 	// restartVersion models the fixed launcher: a restart reads the activation
 	// pointer and the active bundle's manifest version.
 	restartVersion func(unit string) string
@@ -104,6 +105,9 @@ func (f *fakeSystem) RestartUnit(unit string) error {
 	f.active[unit] = true
 	if f.restartVersion != nil {
 		f.runningVersion[unit] = f.restartVersion(unit)
+	}
+	if f.restartHook != nil {
+		return f.restartHook(unit)
 	}
 	return nil
 }
@@ -210,6 +214,7 @@ type testEnv struct {
 	system         *fakeSystem
 	data           *fakeData
 	image          *fakeImage
+	applier        *testConfigApplier
 	options        Options
 	sourceCounter  int
 }
@@ -301,6 +306,15 @@ func newTestEnv(t *testing.T) *testEnv {
 		HealthTimeout:    5 * time.Minute,
 		BaselineBinary:   baselineBinary,
 	}
+	env.applier = &testConfigApplier{env: env, system: newTestApplySystem()}
+	env.options.ConfigApplier = env.applier
+	system.restartHook = func(unit string) error {
+		if unit != "bitternd.service" {
+			return nil
+		}
+		_, persistErr := PersistPendingMigrations(env.stateRoot, env.configPath)
+		return persistErr
+	}
 	return env
 }
 
@@ -350,8 +364,9 @@ privacy:
 
 func defaultFiles() map[string]fileSpec {
 	return map[string]fileSpec{
-		"bin/bitternd":  {data: []byte("#!/bin/sh\necho agent\n"), mode: 0o755},
-		"share/app.txt": {data: []byte("application file\n"), mode: 0o644},
+		"usr/bin/bittern":  {data: []byte("#!/bin/sh\necho renderer\n"), mode: 0o755},
+		"usr/bin/bitternd": {data: []byte("#!/bin/sh\necho agent\n"), mode: 0o755},
+		"share/app.txt":    {data: []byte("application file\n"), mode: 0o644},
 	}
 }
 

@@ -8,7 +8,8 @@
   [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md): the new `plan`, `snapshot`,
   `subsystems`, `apply-config`, and `persist-config` steps extend section 3, and the write boundary
   in sections 5, 7, 10, 12, and 15 is extended by the bounded subsystem allowlist. The rest of this
-  note is unchanged and remains the slice zero and slice two record.
+  note is unchanged and remains the slice zero and slice two record. Amended again on 2026-11-27 by
+  the apply-on-update and migration persistence implementation; section 3a is that delta.
 - Related: [ADR 0008](../adr/0008-updates-rollback-and-reset.md),
   [ADR 0029](../adr/0029-release-signing-and-key-custody.md),
   [ADR 0030](../adr/0030-ab-from-the-first-image.md),
@@ -97,7 +98,8 @@ lines 39 to 53). The update transaction uses separate names so the two journals 
 | `/var/lib/bittern/backups/<operation-id>/previous-manifest.json` | Canonical previous manifest, mode 0644 | Same as backup | Identifies the bundle the pointer returns to. |
 | `/var/lib/bittern/backups/<operation-id>/previous-state.json` | Copy of the previous `state.json`, mode 0644 | Same as backup | Identifies the committed generation and manifest digest. |
 | `/var/lib/bittern/backups/<operation-id>/checksums.sha256` | `sha256sum` format, mode 0644 | Same as backup | Detects a partial or corrupted backup before restore. |
-| `/var/lib/bittern/update/<operation-id>/appliance.yaml` | Pending migrated config, mode 0600 | Removed at commit or rollback | The engine's migration output. It is not written to `/etc`; the slice-two agent reads and persists it after commit. |
+| `/var/lib/bittern/update/pending/<operation-id>.json` | Strict JSON, mode 0600, root-owned | Removed by the agent after persistence or by `rollback-prune` | The durable pending `appliance.yaml` migration: id, target, `from`, `to`, generation, source and document digests, and the migrated document. It is outside the operation directory so it survives the operation-directory prune. |
+| `/var/lib/bittern/update/<operation-id>/apply-config.json` | Strict JSON, mode 0600 | Retained with the operation directory | The candidate renderer's result record for `apply-config`: result, configuration generation, changed targets, restart units, native checks, and the failing step and reason. |
 
 Temporary files are named `.tmp-<name>-<random>` in the destination directory and are never
 reachable through the pointer. A staging directory left by a cut is not reused blindly: the next
@@ -218,6 +220,54 @@ resume finishes the remaining record and prune steps.
 The first live step is `stop-frigate`. Its journal entry sets `live_touched=true` before the stop,
 so a cut after the entry but before the stop still produces a rollback on the next command rather
 than a silent half-update. A cut before `stop-frigate` is a rejection with no live change.
+
+### 3a. Amendment 2026-11-27: apply-on-update and migration persistence
+
+This is the first half of [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md).
+It adds two steps to the install plan and changes `migrate`; it does not add the ADR's `plan`,
+`snapshot`, `subsystems`, unit delivery, or manifest v2 work.
+
+| Step | Position | What it does |
+| --- | --- | --- |
+| `apply-config` | After `ensure-image`, before `start-agent` | Runs the candidate bundle's `usr/bin/bittern update apply-config`, which executes the same render, native-validate, and atomic-write pipeline a manual apply runs. The candidate binary is the renderer, so its embedded templates, defaults, target map, checkers, and pinned image are the candidate's. The step runs after activation and before commit, so a failure is a rollback. |
+| `persist-config` | After `commit`, before `record` | Restarts `bitternd.service` only when a durable pending migration exists for the committed generation, waits for the agent to consume it, and records `config-pending` when the wait ends without consumption. It never rolls a committed update back. |
+
+The `migrate` step now writes `/var/lib/bittern/update/pending/<operation-id>.json` instead of a file
+inside the operation directory. The record is written atomically with `fsync` and a directory
+`fsync`, is strict JSON, and contains no secret. `rollback-prune` removes it. The agent reads it only
+when `state.json` names the record's generation as committed, validates `source_sha256`, writes
+`/etc/bittern/appliance.yaml` through a temporary file in the same directory with `fsync`, `rename`,
+and a directory `fsync`, and removes the record. A live document with the record's
+`document_sha256` is already applied and removes the record without a second write. A live document
+whose digest is neither the source nor the document is refused; the record stays and status reports
+`config-pending`. The agent runs this at every start, so a cut between the live write and the record
+removal is repaired by the next start.
+
+`apply-config` writes the apply pipeline's new generation under `/var/lib/bittern/generations/<n>/`
+and advances the apply pointer `/var/lib/bittern/current` only after every changed live target has
+been written and every changed unit restarted. Each live target is written through the apply
+pipeline's existing temporary-file, `fsync`, `rename`, and directory-`fsync` writer, so a single file
+is never half-written. The update journal records `apply_attempted` and
+`apply_previous_generation` before the candidate runs, so a cut or a failed write still lets
+`rollback-restore-config` restore the apply generation that was current before the transaction. The
+restore verifies every file of that generation before it writes anything; a verification failure is
+a rollback failure and `state-unknown`, not a claimed restore. The update transaction keeps its own
+journal, snapshot of the bundle and backup, and rollback; the apply stages do not take the shared
+lock again, write an apply journal, run an apply health gate, or commit a nested transaction.
+
+The failure model is:
+
+| Failure | Result |
+| --- | --- |
+| Render or native check in `apply-config` | No live target was written. The step fails, the journal switches to rollback, the bundle pointer and committed state return to the previous generation, and the configuration restore is a no-op or an idempotent rewrite of the same previous generation. |
+| A write or unit restart after the first changed target | The rollback restores every live target of the previous apply generation and removes targets only the candidate generation introduced, then the update restarts the previous agent and Frigate. |
+| The configuration restore cannot verify or write the previous generation | The journal becomes `rollback-failed`, the failing step and reason are recorded, and the history result is `state-unknown`. The update never reports the previous configuration as running. |
+| `persist-config` fails after commit | The update stays committed. The history and status report `config-pending`; the agent retries at every start and at the next boot. |
+
+`apply-config` belongs to the install plan between `ensure-image` and `start-agent`, and to the
+same rollback plan through the existing `rollback-restore-config` step. It is a live step in the
+journal's `live_touched` sense. `persist-config` belongs to the install plan between `commit` and
+`record` and is not a live step because the commit point has already passed.
 
 ### Rollback plan
 
@@ -400,7 +450,10 @@ What is restored, in order:
    The live `/etc/bittern/appliance.yaml` was never changed by this transaction, so it needs no
    restore. Slice two's agent may persist the pending migration after commit; it owns that write
    and its own rollback.
-5. The Frigate database snapshot is restored through `DataSnapshot.Restore` after its digest is
+5. The Frigate configuration and every other live target the update's `apply-config` touched are
+   restored to the apply generation that was current before the transaction. The restore verifies
+   every staged file of that generation first; a mismatch fails the rollback with `state-unknown`.
+   The Frigate database snapshot is restored through `DataSnapshot.Restore` after its digest is
    verified. If no snapshot exists, the step records `no-data` and does not invent one.
 6. The previous `bitternd` is started from the restored pointer, then the previous Frigate unit.
 7. The health gate is run against the previous bundle. If the previous generation is `0`, the gate
@@ -490,6 +543,8 @@ for records with the same generation.
 | `base` | The base fingerprint from section 12. |
 | `platform` | The provider's generation and source. |
 | `schema` | The appliance schema before and after the migration. |
+| `apply` | `result` (`applied`, `failed`, `rolled-back`, or `not-run`), the configuration generation, the changed targets, the restarted units, the native check results, and the failing step and reason. |
+| `migration` | `result` (`none`, `applied`, `config-pending`, or `discarded`), the schema range, and the reason when the record is still pending. |
 | `payload` | `filename`, `size`, and `sha256`. |
 
 Retention: keep the newest 20 records and at least the newest record. Prune older records only after
@@ -611,10 +666,12 @@ step's effect but before the completion entry where the step has an effect.
 - [ ] `TestUpdatePowerCutBeforeActivate`
 - [ ] `TestUpdatePowerCutBeforeMigrate`
 - [ ] `TestUpdatePowerCutBeforeEnsureImage`
+- [ ] `TestUpdatePowerCutBeforeApplyConfig`
 - [ ] `TestUpdatePowerCutBeforeStartAgent`
 - [ ] `TestUpdatePowerCutBeforeStartFrigate`
 - [ ] `TestUpdatePowerCutBeforeHealth`
 - [ ] `TestUpdatePowerCutBeforeCommit`
+- [ ] `TestUpdatePowerCutBeforePersistConfig`
 - [ ] `TestUpdatePowerCutBeforeRecord`
 - [ ] `TestUpdatePowerCutBeforePrune`
 - [ ] `TestUpdatePowerCutBeforeFinish`
@@ -691,6 +748,25 @@ is on a verified bundle or `0`, the committed generation is unchanged until comm
 - [ ] `TestUpdateRejectionLeavesPointerAndStateUnchanged`
 - [ ] `TestUpdateRejectionRemovesStagingAndLeavesNoJournal`
 - [ ] `TestUpdateRejectionDoesNotWriteBackupAsCommittedState`
+
+### Apply-on-update and migration persistence (2026-11-27)
+
+- [x] `TestUpdateAppliesCandidateRendererOnActivation`
+- [x] `TestUpdateApplyChecksRunBeforeAnyLiveWrite`
+- [x] `TestUpdateApplyValidationFailureRollsBackBundleAndConfiguration`
+- [x] `TestUpdateApplyPartialWriteFailureRollsBackConfiguration`
+- [x] `TestUpdateApplyRollbackFailureReportsStateUnknown`
+- [x] `TestUpdateApplyUsesHeldLock`
+- [x] `TestUpdateNoServiceStoppedBeforeVerification`
+- [x] `TestUpdateWritesPendingMigrationRecord`
+- [x] `TestUpdateMigrationPersistedAfterCommit`
+- [x] `TestUpdateMigrationAppliedOnce`
+- [x] `TestUpdateMigrationDiscardedOnRollback`
+- [x] `TestUpdateConfigPendingIsCommittedAndRecorded`
+- [x] `TestUpdateNoSchemaChangeDoesNothingExtra`
+- [x] `TestUpdateMigrationRefusesChangedLiveConfig`
+- [x] `TestUpdateHistoryRecordsApplyAndMigration`
+- [x] `TestExecConfigApplierRunsCandidateBinary`
 
 The no-live-write assertion records the live root and every unit action before the attempt and
 requires them to be unchanged after a rejection. It uses the same fake System shape as

@@ -332,19 +332,28 @@ These are open after step 5. The first is the next action; the rest do not block
    provisional default: keep the documented temporary `main` policy for a dry run, because it is
    the smallest reversible change, and decide the no-secret dry-run environment before the next dry
    run. The environment is unchanged now.
-4. **The pending `appliance.yaml` migration is not persisted.** The update engine writes
-   `/var/lib/bittern/update/<operation-id>/appliance.yaml` and removes it at the end of the
-   transaction; nothing applies it to `/etc/bittern/appliance.yaml`.
-   [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md) decides the durable pending
-   record and the post-commit `persist-config` step. Implement it in the order below. Do not publish
-   a bundle that needs a schema migration until `TestUpdateMigrationAppliedOnce`,
-   `TestUpdateMigrationDiscardedOnRollback`, and `TestUpdateMigrationPersistedAfterCommit` pass.
-5. **Unit changes are not delivered by the bundle.** The payload is files-only under
+4. **Apply-on-update and the pending `appliance.yaml` migration.** Landed on 2026-11-27 as the
+   first half of [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md). The install
+   plan now has `apply-config` after `ensure-image` and before `start-agent`, and `persist-config`
+   after `commit` and before `record`. The candidate bundle's renderer runs the manual apply's
+   render, native-check, and atomic-write pipeline inside the update transaction; the durable
+   pending record is `update/pending/<operation-id>.json`; the agent persists it after commit and
+   discards it on rollback. `TestUpdateAppliesCandidateRendererOnActivation`,
+   `TestUpdateApplyValidationFailureRollsBackBundleAndConfiguration`,
+   `TestUpdateApplyPartialWriteFailureRollsBackConfiguration`,
+   `TestUpdateApplyRollbackFailureReportsStateUnknown`, `TestUpdateApplyChecksRunBeforeAnyLiveWrite`,
+   `TestUpdateNoServiceStoppedBeforeVerification`, `TestUpdateMigrationAppliedOnce`,
+   `TestUpdateMigrationPersistedAfterCommit`, `TestUpdateMigrationDiscardedOnRollback`,
+   `TestUpdateConfigPendingIsCommittedAndRecorded`, and `TestUpdateNoSchemaChangeDoesNothingExtra`
+   pass. The remaining ADR 0036 work is item 5.
+5. **Unit changes and manifest v2 are not delivered yet.** The payload is files-only under
    `/var/lib/bittern/app/bundles/<generation>/files`; units, scripts, and templates come from the
    kit or the image. [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md) decides the
-   bounded `bittern-bundle-*` unit class, its ownership record, and its snapshot and rollback. The
-   image-only answer is replaced for that class only. Base-system units, package units, drop-ins,
-   and a unit that needs a package or kernel module remain image changes.
+   bounded `bittern-bundle-*` unit class, its ownership record, the transaction-wide `snapshot`
+   step, and the `subsystems` step. Those, the manifest v2 `subsystems` section, the dual-version
+   verifier, and the v2 fixture are the remaining ADR 0036 slice. The image-only answer is replaced
+   for that class only. Base-system units, package units, drop-ins, and a unit that needs a package
+   or kernel module remain image changes.
 6. **OQ-35, the delivery model and supported base.** The image is not yet required, the packaging
    install path is a bridge, and the first device that is not the maintainer's needs a reproducible
    supported base. Decide it before that trigger; it does not block the bench rollout.
@@ -2339,10 +2348,12 @@ rule that closes it are in [the update card note](../notes/2026-11-22-update-car
 [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md) decides the remaining delivery
 gap: a signed bundle may declare bounded systemd units and typed migrations, the fixed helper
 installs them, the candidate renderer applies the generated configuration inside the transaction,
-and one snapshot and rollback cover the set. The remaining work is the `plan`, `snapshot`,
-`subsystems`, `migrate`, `apply-config`, and `persist-config` steps with the ADR 0036 named tests.
-The order is this decision, then the apply-on-update and migration persistence work, then time
-synchronisation.
+and one snapshot and rollback cover the set. The apply-on-update and migration persistence half
+landed on 2026-11-27: `apply-config` runs the candidate renderer inside the transaction and
+`persist-config` lets the agent consume the durable pending record after commit. The remaining work
+is the `plan`, transaction-wide `snapshot`, `subsystems`, and unit delivery steps, the manifest v2
+section and dual-version verifier, and the remaining ADR 0036 named tests. The order is this
+decision, then time synchronisation.
 
 **Goal.** Updates that cannot leave the appliance half-configured. **Scope.**
 - Signed manifest with digest, generation and channel.
@@ -2376,7 +2387,7 @@ the transaction never writes a bootloader or claims an OS slot. The channel and 
 | 3 | QEMU update scenario, release-path evidence, and the end-to-end case. | A valid update, an invalid signature, a digest mismatch, a downgrade and a rollback pass against the fixture on the local or bench QEMU path. The database backup restores; the failing step is reported; a committed update is idempotent. A bundle with the camera-variant fix and its regression test can be published to the channel and installed by an appliance already on that channel. The evidence is recorded in a dated note. QEMU stays outside CI until the KVM question is measured. |
 | 4 | On-demand channel check, channel install, manual rollback, and status fields. Design delta in [the update channel and manual rollback note](../notes/2026-11-22-update-channel-check-and-manual-rollback.md); evidence in [the slice note](../notes/2026-11-22-update-channel-and-manual-rollback-slice.md). | A verified GitHub Releases candidate is reported as a status fact and never auto-installs; generation 0 is the kit baseline and any published generation is an update; manual rollback restores a retained bundle or the baseline without lowering the committed generation; the status document reports running and committed generations, last check, available candidate, rollback target, and last operation. The fake channel covers drafts, the other channel, tag mismatch, lower and higher generations, a bad signature, rate limits, offline, and malformed responses. |
 | 5 | Browser update card, actions, and rollback confirmation. Design delta and evidence in [the update card note](../notes/2026-11-22-update-card-ui.md). | The status card names every update state without blanking out, a failed check never reads as up to date, and the factory baseline is named. Check, install, and rollback require the session and CSRF token, install and rollback show the journal step through the status fragment, and every impossible action is absent. The browser manifest covers each state at four widths, and the manual-rollback limitation and its closing rule are recorded. |
-| 6 | Subsystem delivery per [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md): the manifest v2 section, the `plan`, `snapshot`, `subsystems`, `migrate`, `apply-config`, and `persist-config` steps, the dual-version verifier, the v2 fixture, the helper allowlist, and the named tests. | A bundle with a declared unit and a migration installs, applies the candidate renderer and pin, persists the migration after commit, and rolls the unit, the configuration, and the bundle back on a failed apply. The eight ADR 0036 named cases pass, including the undeclared path, symlink, mode or owner, snapshot failure, migration once, migration discarded on rollback, and post-unit validation failure. A v1 verifier rejects a v2 manifest; a v2 verifier accepts both. The helper writes only the declared allowlist. |
+| 6 | Subsystem delivery per [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md). First half landed on 2026-11-27: the `apply-config` and `persist-config` steps, the candidate renderer's render, validate and atomic-write pipeline inside the transaction, the durable pending migration record, and the status and history fields. Remaining: the manifest v2 section, the `plan`, transaction-wide `snapshot`, and `subsystems` steps, unit delivery, the dual-version verifier, the v2 fixture, and the remaining named tests. | The landed first half passes `TestUpdateAppliesCandidateRendererOnActivation`, `TestUpdateApplyValidationFailureRollsBackBundleAndConfiguration`, `TestUpdateApplyPartialWriteFailureRollsBackConfiguration`, `TestUpdateApplyRollbackFailureReportsStateUnknown`, `TestUpdateApplyChecksRunBeforeAnyLiveWrite`, `TestUpdateNoServiceStoppedBeforeVerification`, `TestUpdateMigrationAppliedOnce`, `TestUpdateMigrationPersistedAfterCommit`, `TestUpdateMigrationDiscardedOnRollback`, `TestUpdateConfigPendingIsCommittedAndRecorded`, and `TestUpdateNoSchemaChangeDoesNothingExtra`. The remaining acceptance is a bundle with a declared unit and a migration installing, applying, persisting, and rolling back the unit, the configuration, and the bundle; a v1 verifier rejecting a v2 manifest; and the helper writing only the declared allowlist. |
 **Depends on.** BIT-005, BIT-006. **Size.** L.
 
 ### BIT-010 Factory reset and support bundle skeleton

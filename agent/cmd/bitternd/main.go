@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -30,6 +29,7 @@ import (
 	"bittern.invalid/agent/internal/status"
 	"bittern.invalid/agent/internal/tlsutil"
 	bitternui "bittern.invalid/agent/internal/ui"
+	"bittern.invalid/agent/internal/update"
 )
 
 const (
@@ -91,6 +91,7 @@ func run() error {
 	flags := flag.NewFlagSet("bitternd", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	listen := flags.String("listen", defaultListen, "loopback address for the status API")
+	stateRoot := flags.String("state-root", "/var/lib/bittern", "state root for update state and the pending migration record")
 	configPath := flags.String("config", defaultConfigPath, "appliance.yaml path to load and validate")
 	uiEnabled := flags.Bool("ui", false, "serve the first-run wizard and status pages")
 	uiMock := flags.Bool("ui-mock", false, "serve mock status states and setup checks (requires --ui)")
@@ -132,9 +133,15 @@ func run() error {
 		redactor.Add(redact.ValuesFromYAML(data)...)
 	}
 	logger := logging.New(os.Stderr, redactor)
+	if migration, migrationErr := update.PersistPendingMigrations(*stateRoot, *configPath); migrationErr != nil {
+		logger.Error("migration.persist", "result", migration.Result, "error", migrationErr.Error())
+	} else if migration.Result == update.MigrationApplied {
+		logger.Info("migration.persist", "result", migration.Result, "from", migration.From, "to", migration.To)
+	}
 	builder := status.New(*configPath, status.Options{
 		Probes:          status.DefaultProbes(),
 		Redactor:        redactor,
+		StateRoot:       *stateRoot,
 		BaselineVersion: version,
 	})
 	var uiHandler http.Handler
@@ -174,7 +181,7 @@ func run() error {
 			cameraSnapshot = bitternui.MockSnapshotChecker{}
 		}
 		updateService := bitternui.UpdateService(&bitternui.AgentUpdateService{
-			StateRoot:  filepath.Dir(*uiAuthState),
+			StateRoot:  *stateRoot,
 			ConfigPath: *configPath,
 			Now:        time.Now,
 		})
@@ -189,7 +196,7 @@ func run() error {
 			Snapshot:               cameraSnapshot,
 			Updates:                updateService,
 			ConfigPath:             *configPath,
-			StateRoot:              filepath.Dir(*uiAuthState),
+			StateRoot:              *stateRoot,
 			Now:                    time.Now,
 			MockPreview:            *uiMock,
 			Auth:                   authStore,

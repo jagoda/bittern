@@ -41,6 +41,7 @@ const usage = `usage:
   bittern update status [--state-root DIR]
   bittern update cancel [--state-root DIR]
   bittern update helper
+  bittern update apply-config --state-root DIR
 `
 
 var (

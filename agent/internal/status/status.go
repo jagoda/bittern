@@ -258,16 +258,39 @@ type UpdateOperationProgress struct {
 
 // UpdateOperationSection is the newest update or rollback history record.
 type UpdateOperationSection struct {
-	OperationID        string  `json:"operation_id"`
-	Kind               string  `json:"kind"`
-	Result             string  `json:"result"`
-	FailedStep         string  `json:"failed_step"`
-	Reason             string  `json:"reason"`
-	FinishedAt         *string `json:"finished_at"`
-	FromGeneration     *int64  `json:"from_generation"`
-	ToGeneration       *int64  `json:"to_generation"`
-	RestoredGeneration *int64  `json:"restored_generation"`
-	Baseline           bool    `json:"baseline"`
+	OperationID        string                  `json:"operation_id"`
+	Kind               string                  `json:"kind"`
+	Result             string                  `json:"result"`
+	FailedStep         string                  `json:"failed_step"`
+	Reason             string                  `json:"reason"`
+	FinishedAt         *string                 `json:"finished_at"`
+	FromGeneration     *int64                  `json:"from_generation"`
+	ToGeneration       *int64                  `json:"to_generation"`
+	RestoredGeneration *int64                  `json:"restored_generation"`
+	Baseline           bool                    `json:"baseline"`
+	Apply              *UpdateApplySection     `json:"apply,omitempty"`
+	Migration          *UpdateMigrationSection `json:"migration,omitempty"`
+}
+
+// UpdateApplySection reports whether the update applied rendered
+// configuration and what the apply pipeline did. It is absent for a manual
+// bundle rollback, which does not run an apply.
+type UpdateApplySection struct {
+	Result       string `json:"result"`
+	Generation   *int64 `json:"generation"`
+	ChangedFiles int    `json:"changed_files"`
+	FailedStep   string `json:"failed_step,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+// UpdateMigrationSection reports the schema migration outcome. A pending
+// record for the committed generation keeps the result at config-pending even
+// after the committed history record was written.
+type UpdateMigrationSection struct {
+	Result string `json:"result"`
+	From   *int   `json:"from"`
+	To     *int   `json:"to"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // UpdatesBase is the base fingerprint recorded by the update transaction. It

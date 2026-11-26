@@ -26,6 +26,7 @@ func helperOptions(t *testing.T, env *testEnv) HelperOptions {
 		System:           env.system,
 		Data:             env.data,
 		Image:            env.image,
+		ConfigApplier:    env.applier,
 		Base:             env.options.Base,
 		Now:              env.options.Now,
 	}

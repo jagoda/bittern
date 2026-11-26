@@ -3857,6 +3857,9 @@ rm -f /tmp/bittern-frigate.cookies
             "sudo -n sh -c 'for f in /var/lib/bittern/generations/*/manifest.json; do "
             "echo ===$f===; python3 -c \"import json,sys; d=json.load(open(sys.argv[1])); "
             "print(json.dumps({k:d.get(k) for k in (\\\"status\\\",\\\"checks\\\",\\\"health\\\")}, indent=2))\" \"$f\"; done'",
+            "sudo -n sh -c 'test -f /var/lib/bittern/update/journal.json && cat "
+            "/var/lib/bittern/update/journal.json; for f in /var/lib/bittern/update/history/*.json; "
+            "do echo ===$f===; cat $f; done'",
         )
         for command in commands:
             try:
@@ -5542,6 +5545,19 @@ UPDATE_TRUST_DIR = "/etc/bittern/trust/release-keys"
 UPDATE_IMAGE_TRUST_DIR = "/usr/lib/bittern/trust/release-keys"
 INSTALL_CHANNEL_FILE = "install-channel"
 
+# The update scenario changes rendered configuration through the candidate
+# renderer, not through the live appliance.yaml. Generation 2 carries a chrony
+# template marker and generation 4 carries an invalid dnsmasq directive. Both
+# patch the generated embedded asset copy for one build and restore it after.
+GENERATION_2_CHRONY_MARKER = "# qemu-update: generation 2 rendered configuration"
+EMBEDDED_CHRONY_TEMPLATE = (
+    ROOT / "agent" / "internal" / "assets" / "templates" / "chrony" / "chrony.conf.tmpl"
+)
+EMBEDDED_DNSMASQ_TEMPLATE = (
+    ROOT / "agent" / "internal" / "assets" / "templates" / "dnsmasq" / "dnsmasq.conf.tmpl"
+)
+BAD_CONFIG_DNSMASQ_DIRECTIVE = "qemu-update-invalid-directive"
+
 
 def build_release_tool() -> Path:
     result = run_command(["make", "bittern-release"], cwd=ROOT, timeout=300)
@@ -5636,6 +5652,16 @@ def build_go_binary(command: str, destination: Path, version: str = "") -> None:
     destination.chmod(0o755)
 
 
+@contextlib.contextmanager
+def patched_embedded_template(path: Path, extra: str):
+    original = path.read_bytes()
+    path.write_bytes(original + extra.encode("utf-8"))
+    try:
+        yield
+    finally:
+        path.write_bytes(original)
+
+
 def build_update_bundle(
     tool: Path,
     work: Path,
@@ -5645,11 +5671,17 @@ def build_update_bundle(
     key_id: str,
     key: Path,
     created: str,
+    template_patch: tuple[Path, str] | None = None,
 ) -> Path:
     tree = work / f"tree-g{generation}"
     binaries = tree / "usr" / "bin"
     binaries.mkdir(parents=True)
-    build_go_binary("bittern", binaries / "bittern")
+    if template_patch is None:
+        build_go_binary("bittern", binaries / "bittern")
+    else:
+        path, extra = template_patch
+        with patched_embedded_template(path, extra):
+            build_go_binary("bittern", binaries / "bittern")
     build_go_binary("bitternd", binaries / "bitternd", version)
     if generation == 3:
         # Generation 3 fails the post-activation bundle-integrity probe by
@@ -5768,6 +5800,7 @@ class UpdateScenario(FirstbootScenario):
         self.run_phase("install-generation-1", self.install_generation_1)
         self.run_phase("update-generation-2", self.update_generation_2)
         self.run_phase("rollback-generation-3", self.rollback_generation_3)
+        self.run_phase("rollback-generation-4", self.rollback_generation_4)
         self.run_phase("rejections", self.reject_invalid_bundles)
         self.run_phase("assertions", self.assert_update_state)
         self.run_phase("logs", self.assert_logs_clean)
@@ -5799,6 +5832,16 @@ class UpdateScenario(FirstbootScenario):
         self.baseline_version = f"0.0.0-factory-{self.commit[:12]}"
         created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self.kit_archive = build_beta_kit(public, created)
+        patches = {
+            2: (
+                EMBEDDED_CHRONY_TEMPLATE,
+                f"\n# {GENERATION_2_CHRONY_MARKER}\n",
+            ),
+            4: (
+                EMBEDDED_DNSMASQ_TEMPLATE,
+                f"\n{BAD_CONFIG_DNSMASQ_DIRECTIVE}\n",
+            ),
+        }
         for generation in (1, 2, 3, 4):
             version = f"0.0.0-beta.{generation}-{self.commit[:12]}"
             self.versions[generation] = version
@@ -5811,6 +5854,7 @@ class UpdateScenario(FirstbootScenario):
                 self.key_id,
                 key,
                 created,
+                template_patch=patches.get(generation),
             )
         g4 = self.work / "bundles" / "g4"
         tampered = self.work / "bundles" / "tampered-payload"
@@ -5831,6 +5875,7 @@ class UpdateScenario(FirstbootScenario):
             "g1": self.work / "bundles" / "g1",
             "g2": self.work / "bundles" / "g2",
             "g3": self.work / "bundles" / "g3",
+            "g4": self.work / "bundles" / "g4",
             "tampered-payload": tampered,
             "bad-signature": bad,
         }
@@ -6208,6 +6253,10 @@ class UpdateScenario(FirstbootScenario):
         )
 
     def update_generation_2(self) -> str:
+        chrony_config = "/etc/chrony/chrony.conf"
+        before = self.appliance.ssh(f"sudo -n cat {chrony_config}", timeout=30).stdout
+        if GENERATION_2_CHRONY_MARKER in before:
+            raise HarnessError("the generation 2 renderer marker is already live before the update")
         result = self.run_update("g2")
         output = result.stdout + result.stderr
         if result.returncode != 0 or "update: committed" not in output:
@@ -6222,9 +6271,28 @@ class UpdateScenario(FirstbootScenario):
         }
         if health.get("bundle-integrity") != "passed":
             raise HarnessError(f"the generation 2 integrity gate did not pass: {health}")
+        applied = record.get("apply") or {}
+        if applied.get("result") != "applied":
+            raise HarnessError(f"the generation 2 record did not apply configuration: {applied}")
+        if not applied.get("generation"):
+            raise HarnessError(f"the generation 2 record has no configuration generation: {applied}")
+        after = self.appliance.ssh(f"sudo -n cat {chrony_config}", timeout=30).stdout
+        if GENERATION_2_CHRONY_MARKER not in after:
+            raise HarnessError(
+                "the generation 2 candidate renderer's chrony marker did not reach the live "
+                f"configuration:\n{after}"
+            )
+        evidence = (
+            f"$ cat {chrony_config} (before)\n{before}\n"
+            f"$ bittern update install {UPDATE_INCOMING}/g2\n{output}\n"
+            f"$ cat {chrony_config} (after)\n{after}\n"
+            f"history apply: {json.dumps(applied, sort_keys=True)}\n"
+        )
+        self.capture("update-generation-2-apply.txt", evidence)
         return (
             f"generation 2 {self.versions[2]} committed; the running version changed from "
-            f"{self.versions[1]} to {self.versions[2]}"
+            f"{self.versions[1]} to {self.versions[2]}; the candidate renderer's chrony marker "
+            "reached the live configuration"
         )
 
     def rollback_generation_3(self) -> str:
@@ -6273,6 +6341,67 @@ class UpdateScenario(FirstbootScenario):
         return (
             "generation 3 activation failed the bundle-integrity health gate; the pointer "
             f"and the running version returned to generation 2 {self.versions[2]}"
+        )
+
+    def rollback_generation_4(self) -> str:
+        dnsmasq_config = "/etc/dnsmasq.d/bittern.conf"
+        before = self.appliance.ssh(f"sudo -n sha256sum {dnsmasq_config}", timeout=30).stdout.strip()
+        result = self.run_update("g4")
+        output = result.stdout + result.stderr
+        if result.returncode == 0 or "update: rolled-back" not in output:
+            raise HarnessError("the generation 4 invalid configuration did not roll back:\n" + output)
+        if "failed step: apply-config" not in output:
+            raise HarnessError(
+                "the generation 4 failure is not the apply-config step:\n" + output
+            )
+        if "dnsmasq" not in output.lower():
+            raise HarnessError(
+                "the generation 4 failure does not name the dnsmasq check:\n" + output
+            )
+        pointer = self.appliance.ssh(f"sudo -n cat {UPDATE_POINTER}", timeout=30).stdout.strip()
+        if pointer != "2":
+            raise HarnessError(
+                f"the generation 4 rollback left the pointer at {pointer!r}, expected 2"
+            )
+        version = self.wait_version()
+        if version != self.versions[2]:
+            raise HarnessError(
+                f"the generation 4 rollback left the running version {version!r}, expected "
+                f"{self.versions[2]!r}"
+            )
+        after = self.appliance.ssh(f"sudo -n sha256sum {dnsmasq_config}", timeout=30).stdout.strip()
+        if after != before:
+            raise HarnessError(
+                "the generation 4 invalid configuration changed the live dnsmasq file: "
+                f"{before!r} -> {after!r}"
+            )
+        record = self.latest_history()
+        if record.get("result") != "rolled-back":
+            raise HarnessError(f"the generation 4 history result is {record.get('result')!r}")
+        if record.get("failed_step") != "apply-config":
+            raise HarnessError(
+                f"the generation 4 history failed step is {record.get('failed_step')!r}"
+            )
+        applied = record.get("apply") or {}
+        if applied.get("result") != "rolled-back":
+            raise HarnessError(f"the generation 4 apply result is {applied.get('result')!r}")
+        if "dnsmasq" not in str(applied.get("failed_step", "")).lower():
+            raise HarnessError(
+                f"the generation 4 apply failed step does not name dnsmasq: {applied}"
+            )
+        evidence = (
+            f"$ sha256sum {dnsmasq_config} (before)\n{before}\n"
+            f"$ bittern update install {UPDATE_INCOMING}/g4\n{output}\n"
+            f"$ cat {UPDATE_POINTER}\n{pointer}\n"
+            f"$ GET /api/version\n{version}\n"
+            f"$ sha256sum {dnsmasq_config} (after)\n{after}\n"
+            f"history apply: {json.dumps(applied, sort_keys=True)}\n"
+        )
+        self.capture("update-generation-4-rollback.txt", evidence)
+        return (
+            "generation 4 rendered an invalid dnsmasq configuration; apply-config failed "
+            "validation, the bundle and configuration rolled back, and the live dnsmasq file "
+            "stayed at the generation 2 content"
         )
 
     def assert_rejection(
@@ -6383,7 +6512,7 @@ class UpdateScenario(FirstbootScenario):
                     f"rollback.restored_generation: {record}"
                 )
         counts = {name: results.count(name) for name in ("committed", "rolled-back", "rejected")}
-        if counts != {"committed": 2, "rolled-back": 1, "rejected": 3}:
+        if counts != {"committed": 2, "rolled-back": 2, "rejected": 3}:
             raise HarnessError(f"unexpected update history results: {counts} ({results})")
         pointer = self.appliance.ssh(f"sudo -n cat {UPDATE_POINTER}", timeout=30).stdout.strip()
 
@@ -6421,7 +6550,7 @@ class UpdateScenario(FirstbootScenario):
         )
         self.capture("update-final.txt", evidence)
         return (
-            "two commits, one rollback and three rejections recorded; the pointer is on "
+            "two commits, two rollbacks and three rejections recorded; the pointer is on "
             f"generation {pointer} with no journal; appliance.yaml and the absent image "
             "trust store are unchanged after first boot"
         )

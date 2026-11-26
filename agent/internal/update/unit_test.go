@@ -20,7 +20,7 @@ func TestUpdateHelperUnitIsFixedAndArgumentFree(t *testing.T) {
 		"ConditionPathExists=/var/lib/bittern/update/request.json",
 		"User=root",
 		"Group=root",
-		"ReadWritePaths=/var/lib/bittern",
+		"ReadWritePaths=/etc /var/lib/bittern",
 		"CapabilityBoundingSet=",
 		"NoNewPrivileges=true",
 	} {

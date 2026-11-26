@@ -817,7 +817,13 @@ func (p *UpdateStateProbe) Probe(ctx context.Context) UpdateObservation {
 	if err != nil {
 		observation.LastError = err.Error()
 	} else if record != nil {
-		observation.LastOperation = updateOperationSection(record)
+		pending := false
+		if records, pendingErr := update.PendingMigrations(p.StateRoot, state.CommittedGeneration); pendingErr != nil {
+			observation.LastError = pendingErr.Error()
+		} else {
+			pending = len(records) > 0
+		}
+		observation.LastOperation = updateOperationSection(record, pending)
 	}
 	if journal, journalErr := update.ActiveJournal(p.StateRoot); journalErr != nil {
 		observation.LastError = journalErr.Error()
@@ -918,7 +924,7 @@ func updateCheckSection(check update.Check) UpdateCheckSection {
 	return section
 }
 
-func updateOperationSection(record *update.History) *UpdateOperationSection {
+func updateOperationSection(record *update.History, pendingMigration bool) *UpdateOperationSection {
 	if record == nil {
 		return nil
 	}
@@ -949,6 +955,38 @@ func updateOperationSection(record *update.History) *UpdateOperationSection {
 			restored = *record.Rollback.RestoredGeneration
 		}
 		section.RestoredGeneration = &restored
+	}
+	if record.Apply.Result != "" {
+		applySection := &UpdateApplySection{
+			Result:       record.Apply.Result,
+			ChangedFiles: len(record.Apply.ChangedFiles),
+			FailedStep:   record.Apply.FailedStep,
+			Reason:       record.Apply.Failure,
+		}
+		if record.Apply.Generation > 0 {
+			generation := int64(record.Apply.Generation)
+			applySection.Generation = &generation
+		}
+		section.Apply = applySection
+	}
+	if record.Migration.Result != "" {
+		migration := &UpdateMigrationSection{
+			Result: record.Migration.Result,
+			Reason: record.Migration.Reason,
+		}
+		if record.Migration.From > 0 {
+			from := record.Migration.From
+			migration.From = &from
+		}
+		if record.Migration.To > 0 {
+			to := record.Migration.To
+			migration.To = &to
+		}
+		if pendingMigration {
+			migration.Result = update.MigrationConfigPending
+			migration.Reason = "the committed update still has a pending configuration migration; the agent retries at every start"
+		}
+		section.Migration = migration
 	}
 	return section
 }

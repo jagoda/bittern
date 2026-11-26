@@ -33,14 +33,15 @@ type HelperOptions struct {
 	DockerPath       string
 	BaselineBinary   string
 
-	System   UnitSystem
-	Data     DataSnapshot
-	Image    ImageEnsurer
-	Platform PlatformProvider
-	Base     BaseCollector
-	Now      func() time.Time
-	Logger   func(format string, args ...any)
-	UID      func() int
+	System        UnitSystem
+	Data          DataSnapshot
+	Image         ImageEnsurer
+	ConfigApplier ConfigApplier
+	Platform      PlatformProvider
+	Base          BaseCollector
+	Now           func() time.Time
+	Logger        func(format string, args ...any)
+	UID           func() int
 }
 
 func (o HelperOptions) normalized() HelperOptions {
@@ -120,6 +121,7 @@ func RunHelper(options HelperOptions) (Result, error) {
 		SecretsPath:      options.SecretsPath,
 		Now:              options.Now,
 		Logger:           options.Logger,
+		ConfigApplier:    options.ConfigApplier,
 	}
 	if options.System != nil {
 		installOptions.System = options.System
@@ -168,6 +170,7 @@ func runRollbackHelper(options HelperOptions, p paths, request Request, journal 
 		Logger:           options.Logger,
 		Reason:           request.Reason,
 		BaselineBinary:   options.BaselineBinary,
+		ConfigApplier:    options.ConfigApplier,
 	}
 	if options.System != nil {
 		rollbackOptions.System = options.System

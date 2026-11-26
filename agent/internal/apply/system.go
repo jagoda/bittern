@@ -158,16 +158,23 @@ func (s *ExecSystem) reconfigureNetworkd() error {
 		}
 		// A fresh boot with no prior network configuration leaves the link
 		// administratively down. networkd only configures an up link, so bring
-		// it up before asking for the new configuration.
-		output, err := s.command("networkctl", "up", name)
-		if err != nil {
-			message := strings.TrimSpace(output)
-			if message == "" {
-				message = err.Error()
+		// it up before asking for the new configuration. An already-up link
+		// needs no bring-up, and networkctl up is a netlink write that needs
+		// CAP_NET_ADMIN. The update helper deliberately has no capability set,
+		// so skip the write when the running appliance's link is already up and
+		// let networkd reconfigure it.
+		link, linkErr := net.InterfaceByName(name)
+		if linkErr != nil || link.Flags&net.FlagUp == 0 {
+			output, err := s.command("networkctl", "up", name)
+			if err != nil {
+				message := strings.TrimSpace(output)
+				if message == "" {
+					message = err.Error()
+				}
+				return fmt.Errorf("networkctl up %s: %s", name, message)
 			}
-			return fmt.Errorf("networkctl up %s: %s", name, message)
 		}
-		output, err = s.command("networkctl", "reconfigure", name)
+		output, err := s.command("networkctl", "reconfigure", name)
 		if err != nil {
 			message := strings.TrimSpace(output)
 			if message == "" {

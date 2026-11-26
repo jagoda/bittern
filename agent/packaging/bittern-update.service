@@ -18,16 +18,20 @@ Group=root
 UMask=0077
 StateDirectory=bittern
 
-# The transaction writes only under /var/lib/bittern. /etc stays read-only so the live
-# appliance.yaml write remains the agent's responsibility.
-ReadWritePaths=/var/lib/bittern
+# The transaction writes its own state under /var/lib/bittern and, during the apply-config
+# step, the apply target map's live files under /etc. The fixed target map is the allowlist;
+# /etc is writable because an atomic replacement creates its temporary file beside the target.
+# The live appliance.yaml is still written by the agent after commit, not by this helper.
+ReadWritePaths=/etc /var/lib/bittern
 
 # The helper needs to see /dev/dri and /sys/firmware for the read-only base fingerprint, so
 # PrivateDevices is deliberately absent. It runs systemctl as a D-Bus client, docker through the
-# socket, and sqlite3 on regular files, so it needs no capability.
+# socket, sqlite3 on regular files, and the native checkers, so it needs no capability. AF_NETLINK
+# lets nft -c ask the kernel to validate the ruleset; without CAP_NET_ADMIN the checker reports the
+# environment skip the apply pipeline already records instead of a false pass.
 CapabilityBoundingSet=
 AmbientCapabilities=
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 
 ProtectSystem=strict
 ProtectHome=true

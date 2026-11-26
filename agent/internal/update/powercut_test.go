@@ -152,10 +152,12 @@ func TestUpdatePowerCutBeforeStopAgent(t *testing.T)      { powerCutInstallCase(
 func TestUpdatePowerCutBeforeActivate(t *testing.T)       { powerCutInstallCase(t, StepActivate) }
 func TestUpdatePowerCutBeforeMigrate(t *testing.T)        { powerCutInstallCase(t, StepMigrate) }
 func TestUpdatePowerCutBeforeEnsureImage(t *testing.T)    { powerCutInstallCase(t, StepEnsureImage) }
+func TestUpdatePowerCutBeforeApplyConfig(t *testing.T)    { powerCutInstallCase(t, StepApplyConfig) }
 func TestUpdatePowerCutBeforeStartAgent(t *testing.T)     { powerCutInstallCase(t, StepStartAgent) }
 func TestUpdatePowerCutBeforeStartFrigate(t *testing.T)   { powerCutInstallCase(t, StepStartFrigate) }
 func TestUpdatePowerCutBeforeHealth(t *testing.T)         { powerCutInstallCase(t, StepHealth) }
 func TestUpdatePowerCutBeforeCommit(t *testing.T)         { powerCutInstallCase(t, StepCommit) }
+func TestUpdatePowerCutBeforePersistConfig(t *testing.T)  { powerCutInstallCase(t, StepPersistConfig) }
 func TestUpdatePowerCutBeforeRecord(t *testing.T)         { powerCutInstallCase(t, StepRecord) }
 func TestUpdatePowerCutBeforePrune(t *testing.T)          { powerCutInstallCase(t, StepPrune) }
 func TestUpdatePowerCutBeforeFinish(t *testing.T)         { powerCutInstallCase(t, StepFinish) }

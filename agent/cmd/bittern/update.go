@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"bittern.invalid/agent/internal/apply"
+	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/logging"
 	"bittern.invalid/agent/internal/redact"
 	"bittern.invalid/agent/internal/update"
@@ -79,6 +81,8 @@ func runUpdate(args []string) error {
 		return runUpdateCancel(args[1:])
 	case "helper":
 		return runUpdateHelper(args[1:])
+	case "apply-config":
+		return runUpdateApplyConfig(args[1:])
 	default:
 		return fmt.Errorf("unknown update subcommand %q", args[0])
 	}
@@ -368,9 +372,35 @@ func printHistory(w io.Writer, record *update.History) {
 		} else {
 			fmt.Fprintf(w, "  rollback: %s\n", record.Rollback.Result)
 		}
+		if record.Rollback.Failure != "" {
+			fmt.Fprintf(w, "  rollback reason: %s\n", record.Rollback.Failure)
+		}
 	}
 	if record.Rollback.Baseline {
 		fmt.Fprintln(w, "  target: baseline (no active bundle)")
+	}
+	if record.Apply.Result != "" {
+		switch {
+		case record.Apply.FailedStep != "":
+			fmt.Fprintf(w, "  apply: %s at %s\n", record.Apply.Result, record.Apply.FailedStep)
+			if record.Apply.Failure != "" {
+				fmt.Fprintf(w, "  apply reason: %s\n", record.Apply.Failure)
+			}
+		case record.Apply.Generation > 0:
+			fmt.Fprintf(w, "  apply: %s, configuration generation %d (%d files changed)\n", record.Apply.Result, record.Apply.Generation, len(record.Apply.ChangedFiles))
+		default:
+			fmt.Fprintf(w, "  apply: %s\n", record.Apply.Result)
+		}
+	}
+	if record.Migration.Result != "" {
+		if record.Migration.From > 0 && record.Migration.To > 0 {
+			fmt.Fprintf(w, "  migration: %s (schema %d to %d)\n", record.Migration.Result, record.Migration.From, record.Migration.To)
+		} else {
+			fmt.Fprintf(w, "  migration: %s\n", record.Migration.Result)
+		}
+		if record.Migration.Reason != "" {
+			fmt.Fprintf(w, "  migration reason: %s\n", record.Migration.Reason)
+		}
 	}
 	if record.FinishedAt != "" {
 		fmt.Fprintf(w, "  finished: %s\n", record.FinishedAt)
@@ -454,8 +484,29 @@ func runUpdateStatus(args []string) error {
 	}
 	if latest != nil {
 		fmt.Printf("last result: %s, operation %s, finished %s\n", latest.Result, latest.OperationID, latest.FinishedAt)
+		if latest.Apply.Result != "" {
+			if latest.Apply.Generation > 0 {
+				fmt.Printf("last apply: %s, configuration generation %d (%d files changed)\n", latest.Apply.Result, latest.Apply.Generation, len(latest.Apply.ChangedFiles))
+			} else {
+				fmt.Printf("last apply: %s\n", latest.Apply.Result)
+			}
+		}
 	} else {
 		fmt.Println("last result: none")
+	}
+	if present {
+		if records, pendingErr := update.PendingMigrations(*stateRoot, state.CommittedGeneration); pendingErr != nil {
+			fmt.Printf("migration: unreadable (%v)\n", pendingErr)
+		} else if len(records) > 0 {
+			record := records[0]
+			fmt.Printf("migration: config-pending (schema %d to %d); the agent retries at every start\n", record.From, record.To)
+		} else if latest != nil && latest.Migration.Result != "" {
+			if latest.Migration.From > 0 && latest.Migration.To > 0 {
+				fmt.Printf("migration: %s (schema %d to %d)\n", latest.Migration.Result, latest.Migration.From, latest.Migration.To)
+			} else {
+				fmt.Printf("migration: %s\n", latest.Migration.Result)
+			}
+		}
 	}
 	return nil
 }
@@ -478,6 +529,99 @@ func runUpdateCancel(args []string) error {
 		fmt.Println("cancelled the pending update request")
 	} else {
 		fmt.Println("no pending update request")
+	}
+	return nil
+}
+
+// runUpdateApplyConfig is the fixed candidate renderer entry point. The update
+// helper runs it from the activated bundle after activation and before the
+// agent and Frigate start steps. It takes only the state root; the live
+// configuration path is fixed, and the journal and activation pointer are
+// checked before anything is rendered or written.
+func runUpdateApplyConfig(args []string) error {
+	flags := flag.NewFlagSet("update apply-config", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	stateRoot := flags.String("state-root", "/var/lib/bittern", "state root of the running update transaction")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %v", flags.Args())
+	}
+	if !filepath.IsAbs(*stateRoot) {
+		return fmt.Errorf("the state root must be absolute")
+	}
+	journal, err := update.ActiveJournal(*stateRoot)
+	if err != nil {
+		return err
+	}
+	if journal == nil {
+		return fmt.Errorf("no update journal exists at %s", *stateRoot)
+	}
+	if journal.Phase != update.PhaseInstall || journal.NextStep != update.StepApplyConfig {
+		return fmt.Errorf("the update journal is at %s/%s, not the apply-config step", journal.Phase, journal.NextStep)
+	}
+	if journal.CandidateGeneration == 0 || !journal.LiveTouched {
+		return fmt.Errorf("the update journal does not name a live candidate generation")
+	}
+	running, _, err := update.RunningGeneration(*stateRoot)
+	if err != nil {
+		return err
+	}
+	if running != journal.CandidateGeneration {
+		return fmt.Errorf("the activation pointer names generation %d, not the candidate %d", running, journal.CandidateGeneration)
+	}
+	cfg, validationErrors := config.Load("/etc/bittern/appliance.yaml")
+	if len(validationErrors) > 0 {
+		return fmt.Errorf("the live appliance configuration is invalid: %s", validationErrors[0].Error())
+	}
+	// The chrony checker copies the staged file into /etc/chrony, which is the
+	// only directory chronyd's AppArmor profile allows it to read. The helper
+	// unit makes /etc writable for the apply targets, so the copy and its
+	// atomic-replacement peers are allowed.
+	system := apply.NewExecSystem()
+	var secretValues []string
+	if data, readErr := os.ReadFile("/etc/bittern/secrets.yaml"); readErr == nil {
+		secretValues = redact.ValuesFromYAML(data)
+	}
+	staged, applyErr := apply.ApplyStaged(cfg, apply.Options{
+		StateRoot:   *stateRoot,
+		LiveRoot:    "/",
+		System:      system,
+		Secrets:     secretValues,
+		LogValues:   secretValues,
+		SecretsPath: "/etc/bittern/secrets.yaml",
+	})
+	result := update.ApplyConfigResult{
+		SchemaVersion:      1,
+		OperationID:        journal.OperationID,
+		Result:             "applied",
+		Generation:         staged.Generation,
+		PreviousGeneration: staged.PreviousGeneration,
+		Wrote:              staged.Wrote,
+		ChangedFiles:       staged.Changed,
+		RestartedUnits:     staged.RestartedUnits,
+		FailedStep:         staged.FailedStep,
+		Failure:            staged.Failure,
+		Checks:             make([]update.ConfigApplyCheck, 0, len(staged.Checks)),
+	}
+	for _, check := range staged.Checks {
+		result.Checks = append(result.Checks, update.ConfigApplyCheck{Name: check.Name, Status: check.Status, Reason: check.Reason})
+	}
+	if applyErr != nil {
+		result.Result = "failed"
+		if result.Failure == "" {
+			result.Failure = applyErr.Error()
+		}
+	}
+	if writeErr := update.WriteApplyConfigResult(*stateRoot, result); writeErr != nil {
+		if applyErr != nil {
+			return fmt.Errorf("%w; write the apply result: %v", applyErr, writeErr)
+		}
+		return fmt.Errorf("write the apply result: %w", writeErr)
+	}
+	if applyErr != nil {
+		return applyErr
 	}
 	return nil
 }

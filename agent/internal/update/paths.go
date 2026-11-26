@@ -93,8 +93,16 @@ func (p paths) backupDir(operationID string) string {
 	return filepath.Join(p.backups, operationID)
 }
 
-func (p paths) pendingConfig(operationID string) string {
-	return filepath.Join(p.updateRoot, operationID, "appliance.yaml")
+func (p paths) pendingDir() string {
+	return filepath.Join(p.updateRoot, "pending")
+}
+
+func (p paths) pendingMigration(operationID string) string {
+	return filepath.Join(p.pendingDir(), operationID+".json")
+}
+
+func (p paths) applyConfigResult(operationID string) string {
+	return filepath.Join(p.updateRoot, operationID, "apply-config.json")
 }
 
 func (p paths) historyPath(operationID string) string {
@@ -108,12 +116,13 @@ func (p paths) ensure() error {
 		p.bundles,
 		p.staging,
 		p.updateRoot,
+		p.pendingDir(),
 		p.history,
 		p.backups,
 	} {
 		mode := fs.FileMode(0o755)
-		if directory == p.history || directory == p.backups {
-			mode = 0o755
+		if directory == p.pendingDir() {
+			mode = 0o700
 		}
 		if err := os.MkdirAll(directory, mode); err != nil {
 			return err

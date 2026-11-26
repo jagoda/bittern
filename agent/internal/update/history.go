@@ -75,6 +75,8 @@ func (r *runner) buildHistory(result string, manifest *release.Manifest, manifes
 		Platform:      r.journal.Platform,
 		Schema:        SchemaRecord{Before: r.journal.SchemaBefore, After: r.journal.SchemaAfter},
 		Payload:       payloadRecord(manifest),
+		Apply:         r.historyApply(result),
+		Migration:     r.journal.Migration,
 		Rollback: RollbackRecord{
 			FailedStep: r.journal.RollbackFailedStep,
 			Failure:    r.redactor.String(r.journal.RollbackFailure),
@@ -102,6 +104,21 @@ func (r *runner) buildHistory(result string, manifest *release.Manifest, manifes
 		record.Rollback.Result = ResultStateUnknown
 	default:
 		record.Rollback.Result = ""
+	}
+	return record
+}
+
+// historyApply copies the journal's apply result into the committed record.
+// A transaction that ended before the apply-config step records not-run, so an
+// owner can tell an update-only outcome from an update-and-apply outcome.
+func (r *runner) historyApply(result string) ConfigApplyRecord {
+	record := r.journal.ConfigApply
+	record.Failure = r.redactor.String(record.Failure)
+	if record.Result == "" {
+		record.Result = "not-run"
+	}
+	if result == ResultRolledBack && record.Result == "applied" {
+		record.Result = "rolled-back"
 	}
 	return record
 }
