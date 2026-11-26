@@ -668,6 +668,10 @@ func (h *handler) runApplyOperation(request ApplyRequest, session *wizardSession
 
 	var snapshots []SnapshotResult
 	if err == nil && (result.Status == "" || result.Status == apply.StatusApplied) {
+		// The first-run flow is complete once the configuration is applied.
+		// The password alone is not enough, because the token step happens
+		// before review and apply.
+		_ = writeSetupComplete(h.stateRootPath())
 		h.operations.note("Checking the camera picture")
 		snapshots = h.snapshotResults(ctx, request.Cameras)
 		for index := range snapshots {

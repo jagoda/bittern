@@ -39,7 +39,7 @@
     "host_ssh_port": 2223,
     "host_rtsp_port": 18555,
     "rtsp_path": "/cam0",
-    "resolution": "640x360",
+    "resolution": "1920x1080",
     "fps": 10,
     "mediamtx": {
       "version": "1.21.3",

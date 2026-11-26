@@ -84,6 +84,11 @@ tls: {}
 // The live view checks get their own daemon with the same fixed four-camera
 // inventory, so the grid checks do not depend on the route walk's auth state.
 export const LIVE_APPLIANCE_YAML = APPLIANCE_YAML;
+export const CAMERA_APPLIANCE_YAML = APPLIANCE_YAML;
+export const NO_CAMERA_APPLIANCE_YAML = APPLIANCE_YAML.replace(
+  /cameras:\n(?:  - .*\n(?:    .*\n)*)+/,
+  "cameras: []\n",
+);
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -120,7 +125,11 @@ async function waitForServer(baseURL, child, logs) {
   throw new Error(`bitternd did not answer on ${baseURL}: ${lastError}\n${logs.join("")}`);
 }
 
-export async function startBitternd({ binary, applianceYAML = APPLIANCE_YAML }) {
+export async function startBitternd({
+  binary,
+  applianceYAML = APPLIANCE_YAML,
+  setupComplete = false,
+}) {
   if (!existsSync(binary)) {
     throw new Error(
       `bitternd binary not found at ${binary}; run: make ui-browser-check`,
@@ -135,6 +144,13 @@ export async function startBitternd({ binary, applianceYAML = APPLIANCE_YAML }) 
   await mkdir(stateRoot, { recursive: true });
   await writeFile(configPath, applianceYAML, { mode: 0o644 });
   await writeFile(secretsPath, SECRETS_YAML, { mode: 0o600 });
+  if (setupComplete) {
+    await writeFile(
+      path.join(stateRoot, "setup-complete.json"),
+      JSON.stringify({ schema_version: 1, setup_complete: true }) + "\n",
+      { mode: 0o600 },
+    );
+  }
 
   const apiPort = await freePort();
   const uiPort = await freePort();
@@ -178,6 +194,11 @@ export async function startBitternd({ binary, applianceYAML = APPLIANCE_YAML }) 
     baseURL,
     setupToken: SETUP_TOKEN,
     adminPassword: ADMIN_PASSWORD,
+    stateRoot,
+    configPath,
+    async setApplianceYAML(nextYAML) {
+      await writeFile(configPath, nextYAML, { mode: 0o644 });
+    },
     async stop() {
       if (child.exitCode === null) {
         child.kill("SIGTERM");

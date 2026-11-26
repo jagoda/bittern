@@ -77,17 +77,25 @@ pattern in [patterns.md](patterns.md), not a component here.
 - Class: keep.
 - Purpose: give every screen the same origin, navigation, and main region.
 - Anatomy, in order: skip link; header; brand link; main navigation; optional sign-out; main
-  region; footer.
+  region; footer. The header and main share the same full-width shell; the footer is omitted on the
+  live grid page so the wall owns the viewport.
 - Target: every navigation link is at least 44 by 44 CSS pixels from `--touch-target`, from its own
   padding or its row, at every width. The brand link and the sign-out action are navigation targets
   too. The skip link is a control and meets the 24 by 24 floor from `--touch-target-min`.
 - Variants: authenticated navigation with sign-out; unauthenticated login and setup; a page with
-  no navigation action.
+  no navigation action; a device with no camera, which omits Live.
+- Layout: the shell fills the device width with only `--layout-gutter` inset, or
+  `--layout-gutter-wide` at 80rem and above. The header content is full width for the same reason
+  as the page: it is navigation chrome for a dashboard, not prose, and a separate cap would detach
+  it from the wall below. Prose and controls inside the shell opt into their own measures.
 - States: current page, focus, narrow width with the navigation on its own row, long translation.
 - Tokens: `--color-surface`, `--color-border-subtle`, `--color-text`, `--color-link`,
-  `--space-8`, `--space-16`, `--type-body`, `--touch-target`, `--touch-target-min`.
+  `--space-8`, `--space-16`, `--layout-gutter`, `--layout-gutter-wide`, `--type-body`,
+  `--touch-target`, `--touch-target-min`.
 - Do: keep one header and one main landmark. Keep the brand as a link to `/ui/`. Let the
-  navigation wrap below the brand at phone width.
+  navigation wrap below the brand at phone width. Mark the current destination with
+  `aria-current="page"` and a visible weight change. Offer Live only when the device has at least
+  one configured camera.
 - Don't: add a second navigation row, a breadcrumb, or a page-specific header. Do not hide the
   navigation behind a hover menu.
 - Accessibility: one `<header>`, one `<nav aria-label="Main">`, one `<main id="main">`, skip link
@@ -703,8 +711,10 @@ Current evidence for the list:
   media base; a media area with the `<video>`, the snapshot image and the idle placeholder; a status
   region with a badge, a title, a sentence and one retry action; a profile control that names the
   playing profile; the one-stream hint. A sibling camera-state line may poll and is outside the
-  player node. A grid tile adds a heading, an in-place full-width control, a noscript full-width
-  link and a Change camera picker inside the island.
+  player node. A grid tile adds a heading, an in-place full-width control, a browser full-screen
+  control, a noscript full-width link and a Change camera picker inside the island. The media area
+  is an aspect box that reserves 16:9 before the first frame; the video is contained inside it and
+  never sets the player's size.
 - Variants: MSE, HLS, snapshot fallback, no-JavaScript snapshot, and a grid tile that plays the sub
   profile until it opens full width and switches to main.
 - States: connecting, playing, switching, stalled, reconnecting, idle (not started on this screen),
@@ -717,7 +727,10 @@ Current evidence for the list:
   the current profile on a bordered control, not a second filled button. Expose the viewport
   ceiling and active count as data attributes. Give every grid tile its own island; the grid owns
   the ceiling, the full-width selection and the one-tile replacement, never a shared player or a
-  shared media source.
+  shared media source. Size the media box from the space it is given, not from the stream's native
+  dimensions. Enter browser full screen from the player control, keep the video contained inside
+  the full-screen element, hide page overflow while it is active, and provide both Escape and Back
+  as exits.
 - Don't: put the player or video inside an element with `hx-get`, `hx-post`, `hx-target`, `hx-swap`
   or `hx-trigger`; use `hx-preserve` as the isolation mechanism; put a stream name, RTSP URL,
   camera address or credential in the DOM; use a spinner with no state sentence; render two cameras

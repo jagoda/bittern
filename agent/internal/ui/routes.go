@@ -39,14 +39,14 @@ func routeHandler(fn func(*handler, http.ResponseWriter, *http.Request)) func(*h
 var uiRoutes = []route{
 	{
 		Name: "root", Method: http.MethodGet, Pattern: "/ui", Auth: true, Status: http.StatusSeeOther,
-		Handler: routeHandler(func(_ *handler, w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, BasePath+"/", http.StatusSeeOther)
+		Handler: routeHandler(func(h *handler, w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, h.landingPath(), http.StatusSeeOther)
 		}),
 	},
 	{
 		Name: "root-slash", Method: http.MethodGet, Pattern: "/ui/{$}", Auth: true, Status: http.StatusSeeOther,
-		Handler: routeHandler(func(_ *handler, w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, BasePath+"/wizard", http.StatusSeeOther)
+		Handler: routeHandler(func(h *handler, w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, h.landingPath(), http.StatusSeeOther)
 		}),
 	},
 	{

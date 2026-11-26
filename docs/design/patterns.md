@@ -219,9 +219,11 @@ the snapshot remains visible. The layout preset and the tile camera picker are s
    choice on this device only.
 4. Assign a camera to an empty or replaced tile, or clear a tile.
 5. Open a tile full width in place and return to the grid without losing the other streams.
-6. Switch between the main and sub profiles on the single-camera view; the player says which one is
+6. Open a player in browser full screen for a closer look, then leave with the control, Escape or
+   Back without losing the other streams or scrolling the page underneath.
+7. Switch between the main and sub profiles on the single-camera view; the player says which one is
    playing.
-7. If a stream stalls or drops, read the bounded reconnect attempt and wait, or take the named next
+8. If a stream stalls or drops, read the bounded reconnect attempt and wait, or take the named next
    action.
 
 **Components.** Page shell, page title block, card and plain section, status badge, live player
@@ -249,6 +251,8 @@ disabled, snapshot available and snapshot unavailable.
 | LV11 | Each tile is its own player island. One failing camera names itself in its own tile while the others keep playing, and replacing one tile replaces only that island. | Q5 and Q11; the failure and assignment checks; the template guard. |
 | LV12 | Full width selects one tile in place, switches it to the main profile and back to sub, and the other streams keep playing. | Q11 to Q16; the full-width check. |
 | LV13 | A poll during playback leaves every player, every open picker and the chosen preset alone. | Q6; the grid poll check and the player isolation guard. |
+| LV14 | The media box sizes from the space it is given on both axes. It is never the stream's native size, never wider than its container and never taller than the available height. An aspect box reserves the space before the first frame, so metadata cannot move the layout. The desktop grid fits the viewport without page scrolling; the phone shows one tile in the available area without horizontal scrolling. | Q4; the 1920x1080 and 3840x2160 browser cases at four widths, the reserved-box check and the QEMU live phase. |
+| LV15 | Browser full screen contains the video, keeps the player controls and status reachable, does not scroll the page underneath, and leaves through the control, Escape or Back. | Q6 and Q8; the large-stream full-screen checks at four widths. |
 
 Slice 1a implements LV1 to LV8. Slice 1b implements LV9 to LV13.
 

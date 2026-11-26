@@ -12,7 +12,8 @@
   {
     "route": "wizard",
     "path": "/ui/wizard",
-    "flow": "auth"
+    "flow": "auth",
+    "landing": "uninitialized"
   },
   {
     "route": "wizard-network",
@@ -95,7 +96,8 @@
   {
     "route": "live",
     "path": "/ui/live",
-    "flow": "auth"
+    "flow": "auth",
+    "landing": "initialized-with-cameras"
   },
   {
     "route": "live-camera",
@@ -121,7 +123,8 @@
     "route": "status",
     "path": "/ui/status",
     "flow": "auth",
-    "variant": "ready"
+    "variant": "ready",
+    "landing": "initialized-no-cameras"
   },
   {
     "route": "status",

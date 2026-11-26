@@ -26,8 +26,9 @@ func TestStylesheetKeepsBrowserLayoutInvariants(t *testing.T) {
 	}
 
 	wrapRule := stylesheetRule(t, stylesheet, ".wrap")
-	if !strings.Contains(wrapRule, "width: min(") || !strings.Contains(wrapRule, "100%") {
-		t.Error(".wrap no longer uses a fluid width")
+	if !strings.Contains(wrapRule, "width: 100%") ||
+		!strings.Contains(wrapRule, "padding-inline: var(--layout-gutter)") {
+		t.Error(".wrap no longer fills the viewport with only the layout gutter as inset")
 	}
 
 	footerCode := stylesheetRule(t, stylesheet, ".site-footer code")

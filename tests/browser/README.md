@@ -105,10 +105,24 @@ one camera failing while three keep playing, full width to main and back to sub 
 players alive, and a phone clamping a four-tile layout to one live tile with the ceiling sentence.
 The full-width check writes `build/ui-screenshots/live-full-width-1280x800.png`.
 
+The media stub reports a realistic intrinsic size. Eight large-stream checks run 1920x1080 and
+3840x2160 at all four widths, assert the document has no horizontal or vertical overflow on the grid
+and in browser full screen, and write `live-large-<resolution>-<width>.png` and
+`live-full-screen-<resolution>-<width>.png`. One reserved-box check measures the media and video
+box before and after metadata arrives and requires both to stay the same size. Full screen is
+entered with the player control and left once with Escape and once with Back.
+
+`tests/browser/routing.mjs` runs the three device states at all four widths on fresh daemons: an
+uninitialized device with cameras, an initialized device with no camera, and an initialized device
+with cameras. Each case asserts the gate is setup or sign-in before any content, then the landing is
+`/ui/wizard`, `/ui/status` or `/ui/live`. Two more checks prove a requested `next` target wins over
+the default and that removing the last camera changes the next visit's landing to status. The
+landing screenshots are `landing-<state>-<width>.png`.
+
 `tests/browser/qemu-live.mjs` is the host-side QEMU assertion. It signs in to the forwarded
 appliance, opens the authenticated live grid, waits for the four stored tiles and for both applied
-virtual cameras to report playing with a non-zero video size and time, and writes
-`build/qemu/logs/<run>/live-view.png`.
+virtual cameras to report playing at 1920 by 1080, asserts the guest document has no horizontal or
+vertical overflow, and writes `build/qemu/logs/<run>/live-view.png`.
 
 ## What is checked
 
@@ -124,7 +138,8 @@ The viewport list is provisional under [OQ-26](../../docs/open-questions.md) and
 
 The manifest has 38 screens from 20 routes, so each run checks 152 route-width screens and writes
 152 default full-page screenshots, plus an `-expanded` copy for each screen with a closed
-disclosure. Fifteen status variants cover the five overall states and the update card: factory
+disclosure. The `landing` field on the wizard, live and status entries records which device state
+treats that screen as its default; the routing checks above use the same three states. Fifteen status variants cover the five overall states and the update card: factory
 baseline with an offered update, up to date, update available, installing, failed, rolled back,
 offline, rate limited, and a failed check. The `live-nine-tiles` variant sets the saved layout
 cookie and reloads, so the nine-tile grid and its empty-tile pickers appear at every width. The
@@ -141,6 +156,8 @@ Measuring both is evidence for [OQ-27](../../docs/open-questions.md), not a deci
 For every route and width the harness asserts, against that width's viewport:
 
 - `document.documentElement.scrollWidth <= window.innerWidth + 1`.
+- The page shell fills the viewport width, with only the layout gutter as inset.
+- At 1280 and 1920, every prose block stays within its `--measure-prose` or `--measure-hint` value.
 - Every visible link, button, input, select, textarea, and non-negative tab target can be scrolled
   fully into the viewport and can be focused.
 - The centre of every such control is the control itself, or a descendant, rather than another

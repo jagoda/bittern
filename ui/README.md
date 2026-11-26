@@ -6,8 +6,8 @@ Go `html/template` with HTMX for partial updates, and every page works without J
 status and health, update controls, logs, support bundle download, and reset. It talks to `bitternd`
 over a local API and never writes rendered system files itself; mutations go through the agent apply
 transaction. Live view follows [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md); the
-single-camera slice is implemented and the grid remains later work. The Frigate UI is not a
-product surface.
+single-camera view, the grid and the browser full-screen mode are implemented. The Frigate UI is
+not a product surface.
 
 The product serves the UI over TLS on `0.0.0.0:443` with a self-signed certificate generated at
 first boot. The wizard and every page show its SHA-256 fingerprint; the browser warning is explained
@@ -41,14 +41,28 @@ one-time code. Scan the QR with the device that opens the wizard; the setup page
 locally, clears it with `history.replaceState` before submitting, and posts the token once in the
 form body. The fragment never reaches the server, an access log, or a `Referer`.
 
-The first visit to `/ui/` redirects to `/ui/setup`, which accepts the token or short code and asks
-the owner to set the administrator password. The short code is a separate value, stored only as a
+The first visit to `/ui/` is resolved from device state. Before setup completes it redirects to
+`/ui/setup` and then `/ui/wizard`; after setup it sends a device with a camera to `/ui/live` and a
+device with no camera to `/ui/status`. The setup-complete marker is
+`/var/lib/bittern/setup-complete.json`, mode 0600. It is written when the first-run apply succeeds,
+not when the administrator password is created, so a half-finished setup keeps landing on setup. A
+legacy successful `operation.json` is migrated once so devices that completed setup before the
+marker existed do not return to the wizard. A requested local `next` target wins over the landing
+default and is validated by `SafeNextOr`; absolute URLs, protocol-relative paths, dot segments and
+paths outside `/ui` are refused.
+
+The setup page accepts the token or short code and asks the owner to set the administrator
+password. The short code is a separate value, stored only as a
 hash and expiry in `/etc/bittern/secrets.yaml`, and expires after 10 minutes. Both credentials use
 the same per-address and global rate limit. The password is stored as a salted
 PBKDF2-HMAC-SHA256 hash with 600,000 iterations in `/var/lib/bittern/auth.json`; both token copies
 and the short-code material are removed and neither credential can be reused. Later visits use
 `/ui/login`. If no local console is available, `sudo bittern setup-token --qr` prints the same block
 on the appliance terminal or over SSH.
+
+The header marks the current destination with `aria-current="page"`, omits `Setup` after the setup
+marker exists, and omits `Live` when the device has no configured camera. `Cameras` and `Status`
+remain available because their screens have useful empty and recovery states.
 
 The setup page keeps working with JavaScript disabled: the grouped token or short code is entered by
 hand. `ui/static/setup-fragment.js` only fills the field and clears the fragment when JavaScript is
@@ -251,6 +265,14 @@ and the future kiosk view; there is no separate mobile UI. The base layout keeps
 declaration, uses fluid widths, keeps tables readable at narrow widths, keeps forms usable without
 zoom, and gives controls touch-friendly targets.
 
+The page shell fills the device width with only `--layout-gutter` as inset, and
+`--layout-gutter-wide` at 80rem and above. There is no page maximum. Prose stays at
+`--measure-prose`, help text at `--measure-hint`, controls at `--measure-control`, and tables use
+the extra room or scroll inside `.table-wrap`; no table may widen the document. The header uses the
+same full-width shell because it is navigation chrome for a dashboard, not prose. The live grid owns
+the viewport on the live page, so its footer is omitted and its grid rows size to the available
+height.
+
 The browser check enforces the touch-target rule by role as failures: a control in a navigation, an
 action row, or a whole-row target must reach 44 by 44 CSS pixels, and a control everywhere else
 must reach the 24 by 24 floor and only warns from 24 to 43, so an inline prose link stays advisory.
@@ -367,6 +389,14 @@ screen), offline, unsupported and session ended. Recovery is bounded to three re
 action. The current camera model has one RTSP path, so `main` and `sub` resolve to the same path and
 the single-camera page says so. The profile control is a normal link without JavaScript and a
 runtime switch with it.
+
+The media area is an aspect box, not the video element's intrinsic size. It reserves 16:9 before
+the first frame, and the video is contained inside it with `object-fit: contain`. The desktop grid
+sizes its rows to the viewport, so nine tiles fit without page scrolling even at 1280 by 800. On a
+phone the active tile fills the available area and the remaining tiles scroll inside the grid, not
+the document. Each player also has a browser full-screen control. Full screen requests the player
+root, keeps the media contained, hides document overflow, and exits through the control, Escape or
+Back; the grid and the other streams keep their state.
 
 ## Boundaries
 

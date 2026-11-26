@@ -74,9 +74,10 @@ func (h *handler) showLive(w http.ResponseWriter, r *http.Request) {
 	}
 	grid := resolveLiveGrid(liveLayoutFromRequest(r), cameras, liveCSRF(r))
 	h.render(w, r, http.StatusOK, "live", pageData{
-		Title:   "Live",
-		Preview: h.preview,
-		Live:    liveView{Grid: &grid},
+		Title:     "Live",
+		Preview:   h.preview,
+		BodyClass: "live-grid-page",
+		Live:      liveView{Grid: &grid},
 	})
 }
 

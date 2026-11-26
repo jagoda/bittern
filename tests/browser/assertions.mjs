@@ -275,9 +275,41 @@ async function inspectImages(page) {
   }, IMAGE_SELECTOR);
 }
 
+
+async function inspectShell(page) {
+  return page.evaluate(() => {
+    const wrap = document.querySelector("main.wrap");
+    const prose = Array.from(
+      document.querySelectorAll(
+        "main .lede, main .hint, main p:not(.preview-notice):not(.action-links)",
+      ),
+    )
+      .filter((element) => {
+        const style = getComputedStyle(element);
+        return style.display !== "none" && element.getClientRects().length > 0;
+      })
+      .map((element) => {
+        const style = getComputedStyle(element);
+        const raw = style.maxInlineSize || style.maxWidth;
+        const max = raw && raw.endsWith("px") ? parseFloat(raw) : NaN;
+        return {
+          text: (element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 48),
+          width: element.getBoundingClientRect().width,
+          max: Number.isFinite(max) ? max : null,
+        };
+      });
+    return {
+      viewportWidth: window.innerWidth,
+      wrapWidth: wrap ? wrap.getBoundingClientRect().width : 0,
+      prose,
+    };
+  });
+}
+
 export async function checkLayout(page) {
   const layout = await inspectControls(page);
   const images = await inspectImages(page);
+  const shell = await inspectShell(page);
   const failures = [];
   const warnings = [];
 
@@ -286,6 +318,22 @@ export async function checkLayout(page) {
       `page scrollWidth ${layout.scrollWidth} exceeds viewport width ` +
         `${layout.viewportWidth} by ${layout.scrollWidth - layout.viewportWidth}px`,
     );
+  }
+  if (shell.wrapWidth > 0 && shell.wrapWidth < shell.viewportWidth - 1) {
+    failures.push(
+      `page shell is ${Math.round(shell.wrapWidth)}px wide in a ` +
+        `${shell.viewportWidth}px viewport; it must fill the width with only the gutter inset`,
+    );
+  }
+  if (shell.viewportWidth >= 1280) {
+    for (const block of shell.prose) {
+      if (block.max !== null && block.width > block.max + 1) {
+        failures.push(
+          `prose block "${block.text}" is ${Math.round(block.width)}px wide, ` +
+            `above its ${Math.round(block.max)}px reading measure`,
+        );
+      }
+    }
   }
 
   for (const control of layout.controls) {

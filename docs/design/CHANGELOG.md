@@ -1,7 +1,7 @@
 # Design system changelog
 
 - Date: 2026-11-21
-- Status: Accepted; v0.19 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
+- Status: Accepted; v0.21 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
   implemented in `ui/static/bittern.css` and the templates; the v0.3 flow layer is binding from v0.6,
   when [ADR 0027](../adr/0027-flow-layer-above-patterns.md) was accepted with amendments P1 and P3.
 - Applies to: every change to a token, a component, a pattern, a flow, or a rule in
@@ -18,6 +18,33 @@ like at vN, and why is it different now".
 Versions are internal to the design documents. Bittern does not publish a package and has no
 second consumer, so there is no SemVer promise, no changeset tooling, and no codemod. A version is
 a date-stamped batch of class changes; the date is how it maps to an app release.
+
+## v0.21: 2026-11-26
+
+- Class: token value, breaking change, component, pattern and flow
+- What changed: the page shell fills the device width with only `--layout-gutter` inset, or
+  `--layout-gutter-wide` at 80rem and above. The `--layout-page-max: 68rem` token is removed.
+  Prose keeps `--measure-prose`, help text keeps `--measure-hint`, controls keep
+  `--measure-control`, and tables use the room or scroll inside `.table-wrap`. The header uses the
+  same full-width shell and marks the current section with `aria-current="page"`; it omits `Setup`
+  after setup completes and `Live` when no camera is configured. The live player media box sizes to
+  both axes, the desktop grid fits the viewport, and a browser full-screen mode is added. The root
+  and post-sign-in landing resolve from the setup marker and the configured camera count
+  ([patterns.md](patterns.md#live-view), LV14 and LV15;
+  [components.md](components.md#page-shell-and-header) and
+  [components.md](components.md#live-player-island); [flows.md](flows.md#the-navigation-model)).
+- Why: the maintainer reported on real hardware that the live picture ran off the screen, and asked
+  for a full-width NVR dashboard with a sensible authenticated landing. A 68rem shell left the 1920
+  wall no wider than the 1280 wall, and a password alone could not distinguish a finished setup from
+  a half-finished one.
+- Evidence: [the live view sizing note](../notes/2026-11-26-live-view-sizing.md) and
+  [the full-width shell and landing note](../notes/2026-11-26-full-width-shell-and-landing.md);
+  `TestResolveLandingForEveryDeviceState`, `TestLandingFollowsTheConfigurationAtRequestTime` and
+  `TestSafeNextRejectsEveryEscapeAndKeepsLocalTargets`; the browser large-stream, reserved-box,
+  full-screen and routing checks; `make ui-browser-check` with 0 failures and 0 warnings; the
+  four-width screenshots `live-<width>.png`, `live-nine-tiles-<width>.png`, `status-ready-<width>.png`,
+  `wizard-<width>.png`, `login-<width>.png`, `live-full-screen-3840x2160-<width>.png` and
+  `landing-<state>-<width>.png`. [OQ-40](../open-questions.md#oq-40) is answered by this change.
 
 ## v0.20: 2026-11-26
 

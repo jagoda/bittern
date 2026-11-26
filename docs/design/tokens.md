@@ -110,7 +110,6 @@ Check: Q3 in [the professional test](professional-test.md), the mapping table be
   --space-64: 4rem;
 
   /* Layout aliases. These must reference space tokens or a measure. */
-  --layout-page-max: 68rem;
   --layout-gutter: var(--space-16);
   --layout-gutter-wide: var(--space-24);
   --layout-section-gap: var(--space-32);
@@ -235,8 +234,11 @@ Rules:
 - 16px is the floor for body, label, hint, input, and button. 14px is meta only. iOS zooms an input
   below 16px, and the owner cannot undo that.
 - Labels are visible, sentence case, and tied with `for` and `id`. A placeholder is never the label.
-- Prose is at most `--measure-prose` (65ch). Hints are at most `--measure-hint` (60ch). Controls
-  are at most `--measure-control` (32rem). Identifiers wrap instead of widening the page. A table
+- The page shell fills the device width with `--layout-gutter` inset, and `--layout-gutter-wide` at
+  80rem and above. There is no page maximum: a context that needs a narrower column sets its own
+  inline measure. Prose is at most `--measure-prose` (65ch). Hints are at most `--measure-hint`
+  (60ch). Controls are at most `--measure-control` (32rem). Identifiers wrap instead of widening the
+  page. A table
   that compares three or more columns is at least `--measure-table` (32rem) wide and scrolls inside
   `.table-wrap`; when the rows are records and comparison is not the task, the same rows become a
   `.table-stack` description list below 44rem. Its cells keep ordinary words whole, and only a
@@ -272,7 +274,7 @@ Phone and desktop layout:
 | --- | --- | --- |
 | Page gutter | `--space-16` | `--space-24` |
 | Section gap | `--space-32` | `--space-48` |
-| Page maximum | full width minus gutter | `--layout-page-max`, 68rem |
+| Page shell | full width minus `--layout-gutter` | full width minus `--layout-gutter-wide` |
 | Columns | one | one reading column, or two for independent peers |
 | Controls | one column, full width up to `--measure-control` | one column, same maximum |
 | Tables | records stack as `.table-stack` below 44rem; comparisons scroll at `--measure-table` | width follows the card |

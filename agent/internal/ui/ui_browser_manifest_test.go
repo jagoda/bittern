@@ -31,6 +31,7 @@ type browserRouteManifestEntry struct {
 	Flow    string `json:"flow"`
 	Variant string `json:"variant,omitempty"`
 	Prepare string `json:"prepare,omitempty"`
+	Landing string `json:"landing,omitempty"`
 }
 
 // TestBrowserRouteManifest keeps tests/browser/routes.json aligned with the
@@ -124,6 +125,11 @@ func validateBrowserRouteManifest(manifest []browserRouteManifestEntry, responsi
 		case "", "cameras", "review", "started", "applied":
 		default:
 			problems = append(problems, fmt.Sprintf("%s: prepare %q is not cameras, review, started, or applied", line, entry.Prepare))
+		}
+		switch entry.Landing {
+		case "", "uninitialized", "initialized-with-cameras", "initialized-no-cameras":
+		default:
+			problems = append(problems, fmt.Sprintf("%s: landing %q is not a known device state", line, entry.Landing))
 		}
 	}
 	for _, entry := range uiRoutes {

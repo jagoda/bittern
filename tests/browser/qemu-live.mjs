@@ -25,7 +25,13 @@ async function run() {
     await page.fill("#login-username", "admin");
     await page.fill("#login-password", password);
     await Promise.all([
-      page.waitForURL("**/ui/status", { timeout: 30000 }),
+      page.waitForURL(
+        (url) =>
+          url.pathname === "/ui/wizard" ||
+          url.pathname === "/ui/live" ||
+          url.pathname === "/ui/status",
+        { timeout: 30000 },
+      ),
       page.click("button[type='submit']"),
     ]);
     await page.goto(`${baseURL}/ui/live`, {
@@ -75,6 +81,12 @@ async function run() {
     const evidence = await page.evaluate(() => {
       const body = document.body.innerHTML;
       return {
+        overflow: {
+          scrollWidth: document.documentElement.scrollWidth,
+          scrollHeight: document.documentElement.scrollHeight,
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+        },
         tiles: document.querySelectorAll("[data-live-tile]").length,
         players: Array.from(document.querySelectorAll("[data-live-player]")).map(
           (player) => {
@@ -102,8 +114,13 @@ async function run() {
       evidence.tiles !== 4 ||
       evidence.players.length !== 2 ||
       evidence.leaked ||
+      evidence.overflow.scrollWidth > evidence.overflow.viewportWidth + 1 ||
+      evidence.overflow.scrollHeight > evidence.overflow.viewportHeight + 1 ||
       evidence.players.some(
-        (player) => player.state !== "playing" || player.videoWidth <= 0,
+        (player) =>
+          player.state !== "playing" ||
+          player.videoWidth < 1920 ||
+          player.videoHeight < 1080,
       )
     ) {
       process.exitCode = 1;

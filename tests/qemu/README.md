@@ -11,6 +11,8 @@ BIT-008 adoption scenario pass on 2026-11-15. The firstboot live-view phase pass
 the authenticated MSE player reached playing at 640x360 against the virtual camera. The grid slice
 passed on 2026-11-26 with two synthetic cameras in a four-tile layout: both tiles reached playing
 at 640x360 and the screenshot is `build/qemu/logs/firstboot-20261126-135843/live-view.png`. The
+camera fixture now serves 1920x1080 so the live phase exercises a realistic stream; the phase also
+asserts that the guest document has no horizontal or vertical overflow. The
 firstboot and adoption scenarios with the
 setup-token QR phase passed again on 2026-11-17. The measured cold-boot, snapshot, and restore
 times are in [the harness note](../../docs/notes/2026-11-14-qemu-harness.md). The `firstboot`
@@ -467,7 +469,7 @@ on 2026-11-14 and does not work: `rtsp_flags listen` belongs to the RTSP demuxer
 fixture therefore runs the pinned MediaMTX RTSP server and publishes a test pattern into it:
 
 ```sh
-ffmpeg -f lavfi -i testsrc=size=640x360:rate=10 -c:v libx264 \
+ffmpeg -f lavfi -i testsrc=size=1920x1080:rate=10 -c:v libx264 \
   -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 20 \
   -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/cam0
 ```

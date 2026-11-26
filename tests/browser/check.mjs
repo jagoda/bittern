@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 
 import { checkLayout } from "./assertions.mjs";
 import { LIVE_CHECK_COUNT, runLivePlayerChecks } from "./live.mjs";
+import { ROUTING_CHECK_COUNT, runRoutingChecks } from "./routing.mjs";
 import { LIVE_APPLIANCE_YAML, startBitternd } from "./server.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -374,7 +375,13 @@ async function signIn(page, adminPassword) {
     await page.fill("#login-username", "admin");
     await page.fill("#login-password", adminPassword);
     await Promise.all([
-      page.waitForURL("**/ui/status", { timeout: 15_000 }),
+      page.waitForURL(
+        (url) =>
+          url.pathname === "/ui/wizard" ||
+          url.pathname === "/ui/live" ||
+          url.pathname === "/ui/status",
+        { timeout: 15_000 },
+      ),
       page.click("button[type='submit']"),
     ]);
   } catch (error) {
@@ -659,6 +666,18 @@ async function main() {
     } else {
       console.log(
         `passed live-view: ${LIVE_CHECK_COUNT} player, ceiling and grid checks`,
+      );
+    }
+    const routingFailures = await runRoutingChecks({ browser, binary });
+    if (routingFailures.length > 0) {
+      failureCount += routingFailures.length;
+      console.log(`FAIL routing (${ROUTING_CHECK_COUNT} gate and landing checks)`);
+      for (const failure of routingFailures) {
+        console.log(`  - ${failure}`);
+      }
+    } else {
+      console.log(
+        `passed routing: ${ROUTING_CHECK_COUNT} gate and landing checks`,
       );
     }
     for (const result of results) {

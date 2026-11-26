@@ -3519,11 +3519,16 @@ class FirstbootScenario:
                     f"the QEMU browser check returned no result: {result.stdout}{result.stderr}"
                 ) from exc
             players = evidence.get("players") or []
+            overflow = evidence.get("overflow") or {}
             if (
                 evidence.get("tiles") != 4
                 or len(players) != 2
+                or overflow.get("scrollWidth", 0) > overflow.get("viewportWidth", 0) + 1
+                or overflow.get("scrollHeight", 0) > overflow.get("viewportHeight", 0) + 1
                 or any(
-                    player.get("state") != "playing" or int(player.get("videoWidth", 0)) <= 0
+                    player.get("state") != "playing"
+                    or int(player.get("videoWidth", 0)) < 1920
+                    or int(player.get("videoHeight", 0)) < 1080
                     for player in players
                 )
             ):
@@ -3538,7 +3543,9 @@ class FirstbootScenario:
                     f"{player.get('videoHeight')}"
                     for player in players
                 )
-                + f", screenshot {screenshot.name}"
+                + f", page {overflow.get('scrollWidth')}x{overflow.get('scrollHeight')} in "
+                f"{overflow.get('viewportWidth')}x{overflow.get('viewportHeight')}, "
+                f"screenshot {screenshot.name}"
             )
         else:
             state = "browser grid state skipped (node, @playwright/test or qemu-live.mjs missing)"

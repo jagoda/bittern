@@ -308,6 +308,21 @@
     this.headingBadge = root.querySelector("[data-player-state-label]");
     this.expandButton = root.querySelector("[data-live-expand]");
     this.collapseButton = root.querySelector("[data-live-collapse]");
+    this.fullscreenButton = root.querySelector("[data-live-fullscreen]");
+    this.fullscreenPushed = false;
+    this.onFullscreenChange = () => this.syncFullscreen();
+    this.onFullscreenPopState = () => {
+      if (document.fullscreenElement) {
+        var exiting = document.exitFullscreen();
+        if (exiting && typeof exiting.catch === "function") exiting.catch(() => {});
+      }
+    };
+    this.onFullscreenKeyDown = (event) => {
+      if (event.key !== "Escape" || document.fullscreenElement !== this.root) return;
+      event.preventDefault();
+      var exiting = document.exitFullscreen();
+      if (exiting && typeof exiting.catch === "function") exiting.catch(() => {});
+    };
     this.cameraName = root.getAttribute("data-camera-name") || "this camera";
     this.mediaBase = root.getAttribute("data-media-base") || "";
     this.snapshotURL = root.getAttribute("data-snapshot-url") || "";
@@ -377,7 +392,65 @@
         if (this.grid) this.grid.collapse();
       });
     }
+    if (this.fullscreenButton) {
+      this.fullscreenButton.hidden = false;
+      this.fullscreenButton.setAttribute("aria-pressed", "false");
+      this.fullscreenButton.addEventListener("click", () => this.toggleFullscreen());
+      document.addEventListener("fullscreenchange", this.onFullscreenChange);
+      window.addEventListener("popstate", this.onFullscreenPopState);
+      window.addEventListener("keydown", this.onFullscreenKeyDown);
+    }
     this.watchdog = window.setInterval(() => this.tick(), 1000);
+  };
+
+
+  LivePlayer.prototype.toggleFullscreen = function () {
+    if (document.fullscreenElement === this.root) {
+      var exiting = document.exitFullscreen();
+      if (exiting && typeof exiting.catch === "function") exiting.catch(() => {});
+      return;
+    }
+    if (!this.root.requestFullscreen) return;
+    var entering = this.root.requestFullscreen();
+    if (entering && typeof entering.catch === "function") {
+      entering.catch(() => {
+        this.setState(
+          "error",
+          "This browser did not open full screen",
+          "Bittern could not enter full screen. Use Open full width instead.",
+        );
+      });
+    }
+  };
+
+  LivePlayer.prototype.syncFullscreen = function () {
+    var active = document.fullscreenElement === this.root;
+    if (this.fullscreenButton) {
+      this.fullscreenButton.textContent = active ? "Exit full screen" : "Full screen";
+      this.fullscreenButton.setAttribute("aria-pressed", active ? "true" : "false");
+    }
+    document.body.classList.toggle(
+      "live-fullscreen-active",
+      Boolean(document.fullscreenElement),
+    );
+    if (active) {
+      if (!this.fullscreenPushed && window.history && window.history.pushState) {
+        this.fullscreenPushed = true;
+        window.history.pushState({ bitternFullscreen: true }, "", window.location.href);
+      }
+      return;
+    }
+    if (this.fullscreenPushed) {
+      this.fullscreenPushed = false;
+      if (
+        window.history &&
+        window.history.replaceState &&
+        window.history.state &&
+        window.history.state.bitternFullscreen
+      ) {
+        window.history.replaceState(null, "", window.location.href);
+      }
+    }
   };
 
   LivePlayer.prototype.showFullControls = function (full) {
@@ -943,6 +1016,13 @@
     this.clearTimers();
     if (this.watchdog) window.clearInterval(this.watchdog);
     this.watchdog = null;
+    if (document.fullscreenElement === this.root) {
+      var exiting = document.exitFullscreen();
+      if (exiting && typeof exiting.catch === "function") exiting.catch(() => {});
+    }
+    document.removeEventListener("fullscreenchange", this.onFullscreenChange);
+    window.removeEventListener("popstate", this.onFullscreenPopState);
+    window.removeEventListener("keydown", this.onFullscreenKeyDown);
     this.closeSocket();
     this.clearVideo();
     this.wanted = false;

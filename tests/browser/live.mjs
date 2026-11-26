@@ -25,10 +25,16 @@ const PLAYER_STATES = [
 
 // One named check per player state, four device-ceiling widths, and six grid
 // checks. check.mjs prints this count with the pass or fail line.
-export const LIVE_CHECK_COUNT = PLAYER_STATES.length + 4 + 6;
+export const LIVE_CHECK_COUNT = PLAYER_STATES.length + 4 + 6 + 8 + 1;
 
-const STUB = ({ mode, failingCamera }) => {
-  window.__liveStub = { mode, failingCamera: failingCamera || "", sockets: [] };
+const STUB = ({ mode, failingCamera, videoWidth, videoHeight }) => {
+  window.__liveStub = {
+    mode,
+    failingCamera: failingCamera || "",
+    videoWidth: videoWidth || 0,
+    videoHeight: videoHeight || 0,
+    sockets: [],
+  };
 
   class FakeBuffer extends EventTarget {
     constructor() {
@@ -139,6 +145,18 @@ const STUB = ({ mode, failingCamera }) => {
   URL.revokeObjectURL = () => {};
   HTMLMediaElement.prototype.play = () => Promise.resolve();
   HTMLMediaElement.prototype.pause = () => {};
+  Object.defineProperty(HTMLMediaElement.prototype, "videoWidth", {
+    configurable: true,
+    get() {
+      return window.__liveStub.videoWidth || 0;
+    },
+  });
+  Object.defineProperty(HTMLMediaElement.prototype, "videoHeight", {
+    configurable: true,
+    get() {
+      return window.__liveStub.videoHeight || 0;
+    },
+  });
   Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
     configurable: true,
     get() {
@@ -158,7 +176,13 @@ async function signIn(page, baseURL, password) {
   await page.fill("#login-username", "admin");
   await page.fill("#login-password", password);
   await Promise.all([
-    page.waitForURL("**/ui/status", { timeout: 15000 }),
+    page.waitForURL(
+      (url) =>
+        url.pathname === "/ui/wizard" ||
+        url.pathname === "/ui/live" ||
+        url.pathname === "/ui/status",
+      { timeout: 15000 },
+    ),
     page.click("button[type='submit']"),
   ]);
 }
@@ -203,10 +227,14 @@ async function waitForTileProfile(page, index, profile, timeout = 10000) {
   );
 }
 
-async function openLive(context, baseURL, password, mode, route) {
+async function openLive(context, baseURL, password, mode, route, options = {}) {
   const page = await context.newPage();
   await signIn(page, baseURL, password);
-  await page.addInitScript(STUB, { mode });
+  await page.addInitScript(STUB, {
+    mode,
+    videoWidth: options.videoWidth || 0,
+    videoHeight: options.videoHeight || 0,
+  });
   if (route) await route(page);
   await page.goto(`${baseURL}${LIVE_PATH}`, { waitUntil: "load" });
   return page;
@@ -425,6 +453,8 @@ async function openGrid(browser, baseURL, password, options = {}) {
   await page.addInitScript(STUB, {
     mode: options.mode || "playing",
     failingCamera: options.failingCamera || "",
+    videoWidth: options.videoWidth || 0,
+    videoHeight: options.videoHeight || 0,
   });
   await page.goto(`${baseURL}${GRID_PATH}`, { waitUntil: "load" });
   return { context, page };
@@ -814,6 +844,220 @@ async function walkGridCeilingNote(browser, baseURL, password) {
   return failures;
 }
 
+function overflowState(page) {
+  return page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    scrollHeight: document.documentElement.scrollHeight,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    fullscreen: Boolean(document.fullscreenElement),
+    bodyOverflow: getComputedStyle(document.body).overflow,
+  }));
+}
+
+async function assertNoOverflow(page, label, failures) {
+  const state = await overflowState(page);
+  if (state.scrollWidth > state.viewportWidth + 1) {
+    failures.push(
+      `${label}: scrollWidth ${state.scrollWidth} exceeds ${state.viewportWidth}`,
+    );
+  }
+  if (state.scrollHeight > state.viewportHeight + 1) {
+    failures.push(
+      `${label}: scrollHeight ${state.scrollHeight} exceeds ${state.viewportHeight}`,
+    );
+  }
+}
+
+async function assertFullscreenNoOverflow(page, label, failures) {
+  const state = await overflowState(page);
+  if (!state.fullscreen) {
+    failures.push(`${label}: the browser did not enter full screen`);
+  }
+  await assertNoOverflow(page, `${label} in full screen`, failures);
+  const player = await page.evaluate(() => {
+    const root = document.fullscreenElement;
+    if (!root) return null;
+    const media = root.querySelector(".live-media");
+    const video = root.querySelector("video");
+    return {
+      root: root.getBoundingClientRect().toJSON(),
+      media: media ? media.getBoundingClientRect().toJSON() : null,
+      video: video ? video.getBoundingClientRect().toJSON() : null,
+    };
+  });
+  if (!player || !player.media || !player.video) {
+    failures.push(`${label}: full screen has no media box or video`);
+    return;
+  }
+  for (const [name, rect] of [["media", player.media], ["video", player.video]]) {
+    if (
+      rect.left < -1 ||
+      rect.top < -1 ||
+      rect.right > state.viewportWidth + 1 ||
+      rect.bottom > state.viewportHeight + 1
+    ) {
+      failures.push(`${label}: the full-screen ${name} box leaves the viewport`);
+    }
+  }
+}
+
+// 7. A realistic stream cannot change the player geometry or make the page
+// overflow, and the full-screen view contains the same stream.
+async function walkLargeStream(browser, baseURL, password, width, resolution) {
+  const failures = [];
+  const context = await browser.newContext({
+    viewport: { width: width.width, height: width.height },
+  });
+  try {
+    const { page } = await openGrid(browser, baseURL, password, {
+      viewport: { width: width.width, height: width.height },
+      preset: 4,
+      cameras: LIVE_CAMERAS,
+      mode: "playing",
+      videoWidth: resolution.width,
+      videoHeight: resolution.height,
+    });
+    await waitForPlayingCount(page, width.width < 704 ? 1 : 4);
+    const label = `${resolution.width}x${resolution.height} at ${width.width}px`;
+
+    const before = await page.evaluate(() => {
+      const media = document.querySelector(
+        '[data-live-tile="0"] .live-media',
+      );
+      return media.getBoundingClientRect().toJSON();
+    });
+    const after = await page.evaluate(() => {
+      const video = document.querySelector('[data-live-tile="0"] video');
+      window.__liveStub.videoWidth = 0;
+      window.__liveStub.videoHeight = 0;
+      video.dispatchEvent(new Event("loadedmetadata"));
+      const empty = document
+        .querySelector('[data-live-tile="0"] .live-media')
+        .getBoundingClientRect()
+        .toJSON();
+      window.__liveStub.videoWidth = 0;
+      window.__liveStub.videoHeight = 0;
+      return empty;
+    });
+    if (
+      Math.abs(before.width - after.width) > 1 ||
+      Math.abs(before.height - after.height) > 1
+    ) {
+      failures.push(
+        `${label}: the player box moved when metadata changed ` +
+          `(${Math.round(before.width)}x${Math.round(before.height)} to ` +
+          `${Math.round(after.width)}x${Math.round(after.height)})`,
+      );
+    }
+    await assertNoOverflow(page, `${label} grid`, failures);
+    await page.screenshot({
+      path: path.join(
+        SCREENSHOT_DIR,
+        `live-large-${resolution.width}x${resolution.height}-${width.width}x${width.height}.png`,
+      ),
+      fullPage: true,
+    });
+
+    await page.click('[data-live-tile="0"] [data-live-fullscreen]');
+    await page.waitForFunction(() => Boolean(document.fullscreenElement), null, {
+      timeout: 5000,
+    });
+    await assertFullscreenNoOverflow(page, label, failures);
+    await page.screenshot({
+      path: path.join(
+        SCREENSHOT_DIR,
+        `live-full-screen-${resolution.width}x${resolution.height}-${width.width}x${width.height}.png`,
+      ),
+      fullPage: true,
+    });
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.fullscreenElement, null, {
+      timeout: 5000,
+    });
+    if (await page.evaluate(() => document.fullscreenElement)) {
+      failures.push(`${label}: Escape did not leave full screen`);
+    }
+
+    await page.click('[data-live-tile="0"] [data-live-fullscreen]');
+    await page.waitForFunction(() => Boolean(document.fullscreenElement), null, {
+      timeout: 5000,
+    });
+    await page.evaluate(() => window.history.back());
+    await page.waitForFunction(() => !document.fullscreenElement, null, {
+      timeout: 5000,
+    });
+    if (await page.evaluate(() => document.fullscreenElement)) {
+      failures.push(`${label}: Back did not leave full screen`);
+    }
+  } catch (error) {
+    failures.push(
+      `${resolution.width}x${resolution.height} at ${width.width}px: ${error.message}`,
+    );
+  } finally {
+    await context.close();
+  }
+  return failures;
+}
+
+// 8. The media box is reserved before the first frame and does not move when
+// video metadata arrives.
+async function walkReservedBox(browser, baseURL, password) {
+  const failures = [];
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+  });
+  try {
+    const { page } = await openGrid(browser, baseURL, password, {
+      viewport: { width: 1280, height: 800 },
+      preset: 4,
+      cameras: LIVE_CAMERAS,
+      mode: "connecting",
+    });
+    const before = await page.evaluate(() => {
+      const media = document.querySelector(
+        '[data-live-tile="0"] .live-media',
+      );
+      return {
+        media: media.getBoundingClientRect().toJSON(),
+        video: media.querySelector("video").getBoundingClientRect().toJSON(),
+      };
+    });
+    await page.evaluate(() => {
+      const video = document.querySelector('[data-live-tile="0"] video');
+      window.__liveStub.videoWidth = 3840;
+      window.__liveStub.videoHeight = 2160;
+      video.dispatchEvent(new Event("loadedmetadata"));
+    });
+    const after = await page.evaluate(() => {
+      const media = document.querySelector(
+        '[data-live-tile="0"] .live-media',
+      );
+      return {
+        media: media.getBoundingClientRect().toJSON(),
+        video: media.querySelector("video").getBoundingClientRect().toJSON(),
+      };
+    });
+    for (const name of ["media", "video"]) {
+      if (
+        Math.abs(before[name].width - after[name].width) > 1 ||
+        Math.abs(before[name].height - after[name].height) > 1
+      ) {
+        failures.push(
+          `reserved box: ${name} moved from ` +
+            `${Math.round(before[name].width)}x${Math.round(before[name].height)} to ` +
+            `${Math.round(after[name].width)}x${Math.round(after[name].height)}`,
+        );
+      }
+    }
+  } catch (error) {
+    failures.push(`reserved box: ${error.message}`);
+  } finally {
+    await context.close();
+  }
+  return failures;
+}
+
 export async function runLivePlayerChecks({ browser, baseURL, adminPassword }) {
   const failures = [];
   for (const state of PLAYER_STATES) {
@@ -826,5 +1070,28 @@ export async function runLivePlayerChecks({ browser, baseURL, adminPassword }) {
   failures.push(...(await walkGridCameraFailure(browser, baseURL, adminPassword)));
   failures.push(...(await walkGridFullWidth(browser, baseURL, adminPassword)));
   failures.push(...(await walkGridCeilingNote(browser, baseURL, adminPassword)));
+  const largeWidths = [
+    { width: 360, height: 800 },
+    { width: 390, height: 844 },
+    { width: 1280, height: 800 },
+    { width: 1920, height: 1080 },
+  ];
+  for (const resolution of [
+    { width: 1920, height: 1080 },
+    { width: 3840, height: 2160 },
+  ]) {
+    for (const width of largeWidths) {
+      failures.push(
+        ...(await walkLargeStream(
+          browser,
+          baseURL,
+          adminPassword,
+          width,
+          resolution,
+        )),
+      );
+    }
+  }
+  failures.push(...(await walkReservedBox(browser, baseURL, adminPassword)));
   return failures;
 }

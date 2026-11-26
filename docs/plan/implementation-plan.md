@@ -1651,10 +1651,13 @@ authenticated MSE and HLS proxy, the snapshot fallback, the renderer `go2rtc.str
 `cameras.<name>.live.streams` mapping, the player isolation guard and the 1/4/9 viewport ceiling
 structure. Slice 1b implements `/ui/live` as the grid: the 1/2/4/9 presets, the per-device layout
 cookie, the server-resolved tile assignment, one player island per tile, the in-place full-width
-view, the saved-layout clamp and the two-camera QEMU live phase. Evidence: [the live view slice 1a
-note](../notes/2026-11-26-live-view-slice-1a.md) and [the live view slice 1b
-note](../notes/2026-11-26-live-view-slice-1b.md). PTZ, audio, event review and playback remain
-out of scope.
+view, the saved-layout clamp and the two-camera QEMU live phase. The real-hardware sizing fix sizes
+the player to both axes, fits the desktop grid in the viewport and adds browser full screen; the
+QEMU camera now serves 1920x1080 and the live phase asserts no guest page overflow. Evidence: [the
+live view slice 1a note](../notes/2026-11-26-live-view-slice-1a.md), [the live view slice 1b
+note](../notes/2026-11-26-live-view-slice-1b.md) and [the live view sizing
+note](../notes/2026-11-26-live-view-sizing.md). PTZ, audio, event review and playback remain out of
+scope.
 
 **Goal.** Give the owner a live camera view in the Bittern UI on the authenticated 443 surface,
 following [ADR 0034](../adr/0034-live-view-owned-by-bittern.md), with no exposure of port 8555 and no
@@ -1684,7 +1687,9 @@ embedded Frigate UI.
   A stored preset is clamped to the ceiling and the page says so.
 - Keep the default data flow local. Do not add STUN, a public relay, or a cloud dependency. Audio
   stays muted and out of scope until OQ-21.
-- Add tests with the QEMU virtual camera or a fixture: authorized MSE and HLS playback,
+- Add browser cases with 1920x1080 and 3840x2160 stubbed streams at all four widths, a no-overflow
+  assertion on both axes for the grid and full screen, and a reserved-box check that metadata cannot
+  move the player. Add tests with the QEMU virtual camera or a fixture: authorized MSE and HLS playback,
   unauthorized refusal for navigation, playlist, segment and WebSocket requests, session expiry,
   camera offline, reconnect, layout cookie validation, device ceiling, player isolation, and no
   listener on 8555. Add phone and desktop checks and the nftables golden assertion.

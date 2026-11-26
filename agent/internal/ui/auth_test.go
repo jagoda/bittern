@@ -71,6 +71,7 @@ func newAuthTestServer(t *testing.T, token string, policy auth.RateLimitPolicy) 
 		Applier:                &fakeApplier{},
 		Updates:                &MockUpdateService{},
 		Auth:                   store,
+		StateRoot:              base,
 		CertificateFingerprint: "AA:BB:CC:DD",
 	})
 	if err != nil {
@@ -147,6 +148,9 @@ func completeSetup(t *testing.T, server *authServer) {
 		t.Fatalf("setup completion status: %d\n%s", statusCode, body)
 	}
 	assertContains(t, body, "Welcome to Bittern")
+	if err := writeSetupComplete(filepath.Dir(server.state)); err != nil {
+		t.Fatal(err)
+	}
 	if server.store.SetupRequired() {
 		t.Fatal("setup is still required after completion")
 	}
@@ -449,11 +453,11 @@ func TestShortCodeCompletesSetupAndCannotBeReused(t *testing.T) {
 		"password":         {testPassword},
 		"password_confirm": {testPassword},
 	})
-	if statusCode != http.StatusOK || !strings.Contains(body, "Appliance status") {
+	if statusCode != http.StatusOK || !strings.Contains(body, "Welcome to Bittern") {
 		t.Fatalf("reused short code status: %d\n%s", statusCode, body)
 	}
-	if strings.Contains(body, "Welcome to Bittern") {
-		t.Fatal("a reused short code completed setup again")
+	if strings.Contains(body, "Set up Bittern") || strings.Contains(body, "Setup code or backup code") {
+		t.Fatal("a reused short code opened the setup token form again")
 	}
 
 	document, err := secretstore.Load(server.secrets)

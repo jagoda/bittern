@@ -42,6 +42,7 @@
   </div>
   {{if .InGrid}}
   <div class="live-controls live-tile-controls">
+    <button type="button" class="button secondary" data-live-fullscreen="true" hidden="hidden">Full screen</button>
     <button type="button" class="button secondary" data-live-expand="true" hidden="hidden">Open full width</button>
     <button type="button" class="button secondary" data-live-collapse="true" hidden="hidden">Back to grid</button>
     <noscript><a class="button secondary" href="{{$.FullURL}}">Open full width</a></noscript>
@@ -52,6 +53,7 @@
   </div>
   {{else}}
   <div class="live-controls">
+    <button type="button" class="button secondary" data-live-fullscreen="true" hidden="hidden">Full screen</button>
     <div class="live-profiles" role="group" aria-label="Stream profile">
       {{range .Profiles}}<a href="{{.URL}}" data-profile-link="{{.Name}}"{{if .Selected}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}
     </div>
@@ -102,7 +104,7 @@
   </details>
 </section>
 <p class="live-ceiling-note" data-live-ceiling-note="true" hidden="hidden"></p>
-<ul class="live-grid" data-live-grid="true" aria-label="Live cameras">
+<ul class="live-grid" data-live-grid="true" data-live-count="{{len .Tiles}}" aria-label="Live cameras">
   {{range .Tiles}}<li class="live-tile" data-live-tile="{{.Index}}">{{template "live-tile" .}}</li>{{end}}
 </ul>
 {{end}}

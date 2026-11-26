@@ -232,6 +232,11 @@ type pageData struct {
 	AuthError              string
 	Username               string
 	Next                   string
+	BodyClass              string
+	CurrentPath            string
+	NavSection             string
+	ShowSetupNav           bool
+	ShowLiveNav            bool
 }
 
 func parseTemplates() (*template.Template, error) {
@@ -272,6 +277,10 @@ func (h *handler) render(w http.ResponseWriter, r *http.Request, code int, name 
 			data.Authenticated = session.Authenticated
 		}
 	}
+	data.CurrentPath = r.URL.Path
+	data.NavSection = navSection(r.URL.Path)
+	data.ShowSetupNav = !h.setupInitialized()
+	data.ShowLiveNav = h.configuredCameraCount() > 0
 	var output bytes.Buffer
 	if err := h.templates.ExecuteTemplate(&output, name, data); err != nil {
 		http.Error(w, "Bittern could not build this page. Restart the appliance and try again.", http.StatusInternalServerError)

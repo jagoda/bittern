@@ -46,7 +46,7 @@ func (h *handler) authenticate(next http.Handler) http.Handler {
 			}
 		case loginPath:
 			if authenticated {
-				http.Redirect(w, r, BasePath+"/status", http.StatusSeeOther)
+				http.Redirect(w, r, h.landingPath(), http.StatusSeeOther)
 				return
 			}
 			if session == nil {
@@ -63,16 +63,16 @@ func (h *handler) authenticate(next http.Handler) http.Handler {
 				return
 			}
 		case !authenticated:
-			target := SafeNext("")
+			target := ""
 			if isHXRequest(r) {
 				target = hxReturnPath(r)
 			} else if r.Method == http.MethodGet {
-				target = SafeNext(r.URL.RequestURI())
+				target = SafeNextOr(r.URL.RequestURI(), "")
 			}
 			h.redirectToAuth(w, r, BasePath+"/login?next="+url.QueryEscape(target))
 			return
 		case setupPath:
-			http.Redirect(w, r, BasePath+"/status", http.StatusSeeOther)
+			http.Redirect(w, r, h.landingPath(), http.StatusSeeOther)
 			return
 		case mutating(r.Method) && !h.auth.ValidateCSRF(session, csrfFromRequest(r)):
 			h.csrfFailure(w, r)
@@ -149,7 +149,7 @@ func (h *handler) showLogin(w http.ResponseWriter, r *http.Request) {
 	h.render(w, r, http.StatusOK, "login", pageData{
 		Title:    "Sign in",
 		Username: auth.AdministratorUsername,
-		Next:     SafeNext(r.URL.Query().Get("next")),
+		Next:     SafeNextOr(r.URL.Query().Get("next"), ""),
 	})
 }
 
@@ -166,7 +166,10 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	next := SafeNext(r.PostFormValue("next"))
+	next := SafeNextOr(r.PostFormValue("next"), "")
+	if next == "" {
+		next = h.landingPath()
+	}
 	data := pageData{
 		Title:    "Sign in",
 		Username: r.PostFormValue("username"),
@@ -297,18 +300,35 @@ func (h *handler) authStoreFailure(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SafeNext narrows a post-login redirect to a local UI path.
+// SafeNext narrows a post-login redirect to a local UI path, with the status
+// page as the caller-facing fallback.
 func SafeNext(value string) string {
-	const fallback = BasePath + "/status"
+	return SafeNextOr(value, BasePath+"/status")
+}
+
+// SafeNextOr accepts only a local UI path. It rejects absolute URLs,
+// protocol-relative paths, other hosts and paths outside /ui. An empty or
+// invalid value returns the caller's fallback, so the caller can choose the
+// device-state landing instead of a fixed page.
+func SafeNextOr(value, fallback string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return fallback
 	}
+	if strings.Contains(value, "\\") {
+		return fallback
+	}
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.IsAbs() || parsed.Host != "" ||
-		!strings.HasPrefix(parsed.Path, BasePath+"/") ||
+		strings.Contains(parsed.Path, "\\") ||
+		(parsed.Path != BasePath && !strings.HasPrefix(parsed.Path, BasePath+"/")) ||
 		strings.HasPrefix(parsed.Path, BasePath+"//") {
 		return fallback
+	}
+	for _, segment := range strings.Split(parsed.Path, "/") {
+		if segment == "." || segment == ".." {
+			return fallback
+		}
 	}
 	return parsed.RequestURI()
 }

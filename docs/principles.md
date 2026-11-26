@@ -38,6 +38,7 @@ tracker.
 | EN-3 | A regression test starts from the state that failed in the field, and says so | Reboot failures, field parity |
 | EN-4 | The second occurrence of a defect class triggers an audit of the class | Network path notes, reboot failures |
 | EN-5 | A planned-case matrix proves the plan runs; adversarial state proves the invariants | Update engine audit |
+| EN-6 | A fixture must carry realistic data volumes, not a size that hides the defect | Live view real-camera sizing |
 | OP-1 | A repeated manual bridge becomes an idempotent script whose dry run covers the real path | GK41 manual bridges, BIT-016, release call path |
 | OP-2 | An irreversible step has a verifiable completion path that does not need a new generation | Publish recovery note |
 | SEC-1 | A secret has one storage location and a redaction test | ADR 0010, camera credential tests |
@@ -484,6 +485,27 @@ does not apply gets a one-line reason in the review.
   clock cannot cross the invariant.
 - Check: The update package adversarial tests named in the audit note and the review question "which
   invariant does this new test corrupt?".
+
+### EN-6 A fixture must carry realistic data volumes
+
+- Date: 2026-11-26
+- Rule: A test fixture, stub, or sample must carry a realistic size, count, resolution, or data
+  volume for the boundary it exercises. A layout assertion at a convenient size proves only that the
+  convenient case renders. When the real device can produce a larger value, the fixture and the
+  assertion use a value from the real range, and the assertion checks overflow and content bounds,
+  not only that the page loaded.
+- Evidence: [the live view sizing note](notes/2026-11-26-live-view-sizing.md) records a real-camera
+  report where the picture ran off the screen. The browser stub reported no intrinsic video size,
+  the route and QEMU fixtures served 640x360, and the check asserted horizontal overflow only. The
+  fix adds 1920x1080 and 3840x2160 stubs at all four widths, a no-overflow assertion on both axes, a
+  reserved-box check, a browser full-screen check, and a 1920x1080 QEMU camera.
+- Do: Use a realistic resolution and tile count, assert the document's width and height against the
+  viewport, and assert that the player box is stable before metadata arrives.
+- Don't: Prove a live wall with a 640x360 fixture, or prove a list with one item when the product
+  ceiling is nine, and call the geometry green.
+- Check: The large-stream cases in [tests/browser/live.mjs](../tests/browser/live.mjs), the QEMU
+  live phase in [tests/qemu/run.py](../tests/qemu/run.py), and the UI review asks what realistic
+  size the fixture used ([review.md](design/review.md#widths)).
 
 ## Operations
 

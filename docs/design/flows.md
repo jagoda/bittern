@@ -88,7 +88,7 @@ appear in [the transition contract](#the-transition-contract).
 
 | Destination | Job | Entry points | Exits | In the header |
 | --- | --- | --- | --- | --- |
-| `/ui/login` | Prove the owner is the administrator and return them to the work they asked for. | Any signed-in route while signed out ([auth.go](../../agent/internal/ui/auth.go)); sign-out; session expiry; direct. | The `next` destination, else `/ui/status`; the same destination on a failed attempt. | Signed out only |
+| `/ui/login` | Prove the owner is the administrator and return them to the work they asked for. | Any signed-in route while signed out ([auth.go](../../agent/internal/ui/auth.go)); sign-out; session expiry; direct. | The validated `next` destination, else the device landing resolver (setup, live or status); the same destination on a failed attempt. | Signed out only |
 | `/ui/setup` | Exchange the one-time setup token for an administrator password. | Any non-static `/ui` path while setup is required; direct. | `/ui/wizard` on success; the same destination on a failed attempt. | Setup required only |
 
 ### First-run destinations
@@ -98,7 +98,7 @@ without that session is not the state it names.
 
 | Destination | Job | Entry points | Exits | In the header |
 | --- | --- | --- | --- | --- |
-| `/ui/wizard` | Say what the first run will do and that nothing is written until Apply. | `Setup` in the header while first run is incomplete; `/ui/{$}`; setup completion; review "Back to welcome"; error page "Open setup". | `/ui/wizard/network`; also `/ui/wizard` from cancel today. | Transient, header entry only while first run is incomplete |
+| `/ui/wizard` | Say what the first run will do and that nothing is written until Apply. | `Setup` in the header while first run is incomplete; the device landing while setup is incomplete; setup completion; review "Back to welcome"; error page "Open setup". | `/ui/wizard/network`; also `/ui/wizard` from cancel today. | Transient, header entry only while first run is incomplete |
 | `/ui/wizard/network` | Show the two links and their carrier before the owner continues. | Welcome submit; storage "Back to network". | `/ui/wizard/storage`; welcome. | Transient |
 | `/ui/wizard/storage` | Show the recording drive, its free space, and the reserve. | Network submit; camera "Back to storage". | `/ui/wizard/camera`; network. | Transient |
 | `/ui/wizard/camera` | Show every camera added so far, each with its own settings, and add more before the one review. | Storage submit; an add that returns to the step; a settings save; a remove from the list; review "Change cameras". | Add camera; one camera's settings; review; storage. | Transient |
@@ -113,9 +113,9 @@ without that session is not the state it names.
 
 | Destination | Job | Entry points | Exits | In the header |
 | --- | --- | --- | --- | --- |
-| `/ui/status` | Answer "is it working, and what do I do next" from the current status document. | Header; sign-in default; done; camera list; refresh link; the update card's 15 second fragment, or 2 seconds while an update or rollback runs. | Cameras; setup today; refresh; update-card fragment. | Persistent |
+| `/ui/status` | Answer "is it working, and what do I do next" from the current status document. | Header; the device landing when no camera is configured; done; camera list; refresh link; the update card's 15 second fragment, or 2 seconds while an update or rollback runs. | Cameras; setup today; refresh; update-card fragment. | Persistent |
 | `/ui/cameras` | Show every managed camera, its state, and the path to edit, test, or remove it. | Header; status "Manage cameras"; done "Manage cameras"; edit save; remove confirm; edit and remove cancel. | Camera edit; remove; snapshot action; status; setup today. | Persistent |
-| `/ui/live` and `/ui/live/{camera}` | Show one camera live, or the latest snapshot when the stream cannot start, with a picker when more than one camera exists and one line of camera state. | Header; live picker; a camera name from another live destination; direct. | Another camera; the main or sub profile; status; sign-in when the session ends. | Persistent |
+| `/ui/live` and `/ui/live/{camera}` | Show one camera live, or the latest snapshot when the stream cannot start, with a picker when more than one camera exists and one line of camera state. | Header when at least one camera is configured; the device landing when a camera is configured; live picker; a camera name from another live destination; direct. | Another camera; the main or sub profile; status; sign-in when the session ends. | Persistent |
 | `/ui/status/updates/rollback` | Confirm one manual rollback, name its target, and state that configuration and recordings are not reverted. | Status update card "Roll back" when a target exists; direct. | Status on confirm or cancel; status when no target exists. | Persistent while the target exists; the confirmation is transient to the current status document. |
 | `/ui/cameras/{id}/edit` | Change one camera with its current values and one apply action. | Camera card "Edit". | Camera list on save or cancel; the same destination on a validation or apply failure. | Transient, object scoped |
 | `/ui/cameras/{id}/remove` | Remove one camera with its exact effect stated before the commit. | Camera card "Remove". | Camera list on confirm or cancel; the same destination on an apply failure; the error page when the saved credential cannot be deleted. | Transient, object scoped |
@@ -261,35 +261,35 @@ map, not a stepper, and not a set of shortcuts to a flow that has already finish
 
 | Session state | Header | Why |
 | --- | --- | --- |
-| Signed out | Brand, Sign in | Every other route redirects to sign-in, and a header entry that bounces is not a destination. |
+| Signed out | Brand | Every other route redirects to the gate, so no navigation entry is offered. |
 | Setup required | Brand, Set up | `/ui/setup` is the only served destination until the administrator exists. |
-| Signed in, first run incomplete | Brand, Setup, Cameras, Live, Status, Sign out | The first run is the current job, and the camera list shows what exists so far. `Setup` points at the current step. |
-| Signed in, first run complete | Brand, Cameras, Live, Status, Sign out | Setup is gone permanently. Camera changes go through the list; reconfiguration is a reset. |
+| Signed in, setup incomplete | Brand, Setup, Cameras, Status, Sign out | The first run is the current job, and the camera list shows what has been entered. `Setup` points at the current step. Live is absent because no applied camera exists yet. |
+| Signed in, complete, no camera | Brand, Cameras, Status, Sign out | There is no live view to open and no first-run work left. |
+| Signed in, complete, at least one camera | Brand, Cameras, Live, Status, Sign out | Setup is gone permanently. Camera changes go through the list; reconfiguration is a reset. |
+
+The current destination is marked with `aria-current="page"` on its header link, and the current
+link gains weight and a stronger underline. The header is rendered only for an authenticated
+session, so a signed-out visitor sees the brand and the gate.
 
 A signed-out visitor can reach `/ui/login`, and `/ui/setup` while setup is required. Every other
 `/ui` path redirects to sign-in with the requested path in `next`, so the header must not offer a
 destination the visitor cannot open.
 
-The current header renders `Setup`, `Cameras`, `Live`, `Status`, and the sign-out form unconditionally for
-every authenticated session ([base.html](../../ui/templates/base.html), line 18 for `Setup`), and
-the signed-out login and setup pages render the same three links. The signed-out case violates N2:
-`Cameras` and `Status` redirect to `/ui/login?next=...`, and `Setup` after completion redirects to
-`/ui/login?next=/ui/setup` and then, after sign-in, to `/ui/status`
-([auth.go](../../agent/internal/ui/auth.go), the unauthenticated case and the `setupPath` case).
+The implemented header follows the table: `Setup` is rendered only until the setup-complete
+marker exists, `Live` only when `appliance.yaml` has at least one camera, and the current link
+carries `aria-current="page"`. The login and setup gates render no navigation links. The
+implementation is the resolver in `agent/internal/ui/landing.go`, the header in
+[`base.html`](../../ui/templates/base.html), and the `ShowSetupNav` and `ShowLiveNav` values set in
+`render` ([ui.go](../../agent/internal/ui/ui.go)).
 
-### The `Setup` defect
+### The `Setup` destination after the first run
 
 `Setup` after the first run completes is a defect against N1 and N5, and against
 [W1](patterns.md#first-run-wizard): a repeat owner gets direct edit, not the first-run wizard. The
 implemented wizard has no configured check: `welcome` always renders step 1
-([wizard.go](../../agent/internal/ui/wizard.go)), and `/ui/wizard` is reachable by the header, by
-the done screen, by the status page, by the camera list, and by the error page.
-
-The rule it violates: a destination whose job is complete for this appliance must not be offered as
-a normal destination. The first-run wizard's job is to move an unconfigured appliance to a valid
-applied configuration. Once that configuration exists, the job is done, and replaying the wizard
-either duplicates the setup surface or overwrites a working configuration without calling it an
-edit.
+([wizard.go](../../agent/internal/ui/wizard.go)), so the header no longer offers it after the
+setup-complete marker. A direct visit remains possible in this build; it is not a normal
+destination.
 
 What replaces it:
 
@@ -300,11 +300,10 @@ What replaces it:
 | Change the network, storage, or identity | Configuration reset ([ADR 0017](../adr/0017-reset-levels-and-decommissioning.md)), not the first-run wizard. |
 | Recover the administrator password | Factory reset ([ADR 0017](../adr/0017-reset-levels-and-decommissioning.md)), not setup. |
 | See the appliance | Status. |
-| Reach the first-run wizard again | Not at all. `/ui/wizard` redirects to `/ui/status` when an applied configuration exists. |
+| Reach the first-run wizard again | The header does not offer it after setup completes. The direct route remains for the current build. |
 
-The redirect and the header change are targets, not implemented behavior. They belong to the
-ticket that owns the wizard and the navigation, and they are recorded in the defect note rather
-than fixed here.
+The navigation and the setup marker are implemented in this change. The wizard itself still has
+no configured check, which remains [BIT-036](../plan/implementation-plan.md#bit-036-first-run-and-flow-contradictions-from-the-flow-layer).
 
 ## Flow rules
 
@@ -443,7 +442,7 @@ signed-out header shows only sign-in.
 | --- | --- | --- |
 | Apply start | `POST /ui/wizard/apply` starts one persisted operation and 303s to `/ui/wizard/apply`; an operation that finishes within 100ms redirects straight to its terminal destination ([wizard.go](../../agent/internal/ui/wizard.go), `apply`; [routes.go](../../agent/internal/ui/routes.go)). A second start while one runs 303s to `/ui/wizard/apply?busy=1` and runs nothing. `verified` by `operation_test.go`. | The same destination. The operation section in the status contract remains [BIT-014](../plan/implementation-plan.md#bit-014-long-running-operation-progress). |
 | Apply in progress | The operation page shows the current step, elapsed time, completed and remaining steps, and whether leaving is safe. A reload reads the same operation record; the live region polls every two seconds and the Technical details disclosure sits outside it ([operation.html](../../ui/templates/operation.html), [operation_panel.html](../../ui/templates/operation_panel.html)). `verified`. | The same destination, with the status page showing the same operation after [BIT-014](../plan/implementation-plan.md#bit-014-long-running-operation-progress) adds its status section. |
-| Apply success | The operation 303s to `/ui/wizard/result`, titled "Configuration applied" with the steps, elapsed time, generation, every camera and its own picture check, and next-step links ([wizard.go](../../agent/internal/ui/wizard.go), `showApplyResult`; [operation_result.html](../../ui/templates/operation_result.html)). `verified`. | The same destination. The header drops `Setup` once the configuration is applied (N5), owned by [BIT-036](../plan/implementation-plan.md#bit-036-first-run-and-flow-contradictions-from-the-flow-layer). |
+| Apply success | The operation 303s to `/ui/wizard/result`, titled "Configuration applied" with the steps, elapsed time, generation, every camera and its own picture check, and next-step links ([wizard.go](../../agent/internal/ui/wizard.go), `showApplyResult`; [operation_result.html](../../ui/templates/operation_result.html)). `verified`. | The same destination. The setup-complete marker and the header drop `Setup` once the configuration is applied (N5). |
 | Apply, committed but a camera check failed | The same result destination. The lede says one camera has not sent a picture and that the configuration stays applied, and that camera's row carries the failure and its next action ([operation_result.html](../../ui/templates/operation_result.html); [wizard.go](../../agent/internal/ui/wizard.go), `runApplyOperation`). `verified` by `TestApplyResultNamesEveryCamera`. | The result distinguishes the committed apply from the failed camera check, and names each camera's check, so one failed camera among several is named rather than summarised. A separate partial-result state remains with [BIT-036](../plan/implementation-plan.md#bit-036-first-run-and-flow-contradictions-from-the-flow-layer). |
 | Apply hard failure | The operation 303s to `/ui/wizard/result`, which names the failing step, the restored generation, the failure, and the next action. Every camera is listed with the outcome the transaction reached: "Not applied" after a rollback, and "Unknown" when no completed restore is recorded ([wizard.go](../../agent/internal/ui/wizard.go), `showApplyResult`; [operation_result.html](../../ui/templates/operation_result.html)). `verified`. | The same destination. A failed apply is never rendered from the POST, so a reload does not repeat it. |
 | Update check | `POST /ui/status/updates/check` runs one forced channel check and 303s to `/ui/status`; the status card reports the check record, including a rate limit, an offline device, and a failed check, and never reports up to date for a failed check ([update_handlers.go](../../agent/internal/ui/update_handlers.go), `checkForUpdate`; [update.go](../../agent/internal/ui/update.go), `AgentUpdateService.Check`). `verified` by `TestUpdateCardCoversEveryState` and the update card action tests. | No change. The check record is the persistent result. |
@@ -455,9 +454,9 @@ signed-out header shows only sign-in.
 | Camera remove success | 303 to `/ui/cameras?flash=removed` ([cameras.go](../../agent/internal/ui/cameras.go), `removeCamera`); the list says the camera and its saved credential were removed. `verified`. | No change to the destination. A Back step after the removal must not land on a removed object; [BIT-029](../plan/implementation-plan.md#bit-029-multi-camera-inventory-and-add-from-listing) owns it. |
 | Camera remove, apply failure | The remove page re-renders at 200 with "The camera was not removed" ([cameras.go](../../agent/internal/ui/cameras.go), `removeCamera`). `verified`; the reload repeating the destructive commit is `inferred`. | The failing remove step is rendered from a GET so a reload does not repeat the commit. Owning ticket: [BIT-036](../plan/implementation-plan.md#bit-036-first-run-and-flow-contradictions-from-the-flow-layer), with [BIT-029](../plan/implementation-plan.md#bit-029-multi-camera-inventory-and-add-from-listing). |
 | Camera removed, credential delete failed | The error page at 500, with a hand-edit instruction and a filled "Open setup" ([cameras.go](../../agent/internal/ui/cameras.go), `removeCamera`; [error.html](../../ui/templates/error.html)). `verified`. | A remove result that names the credential failure and offers an in-product retry, with an exit to the camera list. Owning ticket: [BIT-029](../plan/implementation-plan.md#bit-029-multi-camera-inventory-and-add-from-listing), with [BIT-010](../plan/implementation-plan.md#bit-010-factory-reset-and-support-bundle-skeleton) for the credential path. |
-| Setup completion (administrator) | 303 to `/ui/wizard` ([auth.go](../../agent/internal/ui/auth.go), `setup`); welcome, step 1 of 6. `verified`. | The same destination on success. The header entry remains while the first run is incomplete and drops after the apply (N1, N5), owned by [BIT-036](../plan/implementation-plan.md#bit-036-first-run-and-flow-contradictions-from-the-flow-layer); the replacement name is [OQ-32](../open-questions.md#oq-32-navigation-destination-after-first-run). |
-| Login success | 303 to `next`, else `/ui/status` ([auth.go](../../agent/internal/ui/auth.go), `login`, and `SafeNext`). `verified`. | No change. The destination is stable and the sign-in handoff is transient, as F8 requires. |
-| Logout | 303 to `/ui/login` ([auth.go](../../agent/internal/ui/auth.go), `logout`). The signed-out header still renders `Setup`, `Cameras` and `Status`, and each one bounces ([base.html](../../ui/templates/base.html); [auth.go](../../agent/internal/ui/auth.go), the unauthenticated case). `verified`. | 303 to `/ui/login` with a signed-out header that lists only sign-in. Owning ticket: [BIT-036](../plan/implementation-plan.md#bit-036-first-run-and-flow-contradictions-from-the-flow-layer). |
+| Setup completion (administrator) | 303 to `/ui/wizard` ([auth.go](../../agent/internal/ui/auth.go), `setup`); welcome, step 1 of 6. `verified`. | The same destination on success. The header entry remains while the setup-complete marker is absent and drops after the apply (N1, N5); the replacement name is [OQ-32](../open-questions.md#oq-32-navigation-destination-after-first-run). |
+| Login success | 303 to the validated `next`, else the device landing resolver: `/ui/wizard` before setup completes, `/ui/live` with a camera, `/ui/status` with none ([auth.go](../../agent/internal/ui/auth.go), `login`; [landing.go](../../agent/internal/ui/landing.go), `resolveLanding`). `verified` by `TestResolveLandingForEveryDeviceState` and the browser routing checks. | The same. The destination is stable and the sign-in handoff is transient, as F8 requires. |
+| Logout | 303 to `/ui/login` ([auth.go](../../agent/internal/ui/auth.go), `logout`). The signed-out header renders only the brand; the navigation is not offered ([base.html](../../ui/templates/base.html)). `verified`. | The same. |
 | Session expiry, GET | 303 to `/ui/login?next=<original URI>` ([auth.go](../../agent/internal/ui/auth.go), the unauthenticated case); sign-in returns to the original destination. `verified`. | No change. The `next` handoff returns the owner to the requested work. |
 | Session expiry, HTMX fragment | The fragment request gets 401 with `HX-Redirect` to `/ui/login?next=<owning page>`, never a 303 followed by login HTML. The live region keeps its content and shows the reconnecting notice until the top-level navigation starts ([auth.go](../../agent/internal/ui/auth.go), `redirectToAuth`). `verified` by the fragment auth test. | No change. A missing or expired session always produces one top-level sign-in, not injected content. |
 | Session expiry, POST | 303 to `/ui/login?next=/ui/status` ([auth.go](../../agent/internal/ui/auth.go), the unauthenticated case); the form input is gone. `verified` for the redirect; the lost input is `inferred` from the absence of any form state. | Sign-in returns to the interrupted form with its input, or the destination says the work was lost and where to restart. Owning ticket: [BIT-036](../plan/implementation-plan.md#bit-036-first-run-and-flow-contradictions-from-the-flow-layer). |
@@ -491,7 +490,7 @@ rendered for the owner who copied it.
 | Camera remove | `/ui/cameras/{id}/remove` | Yes, object scoped | Same, and the effect statement names the camera. |
 | Update rollback confirmation | `/ui/status/updates/rollback` | Yes while a target exists | Renders the current update state; when no target exists it says so and offers status, without inventing a target. |
 | Sign in | `/ui/login` | Yes | Renders the sign-in form. `?next=` is contextual and not required. |
-| First-run setup | `/ui/setup` | Conditional | Only while setup is required. After completion a signed-out visit redirects to sign-in, and a signed-in visit redirects to status. |
+| First-run setup | `/ui/setup` | Conditional | Only while setup is required. After completion a signed-out visit redirects to sign-in, and a signed-in visit follows the device landing resolver. |
 | Wizard welcome to review | `/ui/wizard`, `/ui/wizard/network`, `/ui/wizard/storage`, `/ui/wizard/review` | No | The screen depends on the server-side wizard session. A bookmark without the cookie gets a fresh session, and review redirects to the camera step when the list is empty. |
 | Camera step | `/ui/wizard/camera` | No | The rows come from the wizard session, so a URL without that session renders the empty step, not the owner's list. A reload in the same browser keeps the list. |
 | Camera add | `/ui/wizard/camera/add` | No | The form and the search result re-render from the route and the live search, so a reload in the same browser repeats no add. The camera it adds lands in that browser's list. |
