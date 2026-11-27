@@ -64,9 +64,18 @@ func TestGoldenCameraRoleAbsent(t *testing.T) {
 
 // TestCameraRoleAbsentChronyConfigIsValid runs the native chrony parse on the
 // empty-role golden, so "port 0" and the local reference are proven valid and
-// not just absent lines.
+// not just absent lines. The file is copied to a temporary directory because
+// the Debian chronyd AppArmor profile cannot read the checkout under /home.
 func TestCameraRoleAbsentChronyConfigIsValid(t *testing.T) {
-	runChronyCheck(t, filepath.Join(repoRoot(t), "tests/render/camera-role-absent/expected/chrony/chrony.conf"))
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "tests/render/camera-role-absent/expected/chrony/chrony.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "chrony.conf")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runChronyCheck(t, path)
 }
 
 // TestChronyServesCameraNetworkOnly reads the configured golden and asserts
