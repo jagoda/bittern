@@ -1,5 +1,6 @@
 // Package config loads, validates and type-checks appliance.yaml schema
-// version 2. A version 1 document is migrated to version 2 before validation.
+// version 3. A version 1 or version 2 document is migrated to version 3 before
+// validation.
 //
 // Validation runs in three stages: YAML parsing with duplicate-key rejection,
 // JSON Schema structural validation, and the cross-field semantic rules from
@@ -8,7 +9,7 @@
 package config
 
 // SchemaVersion is the appliance.yaml schema version this package understands.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // Config is a validated appliance.yaml document.
 type Config struct {
@@ -71,16 +72,65 @@ type CAM0DHCP struct {
 // Camera is one camera inventory entry. Credentials are referenced by key,
 // never included.
 type Camera struct {
-	ID             string  `yaml:"id"`
-	Name           string  `yaml:"name"`
-	Address        string  `yaml:"address"`
-	Enabled        *bool   `yaml:"enabled,omitempty"`
-	RTSPPort       *int    `yaml:"rtsp_port,omitempty"`
-	RTSPPath       *string `yaml:"rtsp_path,omitempty"`
-	MAC            *string `yaml:"mac,omitempty"`
-	Vendor         *string `yaml:"vendor,omitempty"`
-	Model          *string `yaml:"model,omitempty"`
-	CredentialsRef *string `yaml:"credentials_ref,omitempty"`
+	ID             string          `yaml:"id"`
+	Name           string          `yaml:"name"`
+	Address        string          `yaml:"address"`
+	Enabled        *bool           `yaml:"enabled,omitempty"`
+	RTSPPort       *int            `yaml:"rtsp_port,omitempty"`
+	RTSPPath       *string         `yaml:"rtsp_path,omitempty"`
+	MAC            *string         `yaml:"mac,omitempty"`
+	Vendor         *string         `yaml:"vendor,omitempty"`
+	Model          *string         `yaml:"model,omitempty"`
+	CredentialsRef *string         `yaml:"credentials_ref,omitempty"`
+	Profiles       *CameraProfiles `yaml:"profiles,omitempty"`
+}
+
+// CameraProfiles names the ONVIF media profiles for the two Bittern streams.
+// Each side is optional; an absent sub means the main stream is the only
+// stream (ADR 0037).
+type CameraProfiles struct {
+	Main *CameraProfile `yaml:"main,omitempty"`
+	Sub  *CameraProfile `yaml:"sub,omitempty"`
+}
+
+// CameraProfile is one ONVIF media profile. It stores paths and reported stream
+// facts only, never a host, userinfo, credential or full URI.
+type CameraProfile struct {
+	ProfileToken string  `yaml:"profile_token"`
+	RTSPPath     string  `yaml:"rtsp_path"`
+	SnapshotPath *string `yaml:"snapshot_path,omitempty"`
+	Width        *int    `yaml:"width,omitempty"`
+	Height       *int    `yaml:"height,omitempty"`
+	Codec        *string `yaml:"codec,omitempty"`
+}
+
+// Profile returns the named stream profile, or nil when it is not present.
+func (c Camera) Profile(name string) *CameraProfile {
+	if c.Profiles == nil {
+		return nil
+	}
+	switch name {
+	case "main":
+		return c.Profiles.Main
+	case "sub":
+		return c.Profiles.Sub
+	default:
+		return nil
+	}
+}
+
+// HasProfile reports whether the camera carries the named stream profile.
+func (c Camera) HasProfile(name string) bool {
+	return c.Profile(name) != nil
+}
+
+// StreamPath returns the RTSP path for a stream profile. A profile path takes
+// precedence; otherwise the camera-level path is the fallback for both names.
+func (c Camera) StreamPath(name string) string {
+	if profile := c.Profile(name); profile != nil && profile.RTSPPath != "" {
+		return profile.RTSPPath
+	}
+	return c.RTSPPathValue()
 }
 
 // IsEnabled applies the schema default for camera.enabled.

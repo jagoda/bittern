@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reference validator for Bittern's appliance.yaml schema version 2.
+"""Reference validator for Bittern's appliance.yaml schema version 3.
 
 This is a development check, not the product CLI. It uses a real JSON Schema
 validator for structural rules and a small set of explicit cross-field checks
@@ -79,8 +79,18 @@ def migrate_document(document: object) -> object:
     if not isinstance(document, dict):
         return document
     version = document.get("schema_version")
-    if isinstance(version, bool) or not isinstance(version, int) or version != 1:
+    if isinstance(version, bool) or not isinstance(version, int):
         return document
+    if version == 1:
+        document = migrate_v1_to_v2(document)
+    version = document.get("schema_version")
+    if version == 2:
+        document = migrate_v2_to_v3(document)
+    return document
+
+
+def migrate_v1_to_v2(document: dict) -> dict:
+    """Version 1 to version 2 changes the version and the recording shape."""
     result = copy.deepcopy(document)
     result["schema_version"] = 2
     storage = result.get("storage")
@@ -93,6 +103,13 @@ def migrate_document(document: object) -> object:
     if "device_role" in recording:
         drives.append({"device_role": recording.pop("device_role")})
     recording["drives"] = drives
+    return result
+
+
+def migrate_v2_to_v3(document: dict) -> dict:
+    """Version 2 to version 3 changes only the version and adds no profiles."""
+    result = copy.deepcopy(document)
+    result["schema_version"] = 3
     return result
 
 

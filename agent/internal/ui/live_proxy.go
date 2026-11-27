@@ -17,6 +17,7 @@ import (
 	"bittern.invalid/agent/internal/auth"
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/livestream"
+	"bittern.invalid/agent/internal/render"
 )
 
 const (
@@ -182,7 +183,12 @@ func (h *handler) serveLiveMedia(w http.ResponseWriter, r *http.Request) {
 		h.serveLiveSnapshot(w, r, source)
 		return
 	}
-	target, ws, err := h.liveUpstream(r, kind, source)
+	stream, ok := render.LiveStreamKey(source, profile)
+	if !ok {
+		writeLiveError(w, http.StatusNotFound, "That live stream is not in the live inventory.")
+		return
+	}
+	target, ws, err := h.liveUpstream(r, kind, stream)
 	if err != nil {
 		writeLiveError(w, http.StatusBadRequest, "That live media address is not allowed.")
 		return
@@ -234,7 +240,7 @@ func (h *handler) liveSource(cameraID, profile string) (config.Camera, bool) {
 // liveUpstream builds the one allowed upstream request. Every path and query
 // is fixed here; no request value is copied into the upstream host, path or
 // src parameter.
-func (h *handler) liveUpstream(r *http.Request, kind string, camera config.Camera) (*url.URL, bool, error) {
+func (h *handler) liveUpstream(r *http.Request, kind, stream string) (*url.URL, bool, error) {
 	base := strings.TrimSpace(h.go2rtcURL)
 	if base == "" {
 		base = defaultGo2RTCURL
@@ -243,7 +249,6 @@ func (h *handler) liveUpstream(r *http.Request, kind string, camera config.Camer
 	if err != nil || target.Scheme == "" || target.Host == "" {
 		return nil, false, errors.New("go2rtc base is invalid")
 	}
-	stream := livestream.StreamName(camera.ID, r.PathValue("profile"))
 	query := r.URL.Query()
 	switch kind {
 	case "ws":

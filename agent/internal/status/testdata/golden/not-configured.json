@@ -8,7 +8,7 @@
       "state": "ok",
       "path": "/etc/bittern/appliance.yaml",
       "present": true,
-      "schema_version": 2,
+      "schema_version": 3,
       "valid": true,
       "errors": []
     },

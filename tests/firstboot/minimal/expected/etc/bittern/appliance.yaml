@@ -1,7 +1,7 @@
 # Minimal Bittern configuration written by first boot.
 # Change it through the wizard or CLI; the appliance re-renders managed files.
 
-schema_version: 2
+schema_version: 3
 identity:
     hostname: bittern
     timezone: UTC

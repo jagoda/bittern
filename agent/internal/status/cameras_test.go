@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"bittern.invalid/agent/internal/config"
 )
 
 func TestCameraHealthCacheRoundTrip(t *testing.T) {
@@ -91,6 +93,41 @@ func TestCameraSectionReportsSnapshotAndOfflineState(t *testing.T) {
 	}
 	if document.State != StateDegraded {
 		t.Fatalf("overall state = %s, want degraded", document.State)
+	}
+}
+
+func TestStatusReportsDistinctAndSharedQualities(t *testing.T) {
+	cfg := loadFixture(t)
+	cfg.Cameras = []config.Camera{
+		{
+			ID:      "driveway",
+			Name:    "Driveway",
+			Address: "10.77.0.20",
+			Profiles: &config.CameraProfiles{
+				Main: &config.CameraProfile{ProfileToken: "Profile_1", RTSPPath: "/main"},
+				Sub:  &config.CameraProfile{ProfileToken: "Profile_2", RTSPPath: "/sub"},
+			},
+		},
+		{
+			ID:      "side_gate",
+			Name:    "Side gate",
+			Address: "10.77.0.21",
+		},
+	}
+	probes := healthyProbes(t)
+	probes.Config = ConfigProbeFunc(func(string) ConfigObservation {
+		return ConfigObservation{Present: true, Config: cfg}
+	})
+	document := newTestBuilderAt(t, probes, t.TempDir()).Build(context.Background())
+	items := document.Sections.Cameras.Items
+	if len(items) != 2 {
+		t.Fatalf("camera items = %d, want 2", len(items))
+	}
+	if got := strings.Join(items[0].DistinctQualities, ","); got != "main,sub" {
+		t.Fatalf("driveway distinct qualities = %q, want main,sub", got)
+	}
+	if got := strings.Join(items[1].DistinctQualities, ","); got != "main" {
+		t.Fatalf("side gate distinct qualities = %q, want main", got)
 	}
 }
 

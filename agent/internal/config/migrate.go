@@ -14,7 +14,9 @@ func migrateDocument(document any) any {
 	}
 	switch version {
 	case 1:
-		return migrateV1ToV2(root)
+		return migrateV2ToV3(migrateV1ToV2(root))
+	case 2:
+		return migrateV2ToV3(root)
 	default:
 		return document
 	}
@@ -43,6 +45,16 @@ func migrateV1ToV2(document map[string]any) map[string]any {
 		delete(recording, "device_role")
 	}
 	recording["drives"] = drives
+	return result
+}
+
+// migrateV2ToV3 changes only the version. A version 2 camera has no profiles
+// key, so the version 3 document has none either and the migrated state is the
+// single-stream degradation from ADR 0037. The function never invents a profile
+// and never reads outside its input.
+func migrateV2ToV3(document map[string]any) map[string]any {
+	result := cloneDocument(document).(map[string]any)
+	result["schema_version"] = 3
 	return result
 }
 

@@ -20,7 +20,7 @@ that is still `proposed` has no priority decision; it remains `not started` unti
 Evidence for the statuses:
 
 - **P0 config compiler: done.** The [current state](../implementation-plan.md#current-state) records
-  schema version 2 with its migration and the Go renderer with golden tests. The
+  schema version 3 with its v1 and v2 migrations and the Go renderer with golden tests. The
   [plan truth pass](../../notes/2026-11-16-plan-truth-pass.md#what-retires-it) states that BIT-002
   and BIT-003 are done.
 - **P0 runtime harness: done.** The [current state](../implementation-plan.md#current-state) records

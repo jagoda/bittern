@@ -5903,7 +5903,7 @@ def build_update_bundle(
             "--schema-min",
             "1",
             "--schema-max",
-            "2",
+            "3",
             "--updater-min",
             "1",
             "--created",

@@ -1,9 +1,9 @@
-# Bittern appliance configuration, schema version 2.
+# Bittern appliance configuration, schema version 3.
 #
 # This example has four cameras and one local recording drive. It contains no
 # credentials: camera entries reference keys in /etc/bittern/secrets.yaml, which
 # is mode 0600 and never committed. See AGENTS.md, "Hard rules".
-schema_version: 2
+schema_version: 3
 
 identity:
   hostname: bittern

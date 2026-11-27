@@ -10,7 +10,7 @@ implemented. The links at the end are the required reading.
 
 ## Current state
 
-- Repository skeleton, local checks, schema version 2 with the v1 to v2 migration, the BIT-004 QEMU
+- Repository skeleton, local checks, schema version 3 with the v1 to v2 and v2 to v3 migrations, the BIT-004 QEMU
   harness, the BIT-005 Frigate fixture bundle, the BIT-003 Go renderer library with golden tests,
   read-only hardware detection, a resumable apply transaction, first-boot provisioning, a minimal
   `bittern` CLI with `detect`, `render`, `first-boot` and `setup-token`, the BIT-006 read-only

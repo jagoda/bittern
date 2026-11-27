@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:bittern:schema:appliance:2",
+  "$id": "urn:bittern:schema:appliance:3",
   "title": "Bittern appliance configuration",
-  "description": "Schema version 2 of appliance.yaml, the single source of truth for a Bittern appliance. Secrets are never stored in this document; camera credentials are referenced from /etc/bittern/secrets.yaml.",
+  "description": "Schema version 3 of appliance.yaml, the single source of truth for a Bittern appliance. Secrets are never stored in this document; camera credentials are referenced from /etc/bittern/secrets.yaml.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -17,8 +17,8 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "const": 2,
-      "description": "Document schema version. Version 2 is current; version 1 documents migrate to version 2 before validation."
+      "const": 3,
+      "description": "Document schema version. Version 3 is current; version 1 and version 2 documents migrate to version 3 before validation."
     },
     "identity": {
       "$ref": "#/$defs/identity"
@@ -200,7 +200,7 @@
         "name",
         "address"
       ],
-      "description": "One camera. Credentials are referenced by key, never included.",
+      "description": "One camera. Credentials are referenced by key, never included. Optional profiles name the ONVIF media profiles for the main and sub streams.",
       "properties": {
         "id": {
           "type": "string",
@@ -256,6 +256,19 @@
           "type": "string",
           "pattern": "^[a-z][a-z0-9_.-]*$",
           "description": "Key in /etc/bittern/secrets.yaml for this camera's credentials. No credential value belongs here."
+        },
+        "profiles": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Optional ONVIF media profiles for the main and sub streams. An absent profiles object means the camera-level rtsp_path is the only stream. An absent sub means the main stream is the only stream. In both cases both stream names resolve to that one path.",
+          "properties": {
+            "main": {
+              "$ref": "#/$defs/cameraProfile"
+            },
+            "sub": {
+              "$ref": "#/$defs/cameraProfile"
+            }
+          }
         }
       }
     },
@@ -265,7 +278,7 @@
       "required": [
         "recording"
       ],
-      "description": "Storage roles. Version 2 has a local recording pool and no network storage.",
+      "description": "Storage roles. Version 3 has a local recording pool and no network storage.",
       "properties": {
         "recording": {
           "$ref": "#/$defs/recording"
@@ -489,6 +502,60 @@
           "description": "Decode acceleration mode."
         }
       }
+    },
+    "cameraProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_token",
+        "rtsp_path"
+      ],
+      "description": "One ONVIF media profile selected for a camera stream. It stores paths only, never a host, userinfo, credential or full URI.",
+      "properties": {
+        "profile_token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Opaque ONVIF profile token from GetProfiles."
+        },
+        "rtsp_path": {
+          "$ref": "#/$defs/cameraProfilePath",
+          "description": "RTSP path and query for this profile, beginning with a slash."
+        },
+        "snapshot_path": {
+          "$ref": "#/$defs/cameraProfilePath",
+          "description": "Optional ONVIF snapshot path and query for this profile."
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384,
+          "description": "Width in pixels reported by the camera. Empty when the camera does not report it."
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384,
+          "description": "Height in pixels reported by the camera. Empty when the camera does not report it."
+        },
+        "codec": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "description": "Codec name reported by the camera, such as h264. Empty when the camera does not report it."
+        }
+      }
+    },
+    "cameraProfilePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^/[^@\\s]*$",
+      "not": {
+        "pattern": "://"
+      },
+      "description": "A path beginning with a slash, with any query string. It must not contain a scheme separator or userinfo."
     }
   }
 }

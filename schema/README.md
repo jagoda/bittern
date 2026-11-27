@@ -5,29 +5,31 @@ defines the version field, the shape of every section, allowed values, and the c
 UI, CLI, renderer, and fleet bundles. Schema versions and migrations live here, with examples used by
 tests and documentation.
 
-Status: schema version 2 is current, with a four-camera example, a POC example, a reference validator,
-the Go product validator in `agent/internal/config`, and a pure v1 to v2 migration. Version 1
-documents are migrated to version 2 before validation. The daemon, apply pipeline, and UI are
-implemented at the skeleton level described in the component READMEs.
+Status: schema version 3 is current, with a four-camera example, a POC example, a reference validator,
+the Go product validator in `agent/internal/config`, and pure v1 to v2 and v2 to v3 migrations.
+Version 1 and version 2 documents are migrated to version 3 before validation. The daemon, apply
+pipeline, and UI are implemented at the skeleton level described in the component READMEs.
 
 ## Files
 
 | Path | Purpose |
 | --- | --- |
-| `appliance.schema.json` | JSON Schema draft 2020-12 for `appliance.yaml` version 2 |
+| `appliance.schema.json` | JSON Schema draft 2020-12 for `appliance.yaml` version 3 |
 | `versions/v1/appliance.schema.json` | Frozen version 1 schema kept for migration fixtures and old documents |
-| `examples/four-cameras.yaml` | Valid version 2 example with four cameras and a local recording mount point |
-| `examples/poc-gk41.yaml` | Valid version 2 POC profile with NIC matches, a recording member, and detector fields |
+| `versions/v2/appliance.schema.json` | Frozen version 2 schema kept for migration fixtures and old documents |
+| `examples/four-cameras.yaml` | Valid version 3 example with four cameras and a local recording mount point |
+| `examples/poc-gk41.yaml` | Valid version 3 POC profile with NIC matches, a recording member, and detector fields |
 | `validation.md` | Validator contract, structural and semantic rules, migration contract |
-| [migrations/README.md](migrations/README.md) | Version 1 to version 2 migration rules, fixtures, and tests |
+| [migrations/README.md](migrations/README.md) | Version 1 to version 2 and version 2 to version 3 migration rules, fixtures, and tests |
 
 ## Contract
 
 - `appliance.yaml` is the single source of truth for device configuration, as decided in
   [ADR 0006](../docs/adr/0006-declarative-config-and-renderer.md).
-- `schema_version` is a required integer and version 2 is current. A version 1 document is migrated
-  to version 2 before validation and is never accepted as a version 2 document without that migration.
-  A missing, older, or newer version is rejected; it is never guessed or migrated implicitly.
+- `schema_version` is a required integer and version 3 is current. A version 1 or version 2
+  document is migrated to version 3 before validation and is never accepted as a version 3 document
+  without that migration. A missing, older, or newer version is rejected; it is never guessed or
+  migrated implicitly.
 - Unknown keys are rejected at every level. Adding a setting requires a schema change, documentation,
   a migration if the version changes, and a test.
 - Defaults are annotations in the schema and defaults for the UI and agent when they create a new
@@ -40,9 +42,9 @@ implemented at the skeleton level described in the component READMEs.
   key names, never a password or username.
 - The camera schema has no credential fields. `additionalProperties: false` rejects `password`,
   `username`, `secret`, and every other unknown key with a JSON path.
-- Version 2 has no network-storage target, no mirror or RAID setting, and no backup target. The
+- Version 3 has no network-storage target, no mirror or RAID setting, and no backup target. The
   recording pool is local and follows [ADR 0018](../docs/adr/0018-recording-capacity-pool.md).
-- The schema does not encode open questions. See "Not in version 2" below.
+- The schema does not encode open questions. See "Not in version 3" below.
 
 ## Development prerequisites
 
@@ -70,7 +72,7 @@ message instead of silently passing.
 
 | Field | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `schema_version` | integer, constant `2` | yes | none | Document schema version |
+| `schema_version` | integer, constant `3` | yes | none | Document schema version |
 | `identity` | object | yes | none | Device name and time zone |
 | `network` | object | yes | none | The two fixed interface roles and optional NIC matches |
 | `cameras` | array | yes | `[]` | Camera inventory; may be empty on first boot |
@@ -155,6 +157,32 @@ the display label. Addresses must be unique, must be on `cam0`, and must not be 
 | `vendor` | string, 1 to 128 characters | no | none | Device-reported manufacturer from ONVIF discovery, shown in the camera list |
 | `model` | string, 1 to 128 characters | no | none | Device-reported model or name from ONVIF discovery, shown in the camera list |
 | `credentials_ref` | string, key pattern | no | none | Key in `/etc/bittern/secrets.yaml` whose value is the complete camera RTSP URL; required when the camera needs authentication, never a credential value |
+| `profiles` | object | no | none | Optional ONVIF main and sub profiles from ADR 0037. Absent means the camera-level path is the only stream |
+
+### cameras[].profiles
+
+`profiles` is optional. `main` and `sub` are each optional. An absent `profiles` object means the
+camera-level `rtsp_path` is the only stream. An absent `sub` means the main stream is the only
+stream. In both cases both stream names resolve to that one path. A profile path takes precedence
+when present. The renderer emits two go2rtc keys per camera; when there is one stream both keys point
+at it.
+
+| Field | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `profile_token` | string, 1 to 128 characters | yes | none | Opaque ONVIF profile token from `GetProfiles` |
+| `rtsp_path` | string, path with optional query, at most 2048 characters | yes | none | RTSP path beginning with `/`; must not contain `://` or `@` |
+| `snapshot_path` | string, path with optional query, at most 2048 characters | no | none | ONVIF snapshot path and query for this profile |
+| `width` | integer, 1 to 16384 | no | none | Width in pixels reported by the camera |
+| `height` | integer, 1 to 16384 | no | none | Height in pixels reported by the camera |
+| `codec` | string, 1 to 32 characters | no | none | Codec reported by the camera, such as `h264` |
+
+A profile stores no host, userinfo, credential or full URI. The schema rejects a path that does not
+begin with `/`, contains `://` or `@`, or exceeds the string cap. The camera-level `rtsp_path` remains
+the manual or fallback path. A camera that uses `credentials_ref` renders its one secret URL under
+both keys until the secret interface carries one URL per profile; the profile paths apply to cameras
+without a reference, and status reports that camera as having one distinct quality. Profiles are
+collected at adoption, not by the migration; a version 2 document migrates with no `profiles` key and
+therefore keeps the one-stream behaviour.
 
 A camera address inside the dynamic pool is accepted only when `mac` is set. The renderer then
 emits one `dhcp-host=<mac>,<address>` line into `/etc/dnsmasq.d/bittern-reservation.conf`.
@@ -242,7 +270,7 @@ The privacy section currently carries only the remote-access settings decided in
 [ADR 0009](../docs/adr/0009-remote-access-via-tailscale.md). It is deliberately not a general
 telemetry or egress panel.
 
-## Not in version 2
+## Not in version 3
 
 These settings are open questions and must not be added as fields until an ADR resolves them:
 
@@ -277,10 +305,11 @@ are in [validation.md](validation.md). The fixture inputs and expected outcomes 
 style, bundle and Go test checks, offline and without reading secrets. The Go parity test
 `TestValidatorParityWithReference` reads the same manifest and asserts the same paths and rules.
 
-The v1 to v2 migration is in `agent/internal/config/migrate.go` and is mirrored by
-`tests/checks/validate_config.py`. Its golden fixtures are under
-[migrations/v1_to_v2](migrations/v1_to_v2/), and the frozen v1 schema is under
-[versions/v1](versions/v1/). Run the migration tests with `make test`.
+The v1 to v2 and v2 to v3 migrations are in `agent/internal/config/migrate.go` and are mirrored by
+`tests/checks/validate_config.py`. Their golden fixtures are under
+[migrations/v1_to_v2](migrations/v1_to_v2/) and [migrations/v2_to_v3](migrations/v2_to_v3/). The
+frozen v1 and v2 schemas are under [versions/v1](versions/v1/) and [versions/v2](versions/v2/). Run
+the migration tests with `make test`.
 
 Related: [architecture](../docs/architecture.md),
 [ADR 0005](../docs/adr/0005-dual-nic-isolated-camera-network.md),

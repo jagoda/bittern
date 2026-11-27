@@ -197,8 +197,8 @@ func TestUpdateRejectsSchemaTooNew(t *testing.T) {
 
 func TestUpdateRejectsSchemaTooOld(t *testing.T) {
 	runRejection(t, bundleSpec{generation: 1, mutate: func(m *release.Manifest) {
-		m.Compatibility.SchemaMin = 3
-		m.Compatibility.SchemaMax = 3
+		m.Compatibility.SchemaMin = 4
+		m.Compatibility.SchemaMax = 4
 	}}, "compatibility.schema")
 }
 

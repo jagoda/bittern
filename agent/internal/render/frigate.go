@@ -543,13 +543,12 @@ func frigateConfigDocument(cfg *config.Config, defaults *frigateDefaults, detect
 	for _, camera := range cfg.Cameras {
 		path := cameraRTSPPath(camera)
 		liveStreams := make(map[string]string, len(livestream.Profiles()))
-		for _, profile := range livestream.Profiles() {
-			key := livestream.StreamName(camera.ID, profile)
-			// The renderer owns the go2rtc stream names. Until the camera
-			// profile work lands, both profiles point at the one configured
-			// RTSP path (ADR 0034 section 5).
-			document.Go2RTC.Streams[key] = path
-			liveStreams[livestream.ProfileLabel(profile)] = key
+		for _, stream := range LiveStreams(camera) {
+			// The renderer owns the go2rtc stream names. Both keys are always
+			// emitted; a camera without profiles points both at the one
+			// configured path (ADR 0037).
+			document.Go2RTC.Streams[stream.Key] = stream.Source
+			liveStreams[livestream.ProfileLabel(stream.Profile)] = stream.Key
 		}
 		document.Cameras[camera.ID] = frigateCameraConfig{
 			Enabled: camera.IsEnabled(),
@@ -565,10 +564,19 @@ func frigateConfigDocument(cfg *config.Config, defaults *frigateDefaults, detect
 }
 
 func cameraRTSPPath(camera config.Camera) string {
+	return cameraStreamSource(camera, livestream.ProfileMain)
+}
+
+// cameraStreamSource is the go2rtc source for one profile. The environment
+// placeholder supplies a credentialed camera's complete RTSP URL, so a camera
+// with credentials_ref keeps that one URL for both keys until the secrets
+// interface carries one URL per profile. Without a credential reference the
+// profile path is rendered directly and a profile path takes precedence.
+func cameraStreamSource(camera config.Camera, profile string) string {
 	if camera.CredentialsRef != nil && strings.TrimSpace(*camera.CredentialsRef) != "" {
 		return "{" + FrigateRTSPEnvName(camera.ID) + "}"
 	}
-	return directRTSPURL(camera)
+	return directRTSPURL(camera, camera.StreamPath(profile))
 }
 
 func frigateDetectorDevice(defaults frigateDetectorDefaults, hardwareDevice string) string {
@@ -589,8 +597,8 @@ func frigateDetectorDevice(defaults frigateDetectorDefaults, hardwareDevice stri
 	return defaults.Device
 }
 
-func directRTSPURL(camera config.Camera) string {
-	return fmt.Sprintf("rtsp://%s:%d%s", camera.Address, camera.RTSPPortValue(), camera.RTSPPathValue())
+func directRTSPURL(camera config.Camera, path string) string {
+	return fmt.Sprintf("rtsp://%s:%d%s", camera.Address, camera.RTSPPortValue(), path)
 }
 
 type frigateComposeFile struct {

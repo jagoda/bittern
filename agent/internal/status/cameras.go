@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"bittern.invalid/agent/internal/config"
+	"bittern.invalid/agent/internal/render"
 )
 
 const cameraHealthSchema = 1
@@ -52,21 +53,26 @@ type CameraTimeSection struct {
 // from appliance.yaml and the last camera health check, never from a live call
 // to the camera on every page render.
 type CameraSection struct {
-	ID         string            `json:"id"`
-	Name       string            `json:"name"`
-	Address    string            `json:"address"`
-	MAC        string            `json:"mac,omitempty"`
-	Vendor     string            `json:"vendor,omitempty"`
-	Model      string            `json:"model,omitempty"`
-	Enabled    bool              `json:"enabled"`
-	Stream     SectionState      `json:"stream"`
-	Snapshot   SectionState      `json:"snapshot"`
-	Recording  SectionState      `json:"recording"`
-	Time       CameraTimeSection `json:"time"`
-	LastSeen   *time.Time        `json:"last_seen"`
-	Detail     string            `json:"detail"`
-	SnapshotAt *time.Time        `json:"snapshot_at,omitempty"`
-	Bytes      int               `json:"snapshot_bytes,omitempty"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Address   string            `json:"address"`
+	MAC       string            `json:"mac,omitempty"`
+	Vendor    string            `json:"vendor,omitempty"`
+	Model     string            `json:"model,omitempty"`
+	Enabled   bool              `json:"enabled"`
+	Stream    SectionState      `json:"stream"`
+	Snapshot  SectionState      `json:"snapshot"`
+	Recording SectionState      `json:"recording"`
+	Time      CameraTimeSection `json:"time"`
+	// DistinctQualities names the live qualities that render to different
+	// streams. Main is always present; sub is present only when it is a
+	// different stream, so the UI can say one stream instead of offering a
+	// false choice.
+	DistinctQualities []string   `json:"distinct_qualities"`
+	LastSeen          *time.Time `json:"last_seen"`
+	Detail            string     `json:"detail"`
+	SnapshotAt        *time.Time `json:"snapshot_at,omitempty"`
+	Bytes             int        `json:"snapshot_bytes,omitempty"`
 }
 
 // CamerasSection reports the managed camera list. The state is unknown when no
@@ -242,13 +248,14 @@ func (b *Builder) buildCameras(cfg *config.Config, frigate FrigateSection) Camer
 	failed := false
 	for _, camera := range cfg.Cameras {
 		entry := CameraSection{
-			ID:        camera.ID,
-			Name:      camera.Name,
-			Address:   camera.Address,
-			Enabled:   camera.IsEnabled(),
-			Stream:    SectionUnknown,
-			Snapshot:  SectionUnknown,
-			Recording: SectionUnknown,
+			ID:                camera.ID,
+			Name:              camera.Name,
+			Address:           camera.Address,
+			Enabled:           camera.IsEnabled(),
+			Stream:            SectionUnknown,
+			Snapshot:          SectionUnknown,
+			Recording:         SectionUnknown,
+			DistinctQualities: render.DistinctLiveQualities(camera),
 			Time: CameraTimeSection{
 				State:  CameraTimeNeverSynchronised,
 				Detail: "Bittern has not set this camera's clock yet.",

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -53,6 +54,122 @@ func liveProxyServer(t *testing.T, upstream string) (string, *http.Client) {
 	return server.URL, client
 }
 
+func writeProfileCameraFixture(t *testing.T) string {
+	t.Helper()
+	configPath := writeApplierFixture(t)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := `cameras:
+  - id: front_door
+    name: Front door
+    address: 10.77.0.20
+    rtsp_port: 554
+    rtsp_path: /stream1
+    profiles:
+      main:
+        profile_token: Profile_1
+        rtsp_path: /main
+        width: 1920
+        height: 1080
+        codec: h264
+      sub:
+        profile_token: Profile_2
+        rtsp_path: /sub
+        width: 640
+        height: 360
+        codec: h264
+`
+	updated := strings.Replace(string(data), "cameras: []\n", replacement, 1)
+	if err := os.WriteFile(configPath, []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return configPath
+}
+
+func TestLiveMediaProxyResolvesEachQuality(t *testing.T) {
+	var gotSource string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSource = r.URL.Query().Get("src")
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer upstream.Close()
+	configPath := writeProfileCameraFixture(t)
+	server, client := newTestServer(t, Options{
+		ConfigPath:  configPath,
+		Go2RTCURL:   upstream.URL,
+		MockPreview: true,
+	})
+	for quality, want := range map[string]string{"main": "front_door_main", "sub": "front_door_sub"} {
+		response, err := client.Get(server.URL + "/ui/live/media/front_door/" + quality + "/stream.m3u8")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status %d body %q", quality, response.StatusCode, body)
+		}
+		if gotSource != want {
+			t.Fatalf("%s: go2rtc src = %q, want %q", quality, gotSource, want)
+		}
+	}
+}
+
+func TestLiveMediaProxyResolvesSubWithoutProfileToMain(t *testing.T) {
+	var gotSource string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSource = r.URL.Query().Get("src")
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer upstream.Close()
+	configPath, secretsPath := writeCameraFixture(t)
+	server, client := newTestServer(t, Options{
+		ConfigPath:  configPath,
+		SecretsPath: secretsPath,
+		Go2RTCURL:   upstream.URL,
+		MockPreview: true,
+	})
+	response, err := client.Get(server.URL + "/ui/live/media/front_door/sub/stream.m3u8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("sub request status = %d body %q, want the main stream", response.StatusCode, body)
+	}
+	if gotSource != "front_door_main" {
+		t.Fatalf("go2rtc src = %q, want front_door_main", gotSource)
+	}
+}
+
+func TestLiveMediaProxyRefusesAnUnknownQuality(t *testing.T) {
+	var hits int32
+	upstream := liveTestUpstream(t, &hits, nil, nil, nil, nil)
+	configPath := writeProfileCameraFixture(t)
+	server, client := newTestServer(t, Options{
+		ConfigPath:  configPath,
+		Go2RTCURL:   upstream.URL,
+		MockPreview: true,
+	})
+	for _, quality := range []string{"side", "Main", "main%2Fsub"} {
+		response, err := client.Get(server.URL + "/ui/live/media/front_door/" + quality + "/stream.m3u8")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		response.Body.Close()
+		if response.StatusCode < 400 {
+			t.Fatalf("quality %q: status %d, want a refusal", quality, response.StatusCode)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("refused requests reached the upstream %d times", hits)
+	}
+}
+
 func TestLiveMediaProxyAllowsOnlyNamedEndpoints(t *testing.T) {
 	var hits int32
 	var gotPath, gotQuery, gotCookie, gotAuth string
@@ -65,7 +182,7 @@ func TestLiveMediaProxyAllowsOnlyNamedEndpoints(t *testing.T) {
 		wantQuery string
 	}{
 		{"/ui/live/media/front_door/main/stream.m3u8", "/api/stream.m3u8", "src=front_door_main"},
-		{"/ui/live/media/front_door/sub/stream.m3u8", "/api/stream.m3u8", "src=front_door_sub"},
+		{"/ui/live/media/front_door/sub/stream.m3u8", "/api/stream.m3u8", "src=front_door_main"},
 		{"/ui/live/media/front_door/main/hls/playlist.m3u8?id=AbCd1234", "/api/hls/playlist.m3u8", "id=AbCd1234"},
 		{"/ui/live/media/front_door/main/hls/init.mp4?id=AbCd1234", "/api/hls/init.mp4", "id=AbCd1234"},
 		{"/ui/live/media/front_door/main/hls/segment.m4s?id=AbCd1234&n=12", "/api/hls/segment.m4s", "id=AbCd1234&n=12"},

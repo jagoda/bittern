@@ -169,7 +169,7 @@ On a fresh install, `bittern first-boot` runs as a root oneshot after local file
 `bitternd`. It detects hardware, reuses or generates identity and secrets, creates the TLS
 certificate, writes a minimal `appliance.yaml`, renders and applies the first generation, and writes
 `<state-root>/first-boot.json` only after commit. A missing marker after power loss runs the same
-idempotent path again. With schema version 2, first boot writes the detected NIC match, detector, and
+idempotent path again. With schema version 3, first boot writes the detected NIC match, detector, and
 video decode fields into `appliance.yaml`; the renderer owns `10-lan0.link` and `10-cam0.link` when a
 match is configured.
 

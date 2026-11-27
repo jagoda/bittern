@@ -50,6 +50,11 @@ var goldenCases = []goldenCase{
 		expectedDir: "tests/render/no-cameras/expected",
 	},
 	{
+		name:        "profiles",
+		configPath:  "tests/render/profiles/appliance.yaml",
+		expectedDir: "tests/render/profiles/expected",
+	},
+	{
 		name:        "overlap",
 		configPath:  "tests/render/overlap/appliance.yaml",
 		expectedDir: "tests/render/overlap/expected",

@@ -1,6 +1,6 @@
 # Validator contract
 
-This document defines what "valid `appliance.yaml`" means for schema version 2. The JSON Schema is
+This document defines what "valid `appliance.yaml`" means for schema version 3. The JSON Schema is
 the structural contract. The reference validator in `tests/checks/validate_config.py` implements the
 structural rules and the semantic rules that JSON Schema cannot express, and is the executable
 example for the agent and renderer that come later.
@@ -80,8 +80,8 @@ Structural validation runs first. If any structural error exists, semantic check
 invalid type does not produce a pile of follow-on errors. Semantic checks run only on a structurally
 valid document.
 
-A version 1 document is migrated before either validator runs structural checks. A version 2
-document is validated as written. A missing or unsupported version is not migrated.
+A version 1 or version 2 document is migrated before either validator runs structural checks. A
+version 3 document is validated as written. A missing or unsupported version is not migrated.
 
 ## Structural rules
 
@@ -99,6 +99,7 @@ These rules come from `schema/appliance.schema.json`, draft 2020-12. The schema 
 | `schema.format` | `format` | value | An IPv4 address is malformed |
 | `schema.minimum`, `schema.maximum` | numeric bounds | value | A number is outside its permitted range |
 | `schema.oneOf` | `oneOf` | containing object | A match sets both or neither of `mac` and `pci`, or a drive selector sets more than one or no selector |
+| `schema.not` | `not` | value | A profile path contains a scheme separator such as `://` |
 
 The schema also fixes the top-level sections: `schema_version`, `identity`, `network`, `cameras`,
 `storage`, `updates`, and `privacy`. `hardware` is optional. Missing required sections are
@@ -138,6 +139,23 @@ MAC renders a `dhcp-host` reservation. Without a MAC the existing
 The storage check normalizes the path before comparing it. A path such as
 `/var/lib/bittern/media/../../../etc` is rejected as an OS-drive path, not accepted because it starts
 with the media directory.
+
+### Camera profiles
+
+Schema version 3 adds an optional `cameras[].profiles` object with `main` and `sub` members. Each
+member has a required `profile_token` and `rtsp_path`, and optional `snapshot_path`, `width`,
+`height` and `codec`. The profile path is a path beginning with `/`, may include a query, is capped
+at 2048 characters, and must not contain `://` or `@`. The schema rejects anything else. An absent
+`profiles` object is valid and means the camera-level `rtsp_path` is the only stream. An absent
+`sub` is valid and means the main stream is the only stream. The renderer emits two go2rtc keys per
+camera; when there is one stream both keys point at it.
+
+A profile stores no host, userinfo, credential or complete URI. `profile_token` is an opaque ONVIF
+value, capped at 128 characters and never used as a URL. Width and height are the values the camera
+reports, not values Bittern assumes. Codec is informational; H.264 remains the only supported live
+codec. A camera that uses `credentials_ref` renders its one secret URL under both go2rtc keys until
+the secret interface carries one URL per profile, so status reports one distinct quality for that
+camera rather than claiming a substream.
 
 ## Credentials and the secrets boundary
 
@@ -186,9 +204,10 @@ id, secret key, and env var name. `render.FrigateCameraEnvPath` names the genera
 
 ## Migration contract
 
-Schema version 2 is current. The supported path is version 1 to version 2. A version 1 document is
-migrated before validation. A version 2 document is left unchanged. A missing or unsupported version
-is rejected with the version path and is never guessed.
+Schema version 3 is current. The supported path is version 1 to version 2, then version 2 to
+version 3. A version 1 or version 2 document is migrated before validation. A version 3 document is
+left unchanged. A missing or unsupported version is rejected with the version path and is never
+guessed.
 
 A migration is a pure function from one schema version to the next:
 
@@ -218,10 +237,22 @@ The function has these properties:
 | Recording member | Move `storage.recording.device_role` into one `storage.recording.drives` entry as `device_role` |
 | Mount-point-only recording | Keep `storage.recording.mount_point` and set `storage.recording.drives` to `[]` |
 | Everything else | Preserve unchanged, including cameras, updates, privacy, and any unknown keys so validation can reject them |
-| Already version 2 | Return the document unchanged |
+| Already version 2 | Return the document unchanged at this step; the chain then runs v2 to v3 |
 
 The migration does not invent a NIC match or hardware detector. Those fields are optional, and an
 absent match keeps the logical interface name as the development and POC fallback.
+
+### Version 2 to version 3
+
+| Change | Rule |
+| --- | --- |
+| Version | Set `schema_version` to `3` |
+| Camera profiles | No `profiles` key is added; a version 2 camera keeps the single configured path |
+| Everything else | Preserve unchanged, including cameras, storage, updates, privacy, and any unknown keys so validation can reject them |
+| Already version 3 | Return the document unchanged |
+
+The migration is deterministic, performs no I/O, and does not mutate its input. It is a version-only
+step. Profiles are collected at adoption, not by the migration.
 
 Every migration ships with a test that proves all of the following:
 
@@ -238,11 +269,14 @@ Every migration ships with a test that proves all of the following:
 
 | Path | Purpose |
 | --- | --- |
-| `schema/appliance.schema.json` | Current schema, version 2 |
+| `schema/appliance.schema.json` | Current schema, version 3 |
 | `schema/versions/v1/appliance.schema.json` | Frozen version 1 schema kept for old documents and migration inputs |
+| `schema/versions/v2/appliance.schema.json` | Frozen version 2 schema kept for old documents and migration inputs |
 | `schema/migrations/README.md` | What changed and why |
 | `schema/migrations/v1_to_v2/input/*.yaml` | Valid version 1 fixtures |
 | `schema/migrations/v1_to_v2/expected/*.yaml` | Exact expected version 2 documents |
+| `schema/migrations/v2_to_v3/input/*.yaml` | Valid version 2 fixtures with a camera, credentials, and no cameras |
+| `schema/migrations/v2_to_v3/expected/*.yaml` | Exact expected version 3 documents |
 | `agent/internal/config/migration_test.go` | Pure-function, golden, no-mutation, and old-schema tests in Go |
 | `tests/checks/validate_config.py` | Python reference implementation of the same migration |
 

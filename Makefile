@@ -40,7 +40,7 @@ KEY_ID ?= $(shell sha256sum $(KEY_PUB) | cut -d' ' -f1)
 OS_GENERATION_MIN ?= 1
 OS_GENERATION_MAX ?= 1
 SCHEMA_MIN ?= 1
-SCHEMA_MAX ?= 2
+SCHEMA_MAX ?= 3
 UPDATER_MIN ?= 1
 
 .PHONY: help check schema link-check style-check design-check bundle-check cleanup-test storage-test unit-enablement-check version-check release-preflight qemu-test qemu-firstboot qemu-firstboot-stock qemu-firstboot-clean qemu-firstboot-late-camera qemu-adoption qemu-update qemu-stop assets test render detect render-poc status ui-test ui-browser-check bitternd bittern-release apply-test first-boot-poc beta-payload

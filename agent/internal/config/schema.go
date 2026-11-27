@@ -12,7 +12,7 @@ import (
 	"bittern.invalid/agent/internal/assets"
 )
 
-const schemaURL = "urn:bittern:schema:appliance:2"
+const schemaURL = "urn:bittern:schema:appliance:3"
 
 var loadSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
 	var document any
@@ -73,6 +73,11 @@ func flatten(validationErr *jsonschema.ValidationError, errors *[]Error) {
 		return
 	case *kind.OneOf:
 		*errors = append(*errors, errorAt(validationErr.InstanceLocation, "schema.oneOf", validationErr.Error()))
+		return
+	case *kind.Not:
+		// kind.Not has no keyword path, but the reference validator reports
+		// schema.not. Keep the rule names identical.
+		*errors = append(*errors, errorAt(validationErr.InstanceLocation, "schema.not", validationErr.Error()))
 		return
 	}
 

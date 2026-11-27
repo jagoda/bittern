@@ -323,7 +323,7 @@ func writeTestConfig(path, channel string, camera bool) error {
 	if camera {
 		cameras = "cameras:\n  - id: front_door\n    name: Front door\n    address: 10.77.0.20\n    credentials_ref: cameras.front_door\n"
 	}
-	document := fmt.Sprintf(`schema_version: 2
+	document := fmt.Sprintf(`schema_version: 3
 
 identity:
   hostname: bittern
@@ -403,7 +403,7 @@ func (e *testEnv) writeBundle(t *testing.T, dir string, spec bundleSpec) (*relea
 			OSGenerationMin: 1,
 			OSGenerationMax: 2,
 			SchemaMin:       1,
-			SchemaMax:       2,
+			SchemaMax:       3,
 			UpdaterMin:      1,
 		},
 		Payload: release.Payload{Filename: "bittern-app.tar.gz"},

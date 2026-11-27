@@ -1,5 +1,5 @@
 {
-  "description": "Expected outcomes for the reference appliance.yaml validator. Paths are relative to this file. Version 1 documents are migrated to version 2 before validation.",
+  "description": "Expected outcomes for the reference appliance.yaml validator. Paths are relative to this file. Version 1 and version 2 documents are migrated to version 3 before validation.",
   "cases": [
     {
       "name": "four-camera example",
@@ -20,6 +20,46 @@
       "name": "valid version 2 document",
       "file": "fixtures/valid-v2.yaml",
       "expected": []
+    },
+    {
+      "name": "valid version 3 document without profiles",
+      "file": "fixtures/valid-v3-no-profiles.yaml",
+      "expected": []
+    },
+    {
+      "name": "valid version 3 document with camera profiles",
+      "file": "fixtures/valid-v3-profiles.yaml",
+      "expected": []
+    },
+    {
+      "name": "profile path contains userinfo",
+      "file": "fixtures/profile-path-at.yaml",
+      "expected": [
+        {
+          "path": "$.cameras[0].profiles.sub.rtsp_path",
+          "rule": "schema.pattern"
+        }
+      ]
+    },
+    {
+      "name": "profile path contains a scheme separator",
+      "file": "fixtures/profile-path-uri.yaml",
+      "expected": [
+        {
+          "path": "$.cameras[0].profiles.main.rtsp_path",
+          "rule": "schema.not"
+        }
+      ]
+    },
+    {
+      "name": "profile without a token",
+      "file": "fixtures/profile-missing-token.yaml",
+      "expected": [
+        {
+          "path": "$.cameras[0].profiles.main.profile_token",
+          "rule": "schema.required"
+        }
+      ]
     },
     {
       "name": "match sets both mac and pci",

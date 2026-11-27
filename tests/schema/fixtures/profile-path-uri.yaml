@@ -1,0 +1,68 @@
+schema_version: 3
+
+identity:
+  hostname: bittern
+  timezone: UTC
+
+network:
+  lan0:
+    mode: dhcp
+    subnet: 192.168.1.0/24
+    match:
+      mac: aa:bb:cc:dd:ee:01
+  cam0:
+    mode: static
+    address: 10.77.0.1/24
+    match:
+      pci: "0000:02:00.0"
+    dhcp:
+      pool_start: 10.77.0.50
+      pool_end: 10.77.0.199
+      reservation_start: 10.77.0.10
+      reservation_end: 10.77.0.49
+      gateway: 10.77.0.1
+      ntp_server: 10.77.0.1
+
+cameras:
+  - id: driveway
+    name: Driveway
+    address: 10.77.0.20
+    rtsp_port: 554
+    rtsp_path: /stream1
+    profiles:
+      main:
+        profile_token: Profile_1
+        rtsp_path: /Streaming/Channels/101?next=rtsp://camera
+        snapshot_path: /onvif-http/snapshot?Profile_1
+        width: 1920
+        height: 1080
+        codec: h264
+      sub:
+        profile_token: Profile_2
+        rtsp_path: /Streaming/Channels/102
+        width: 640
+        height: 360
+        codec: h264
+
+storage:
+  recording:
+    mount_point: /var/lib/bittern/media
+    drives:
+      - by_id: /dev/disk/by-id/ata-BITTERN-01
+      - serial: BITTERN-DISK-02
+    retention_days: 14
+    free_space_reserve_gb: 50
+
+hardware:
+  detector:
+    type: hailo8
+    device: "0000:03:00.0"
+  video_decode:
+    acceleration: qsv
+
+updates:
+  channel: stable
+
+privacy:
+  tailscale:
+    enabled: false

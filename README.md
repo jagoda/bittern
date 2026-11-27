@@ -21,7 +21,7 @@ updatable, recoverable, and safe to hand to someone who does not want to adminis
 
 ## Status
 
-Pre-implementation. This repository contains the design documentation, schema version 2, the
+Pre-implementation. This repository contains the design documentation, schema version 3, the
 reference validator, and the first product code: the Go configuration loader and deterministic
 renderer for networkd, nftables, dnsmasq, chrony, Frigate config, compose, and the Frigate unit,
 read-only hardware detection, the resumable apply and first-boot path, the status daemon, and the

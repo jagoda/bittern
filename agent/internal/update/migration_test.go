@@ -49,13 +49,13 @@ func TestUpdateWritesPendingMigrationRecord(t *testing.T) {
 	if len(seen) != 1 {
 		t.Fatalf("pending migration records before apply-config = %d, want 1", len(seen))
 	}
-	if seen[0].From != 1 || seen[0].To != 2 || seen[0].Target != PendingTargetAppliance {
-		t.Fatalf("pending migration = %+v, want schema 1 to 2 for appliance.yaml", seen[0])
+	if seen[0].From != 1 || seen[0].To != 3 || seen[0].Target != PendingTargetAppliance {
+		t.Fatalf("pending migration = %+v, want schema 1 to 3 for appliance.yaml", seen[0])
 	}
 	if seen[0].Generation != 1 {
 		t.Fatalf("pending migration generation = %d, want 1", seen[0].Generation)
 	}
-	if seen[0].MigrationID != pendingMigrationID(1, 2) {
+	if seen[0].MigrationID != pendingMigrationID(1, 3) {
 		t.Fatalf("pending migration id = %q", seen[0].MigrationID)
 	}
 	if mode != 0o600 {
@@ -75,8 +75,8 @@ func TestUpdateMigrationPersistedAfterCommit(t *testing.T) {
 	if len(validationErrors) > 0 {
 		t.Fatalf("persisted config is invalid: %v", validationErrors[0])
 	}
-	if cfg.SchemaVersion != 2 {
-		t.Fatalf("live schema version = %d, want 2", cfg.SchemaVersion)
+	if cfg.SchemaVersion != 3 {
+		t.Fatalf("live schema version = %d, want 3", cfg.SchemaVersion)
 	}
 	if !strings.Contains(string(live), "drives:") {
 		t.Fatalf("live config is not the migrated document:\n%s", live)
@@ -92,11 +92,11 @@ func TestUpdateMigrationPersistedAfterCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Schema.Before != 1 || record.Schema.After != 2 {
-		t.Fatalf("history schema = %+v, want 1 to 2", record.Schema)
+	if record.Schema.Before != 1 || record.Schema.After != 3 {
+		t.Fatalf("history schema = %+v, want 1 to 3", record.Schema)
 	}
-	if record.Migration.Result != MigrationApplied || record.Migration.From != 1 || record.Migration.To != 2 {
-		t.Fatalf("history migration = %+v, want applied 1 to 2", record.Migration)
+	if record.Migration.Result != MigrationApplied || record.Migration.From != 1 || record.Migration.To != 3 {
+		t.Fatalf("history migration = %+v, want applied 1 to 3", record.Migration)
 	}
 	if record.Apply.Result != "applied" {
 		t.Fatalf("history apply = %+v, want applied", record.Apply)
@@ -302,11 +302,11 @@ func TestUpdateMigrationRefusesChangedLiveConfig(t *testing.T) {
 	record := PendingMigration{
 		SchemaVersion:  pendingMigrationSchemaVersion,
 		OperationID:    "op-g000001-deadbeef",
-		MigrationID:    pendingMigrationID(1, 2),
+		MigrationID:    pendingMigrationID(1, 3),
 		Target:         PendingTargetAppliance,
 		Generation:     1,
 		From:           1,
-		To:             2,
+		To:             3,
 		SourceSHA256:   sha256Hex(original),
 		DocumentSHA256: sha256Hex(migrated.Document),
 		Document:       string(migrated.Document),
