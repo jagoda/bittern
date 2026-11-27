@@ -4,7 +4,8 @@
 - Status: active
 - Process: [findings and principles](../notes/2026-11-15-findings-and-principles-process.md)
 - Rules: [principles](../principles.md)
-- Registers: [defect classes](defect-classes.md), [field parity](field-parity.md)
+- Registers: [defect classes](defect-classes.md), [field parity](field-parity.md),
+  [ONVIF compatibility](onvif-compatibility.md)
 
 Engineering quality in Bittern means a defect is closed when its class is named and a check would
 catch the next instance, not when the reported instance is fixed. The network path produced seven

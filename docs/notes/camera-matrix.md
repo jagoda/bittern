@@ -7,8 +7,14 @@ version.
 
 Related: [ADR 0024](../adr/0024-onvif-discovery-levels.md), [OQ-10](../open-questions.md),
 [BIT-008](../plan/implementation-plan.md#bit-008-camera-discovery-and-adoption-on-cam0),
-[Frigate assessment](../research/frigate-assessment.md), and
+[Frigate assessment](../research/frigate-assessment.md),
+[the ONVIF compatibility matrix](../engineering/onvif-compatibility.md), and
 [ADR 0023](../adr/0023-camera-native-ui-proxy.md) for camera web UI rows.
+
+The ONVIF protocol and feature detail lives in the
+[engineering compatibility matrix](../engineering/onvif-compatibility.md). This file remains the
+OQ-10 adoption and discovery register; link a row there instead of duplicating its service, profile
+and PTZ evidence.
 
 ## Rules
 
