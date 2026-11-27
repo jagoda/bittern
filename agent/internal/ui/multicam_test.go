@@ -98,14 +98,15 @@ func TestTwoCamerasKeepTheirOwnCredentials(t *testing.T) {
 	if len(stored.Cameras) != 2 {
 		t.Fatalf("cameras in appliance.yaml = %d, want 2", len(stored.Cameras))
 	}
-	for index, want := range []string{"cameras.camera_1.rtsp_url", "cameras.camera_2.rtsp_url"} {
+	for index, want := range []string{"cameras.camera_1", "cameras.camera_2"} {
 		camera := stored.Cameras[index]
 		if camera.CredentialsRef == nil || *camera.CredentialsRef != want {
 			t.Fatalf("camera %q credentials_ref = %v, want %s", camera.ID, camera.CredentialsRef, want)
 		}
 	}
 
-	// secrets.yaml holds exactly one entry per camera, each with its own URL.
+	// secrets.yaml holds exactly one entry per camera, each with its own
+	// sign-in and no complete URL.
 	secretsData, err := os.ReadFile(secretsPath)
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +114,8 @@ func TestTwoCamerasKeepTheirOwnCredentials(t *testing.T) {
 	var document struct {
 		AdminPassword string `yaml:"admin_password"`
 		Cameras       map[string]struct {
-			RTSPURL string `yaml:"rtsp_url"`
+			Username string `yaml:"username"`
+			Password string `yaml:"password"`
 		} `yaml:"cameras"`
 	}
 	if err := yaml.Unmarshal(secretsData, &document); err != nil {
@@ -121,6 +123,9 @@ func TestTwoCamerasKeepTheirOwnCredentials(t *testing.T) {
 	}
 	if document.AdminPassword != "keep-me" {
 		t.Fatalf("the existing secret was not kept: %q", document.AdminPassword)
+	}
+	if strings.Contains(string(secretsData), "rtsp://") {
+		t.Fatalf("secrets.yaml still holds a complete URL: %s", secretsData)
 	}
 	wantSecrets := map[string]string{
 		"camera_1": request.CameraCredentials["camera_1"],
@@ -130,8 +135,16 @@ func TestTwoCamerasKeepTheirOwnCredentials(t *testing.T) {
 		t.Fatalf("secrets entries = %d, want %d: %s", len(document.Cameras), len(wantSecrets), secretsData)
 	}
 	for id, want := range wantSecrets {
-		if got := document.Cameras[id].RTSPURL; got != want {
-			t.Fatalf("secrets entry for %s = %q, want %q", id, got, want)
+		parsed, err := url.Parse(want)
+		if err != nil || parsed.User == nil {
+			t.Fatalf("test URL is not a credentialed URL: %q", want)
+		}
+		password, _ := parsed.User.Password()
+		if got := document.Cameras[id].Username; got != parsed.User.Username() {
+			t.Fatalf("secrets username for %s = %q, want %q", id, got, parsed.User.Username())
+		}
+		if got := document.Cameras[id].Password; got != password {
+			t.Fatalf("secrets password for %s does not match the request", id)
 		}
 	}
 	info, err := os.Stat(secretsPath)

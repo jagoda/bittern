@@ -1982,6 +1982,16 @@ reference device is a recent Axis PTZ.
   Treat the virtual camera and the broken implementation as protocol fixtures with their own tests,
   not as vendor rows. Cover profile enumeration, PTZ, events, fallback, and credential and SSRF
   redaction.
+
+**Status 2026-11-27.** The profile half landed. The client discovers services with `GetServices` and
+falls back to `GetCapabilities`, prefers Media2 over Media1, reads profiles with `GetProfiles`,
+`GetStreamUri`, `GetSnapshotUri`, and the encoder configuration, classifies by reported facts, and
+runs the HTTP Digest, WS-Security digest, optional separate account and HTTPS text ladder with the
+camera-clock timestamp. Adoption probes once, stores the schema version 3 profiles, records the
+capability and reason in status, and never fails. The secrets file now holds one account per camera
+and apply builds one URL per profile. PTZ, events, imaging, the profile picker, the quirk table and
+the hardware matrix row are still open. No real camera has run this path.
+
 **Acceptance.**
 - The services and profiles a camera advertises are enumerated and shown with their evidence, and each
   profile that maps to a use case is selectable for stream, snapshot, PTZ, and events.

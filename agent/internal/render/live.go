@@ -23,10 +23,10 @@ func LiveStreams(camera config.Camera) []LiveStream {
 	streams := make([]LiveStream, 0, len(profiles))
 	for _, profile := range profiles {
 		sourceProfile := profile
-		if profile == livestream.ProfileSub && !camera.HasProfile(livestream.ProfileSub) {
-			// An absent sub profile means the main stream is the only
-			// stream, so the sub key points at the main path rather than
-			// the camera-level fallback.
+		if profile == livestream.ProfileSub && !hasDistinctSubProfile(camera) {
+			// An absent sub profile, or a sub profile naming the main path,
+			// means the main stream is the only stream, so the sub key points
+			// at the main source rather than the camera-level fallback.
 			sourceProfile = livestream.ProfileMain
 		}
 		streams = append(streams, LiveStream{
@@ -46,7 +46,7 @@ func ResolveLiveStream(camera config.Camera, quality string) (LiveStream, bool) 
 		return LiveStream{}, false
 	}
 	streamProfile := quality
-	if quality == livestream.ProfileSub && !camera.HasProfile(livestream.ProfileSub) {
+	if quality == livestream.ProfileSub && !hasDistinctSubProfile(camera) {
 		streamProfile = livestream.ProfileMain
 	}
 	return LiveStream{

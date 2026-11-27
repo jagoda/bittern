@@ -91,6 +91,22 @@ type Credentials struct {
 	Password string
 }
 
+// AuthMethod is the ONVIF authentication scheme a client sends. HTTP Digest is
+// the Core baseline; WS-UsernameToken is the legacy Profile S scheme.
+type AuthMethod string
+
+const (
+	// AuthWSSEDigest is a WS-Security UsernameToken with a digest password and
+	// a camera-clock timestamp. It is the default.
+	AuthWSSEDigest AuthMethod = "wsse-digest"
+	// AuthHTTPDigest is HTTP Digest authentication. It has no timestamp, so it
+	// survives a camera whose clock is wrong.
+	AuthHTTPDigest AuthMethod = "http-digest"
+	// AuthWSSEText sends the password as text in the WS-Security header. It is
+	// only allowed over HTTPS and only with an explicit opt-in.
+	AuthWSSEText AuthMethod = "wsse-text"
+)
+
 // Valid reports whether a username is present. A camera with no sign-in can
 // still answer the unauthenticated time read; writes will report their own
 // refusal.

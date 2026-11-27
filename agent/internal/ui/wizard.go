@@ -767,10 +767,11 @@ func (h *handler) showApplyResult(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.render(w, r, http.StatusOK, "operation-result", pageData{
-		Title:     title,
-		Step:      resultStep(record),
-		Preview:   h.preview,
-		Operation: operationView(record, h.now(), false, timezone.Load(h.timezoneName())),
+		Title:          title,
+		Step:           resultStep(record),
+		Preview:        h.preview,
+		Operation:      operationView(record, h.now(), false, timezone.Load(h.timezoneName())),
+		ProfileNotices: h.profileNotices(),
 	})
 }
 
@@ -803,10 +804,11 @@ func (h *handler) showDone(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.render(w, r, http.StatusOK, "done", pageData{
-		Title:     title,
-		Step:      6,
-		Preview:   h.preview,
-		Snapshots: snapshots,
+		Title:          title,
+		Step:           6,
+		Preview:        h.preview,
+		Snapshots:      snapshots,
+		ProfileNotices: h.profileNotices(),
 	})
 }
 

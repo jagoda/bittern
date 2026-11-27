@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"bittern.invalid/agent/internal/cameraprofile"
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/render"
 )
@@ -49,21 +50,58 @@ type CameraTimeSection struct {
 	Detail             string          `json:"detail,omitempty"`
 }
 
+// Camera profile states. They are separate from the shared section states
+// because each needs a different owner action (ADR 0037, BIT-027).
+const (
+	CameraProfileOK               = "ok"
+	CameraProfileOneStream        = "one-stream"
+	CameraProfileONVIFDisabled    = "onvif-disabled"
+	CameraProfileSignInRejected   = "sign-in-rejected"
+	CameraProfileNoMediaService   = "no-media-service"
+	CameraProfileNoProfile        = "no-profile"
+	CameraProfileNoStream         = "no-stream"
+	CameraProfileUnreachable      = "unreachable"
+	CameraProfileClockUnavailable = "clock-unavailable"
+	CameraProfileMalformed        = "malformed"
+	CameraProfileNotProbed        = "not-probed"
+)
+
+// CameraProfileSection is the owner-facing result of the adoption probe. It
+// records capability and the reason for an absent sub profile. It never holds
+// a complete URI or a credential.
+type CameraProfileSection struct {
+	State        string     `json:"state"`
+	Detail       string     `json:"detail"`
+	Action       string     `json:"action,omitempty"`
+	MediaService string     `json:"media_service,omitempty"`
+	AuthMethod   string     `json:"auth_method,omitempty"`
+	Account      string     `json:"account,omitempty"`
+	ClockSource  string     `json:"clock_source,omitempty"`
+	MainToken    string     `json:"main_token,omitempty"`
+	SubToken     string     `json:"sub_token,omitempty"`
+	MainWidth    int        `json:"main_width,omitempty"`
+	MainHeight   int        `json:"main_height,omitempty"`
+	SubWidth     int        `json:"sub_width,omitempty"`
+	SubHeight    int        `json:"sub_height,omitempty"`
+	CollectedAt  *time.Time `json:"collected_at,omitempty"`
+}
+
 // CameraSection is one managed camera in the status document. It is assembled
 // from appliance.yaml and the last camera health check, never from a live call
 // to the camera on every page render.
 type CameraSection struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	Address   string            `json:"address"`
-	MAC       string            `json:"mac,omitempty"`
-	Vendor    string            `json:"vendor,omitempty"`
-	Model     string            `json:"model,omitempty"`
-	Enabled   bool              `json:"enabled"`
-	Stream    SectionState      `json:"stream"`
-	Snapshot  SectionState      `json:"snapshot"`
-	Recording SectionState      `json:"recording"`
-	Time      CameraTimeSection `json:"time"`
+	ID        string               `json:"id"`
+	Name      string               `json:"name"`
+	Address   string               `json:"address"`
+	MAC       string               `json:"mac,omitempty"`
+	Vendor    string               `json:"vendor,omitempty"`
+	Model     string               `json:"model,omitempty"`
+	Enabled   bool                 `json:"enabled"`
+	Stream    SectionState         `json:"stream"`
+	Snapshot  SectionState         `json:"snapshot"`
+	Recording SectionState         `json:"recording"`
+	Time      CameraTimeSection    `json:"time"`
+	Profiles  CameraProfileSection `json:"profiles"`
 	// DistinctQualities names the live qualities that render to different
 	// streams. Main is always present; sub is present only when it is a
 	// different stream, so the UI can say one stream instead of offering a
@@ -87,12 +125,33 @@ type CamerasSection struct {
 // time sync for one camera. It contains no credentials. The time fields are
 // derived state; they are never written into appliance.yaml.
 type CameraHealth struct {
-	Snapshot  SectionState      `json:"snapshot"`
-	CheckedAt *time.Time        `json:"checked_at,omitempty"`
-	Bytes     int               `json:"bytes,omitempty"`
-	Detail    string            `json:"detail,omitempty"`
-	LastSeen  *time.Time        `json:"last_seen,omitempty"`
-	Time      *CameraTimeHealth `json:"time,omitempty"`
+	Snapshot  SectionState         `json:"snapshot"`
+	CheckedAt *time.Time           `json:"checked_at,omitempty"`
+	Bytes     int                  `json:"bytes,omitempty"`
+	Detail    string               `json:"detail,omitempty"`
+	LastSeen  *time.Time           `json:"last_seen,omitempty"`
+	Time      *CameraTimeHealth    `json:"time,omitempty"`
+	Profiles  *CameraProfileHealth `json:"profiles,omitempty"`
+}
+
+// CameraProfileHealth is the cached adoption probe result for one camera. It
+// is derived state, never an appliance.yaml field, and it never contains a
+// credential or a complete URI.
+type CameraProfileHealth struct {
+	State        string     `json:"state"`
+	Detail       string     `json:"detail,omitempty"`
+	Action       string     `json:"action,omitempty"`
+	MediaService string     `json:"media_service,omitempty"`
+	AuthMethod   string     `json:"auth_method,omitempty"`
+	Account      string     `json:"account,omitempty"`
+	ClockSource  string     `json:"clock_source,omitempty"`
+	MainToken    string     `json:"main_token,omitempty"`
+	SubToken     string     `json:"sub_token,omitempty"`
+	MainWidth    int        `json:"main_width,omitempty"`
+	MainHeight   int        `json:"main_height,omitempty"`
+	SubWidth     int        `json:"sub_width,omitempty"`
+	SubHeight    int        `json:"sub_height,omitempty"`
+	CollectedAt  *time.Time `json:"collected_at,omitempty"`
 }
 
 // CameraTimeHealth is the cached capability and schedule for one camera. It is
@@ -260,7 +319,8 @@ func (b *Builder) buildCameras(cfg *config.Config, frigate FrigateSection) Camer
 				State:  CameraTimeNeverSynchronised,
 				Detail: "Bittern has not set this camera's clock yet.",
 			},
-			Detail: "No camera check has run since the last adoption or test.",
+			Profiles: cameraProfileSection(nil),
+			Detail:   "No camera check has run since the last adoption or test.",
 		}
 		if camera.MAC != nil {
 			entry.MAC = strings.ToLower(strings.TrimSpace(*camera.MAC))
@@ -285,6 +345,7 @@ func (b *Builder) buildCameras(cfg *config.Config, frigate FrigateSection) Camer
 			if result.Time != nil {
 				entry.Time = cameraTimeSection(*result.Time)
 			}
+			entry.Profiles = cameraProfileSection(result.Profiles)
 		}
 		if camera.IsEnabled() {
 			enabled++
@@ -364,4 +425,44 @@ func cameraTimeDefaultDetail(state CameraTimeState) string {
 	default:
 		return "Bittern has not set this camera's clock yet."
 	}
+}
+
+func cameraProfileSection(health *CameraProfileHealth) CameraProfileSection {
+	section := CameraProfileSection{State: CameraProfileNotProbed}
+	if health != nil {
+		section = CameraProfileSection{
+			State:        health.State,
+			Detail:       health.Detail,
+			Action:       health.Action,
+			MediaService: health.MediaService,
+			AuthMethod:   health.AuthMethod,
+			Account:      health.Account,
+			ClockSource:  health.ClockSource,
+			MainToken:    health.MainToken,
+			SubToken:     health.SubToken,
+			MainWidth:    health.MainWidth,
+			MainHeight:   health.MainHeight,
+			SubWidth:     health.SubWidth,
+			SubHeight:    health.SubHeight,
+			CollectedAt:  health.CollectedAt,
+		}
+	}
+	if section.State == "" {
+		section.State = CameraProfileNotProbed
+	}
+	if section.Detail == "" {
+		section.Detail = cameraProfileDefaultDetail(section.State)
+	}
+	if section.Action == "" {
+		section.Action = cameraProfileDefaultAction(section.State)
+	}
+	return section
+}
+
+func cameraProfileDefaultDetail(state string) string {
+	return cameraprofile.StateDetail(cameraprofile.State(state))
+}
+
+func cameraProfileDefaultAction(state string) string {
+	return cameraprofile.StateAction(cameraprofile.State(state))
 }

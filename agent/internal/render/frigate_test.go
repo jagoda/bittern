@@ -315,3 +315,47 @@ func TestFrigateComposeUsesTheLocalImage(t *testing.T) {
 		}
 	}
 }
+
+func TestFrigateCameraSecretsCarryOneAccountForTwoProfiles(t *testing.T) {
+	cfg, validationErrors := config.Load(filepath.Join(repoRoot(t), "tests/render/profiles/appliance.yaml"))
+	if len(validationErrors) != 0 {
+		t.Fatalf("fixture did not validate: %v", validationErrors)
+	}
+	secrets := FrigateCameraSecrets(cfg)
+	if len(secrets) != 3 {
+		t.Fatalf("mappings = %+v, want main and sub for driveway and main for side_gate", secrets)
+	}
+	byEnv := map[string]FrigateCameraSecret{}
+	for _, mapping := range secrets {
+		byEnv[mapping.EnvName] = mapping
+	}
+	main := byEnv["FRIGATE_CAMERA_DRIVEWAY_RTSP_URL"]
+	sub := byEnv["FRIGATE_CAMERA_DRIVEWAY_SUB_RTSP_URL"]
+	if main.SecretKey != sub.SecretKey || main.SecretKey != "cameras.driveway" {
+		t.Fatalf("the two profiles do not share one account: %+v %+v", main, sub)
+	}
+	if main.Profile != "main" || sub.Profile != "sub" {
+		t.Fatalf("profile roles = %q and %q", main.Profile, sub.Profile)
+	}
+	side := byEnv["FRIGATE_CAMERA_SIDE_GATE_RTSP_URL"]
+	if side.SecretKey != "cameras.side_gate" {
+		t.Fatalf("side gate mapping = %+v", side)
+	}
+	if _, ok := byEnv["FRIGATE_CAMERA_SIDE_GATE_SUB_RTSP_URL"]; ok {
+		t.Fatal("a camera with no sub profile emitted a sub URL")
+	}
+
+	driveway := cfg.Cameras[0]
+	mainURL := CameraStreamURL(driveway, "main", "viewer", "s3cret")
+	subURL := CameraStreamURL(driveway, "sub", "viewer", "s3cret")
+	if mainURL == subURL {
+		t.Fatalf("both profiles produced the same URL: %s", mainURL)
+	}
+	if !strings.Contains(mainURL, "viewer:s3cret@") || !strings.Contains(subURL, "viewer:s3cret@") {
+		t.Fatalf("built URLs do not carry the account: %q %q", mainURL, subURL)
+	}
+	if !strings.HasSuffix(mainURL, "/Streaming/Channels/101?transport=tcp") ||
+		!strings.HasSuffix(subURL, "/Streaming/Channels/102") {
+		t.Fatalf("built URLs do not carry their own paths: %q %q", mainURL, subURL)
+	}
+}

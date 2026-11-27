@@ -34,6 +34,7 @@ type DeviceOptions struct {
 	MaxOperations    int
 	HTTPClient       *http.Client
 	Now              func() time.Time
+	AuthMethod       AuthMethod
 }
 
 // Device is a camera's ONVIF Device service client. It is safe for one
@@ -50,6 +51,9 @@ type Device struct {
 	now           func() time.Time
 	cameraClock   time.Time
 	cameraReadAt  time.Time
+	auth          AuthMethod
+	httpDate      time.Time
+	httpDateAt    time.Time
 }
 
 // NewDevice derives the standard device service endpoints from the stored
@@ -95,6 +99,10 @@ func newDevice(endpoints []*url.URL, allowed netip.Addr, credentials Credentials
 	if maxOperations <= 0 {
 		maxOperations = defaultMaxOperations
 	}
+	auth := options.AuthMethod
+	if auth == "" {
+		auth = AuthWSSEDigest
+	}
 	client := options.HTTPClient
 	if client == nil {
 		transport := &http.Transport{
@@ -126,7 +134,55 @@ func newDevice(endpoints []*url.URL, allowed netip.Addr, credentials Credentials
 		timeout:       timeout,
 		maxOperations: maxOperations,
 		now:           now,
+		auth:          auth,
 	}, nil
+}
+
+// SetCredentials replaces the account used by authenticated operations. The
+// probe ladder tries the camera's RTSP account first and the optional ONVIF
+// account second.
+func (d *Device) SetCredentials(credentials Credentials) {
+	if d == nil {
+		return
+	}
+	d.credentials = credentials
+}
+
+// SetAuthMethod changes the authentication scheme for subsequent operations.
+func (d *Device) SetAuthMethod(method AuthMethod) {
+	if d == nil {
+		return
+	}
+	d.auth = method
+}
+
+// AuthMethod reports the current scheme.
+func (d *Device) AuthMethod() AuthMethod {
+	if d == nil {
+		return ""
+	}
+	return d.auth
+}
+
+// ActiveEndpoint returns the selected service endpoint. It never contains user
+// information because the validator refuses it.
+func (d *Device) ActiveEndpoint() string {
+	if d == nil {
+		return ""
+	}
+	return endpointLabel(d.active)
+}
+
+// HTTPDate returns the camera's HTTP Date header when one was observed. It is
+// the last clock fallback before the appliance clock.
+func (d *Device) HTTPDate() time.Time {
+	if d == nil || d.httpDate.IsZero() {
+		return time.Time{}
+	}
+	if d.httpDateAt.IsZero() {
+		return d.httpDate
+	}
+	return d.httpDate.Add(d.now().Sub(d.httpDateAt))
 }
 
 // Clock reads the camera time without authentication and selects the first
@@ -295,10 +351,16 @@ func (d *Device) call(ctx context.Context, operation, body string, authenticated
 }
 
 func (d *Device) callAt(ctx context.Context, endpoint *url.URL, operation, body string, authenticated bool) ([]byte, error) {
+	return d.callAtAction(ctx, endpoint, operation, deviceAction+operationName(operation), body, authenticated)
+}
+
+// callAtAction sends one SOAP request with an explicit operation action. Media
+// service operations use their own namespace, so the Device service action is
+// not assumed for them.
+func (d *Device) callAtAction(ctx context.Context, endpoint *url.URL, operation, action, body string, authenticated bool) ([]byte, error) {
 	if d.operations >= d.maxOperations {
 		return nil, operationError(KindRefused, operation, "the camera did not answer within the operation limit")
 	}
-	d.operations++
 	// Re-validate immediately before connecting. A stored or discovered URL is
 	// never trusted just because it was checked earlier.
 	validated, err := ValidateEndpoint(endpoint.String(), d.allowed)
@@ -308,12 +370,24 @@ func (d *Device) callAt(ctx context.Context, endpoint *url.URL, operation, body 
 	header := ""
 	if authenticated && d.credentials.Valid() {
 		created := d.authenticationTime()
-		header, err = securityHeader(d.credentials, created)
+		switch d.auth {
+		case AuthWSSEText:
+			if validated.Scheme != "https" {
+				return nil, operationError(KindRefused, operation, "a text sign-in is refused over HTTP")
+			}
+			header, err = securityHeaderText(d.credentials, created)
+		case AuthHTTPDigest:
+			// The first request carries no Authorization header. A 401 with a
+			// Digest challenge is scheme negotiation, not a rejected password.
+		default:
+			header, err = securityHeader(d.credentials, created)
+		}
 		if err != nil {
 			return nil, operationError(KindUnreachable, operation, "the sign-in header could not be built")
 		}
 	}
 	envelope := buildEnvelope(header, body)
+
 	requestContext := ctx
 	cancel := func() {}
 	if requestContext == nil {
@@ -322,23 +396,27 @@ func (d *Device) callAt(ctx context.Context, endpoint *url.URL, operation, body 
 	requestContext, cancel = context.WithTimeout(requestContext, d.timeout)
 	defer cancel()
 
-	request, err := http.NewRequestWithContext(requestContext, http.MethodPost, validated.String(), strings.NewReader(envelope))
+	response, data, err := d.send(requestContext, validated, operation, action, envelope, "")
 	if err != nil {
-		return nil, operationError(KindRefused, operation, "the ONVIF request could not be built")
+		return nil, err
 	}
-	action := deviceAction + operationName(operation)
-	request.Header.Set("Content-Type", `application/soap+xml; charset=utf-8; action="`+action+`"`)
-	request.Header.Set("SOAPAction", `"`+action+`"`)
-
-	response, err := d.client.Do(request)
-	if err != nil {
-		return nil, transportError(operation, err)
+	if response.StatusCode == http.StatusUnauthorized && d.auth == AuthHTTPDigest && d.credentials.Valid() {
+		if challenge, ok := parseDigestChallenge(sortedHeaderValues(response)); ok {
+			_ = response.Body.Close()
+			if d.operations >= d.maxOperations {
+				return nil, operationError(KindRefused, operation, "the camera did not answer within the operation limit")
+			}
+			authorization, authErr := digestAuthorization(http.MethodPost, validated, challenge, d.credentials)
+			if authErr != nil {
+				return nil, operationError(KindAuthentication, operation, authErr.Error())
+			}
+			response, data, err = d.send(requestContext, validated, operation, action, envelope, authorization)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	defer response.Body.Close()
-	data, readErr := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes))
-	if readErr != nil {
-		return nil, operationError(KindUnreachable, operation, "the camera response could not be read")
-	}
 	if response.StatusCode != http.StatusOK {
 		if faultErr := parseFaultError(data, operation); faultErr != nil {
 			return nil, faultErr
@@ -351,17 +429,55 @@ func (d *Device) callAt(ctx context.Context, endpoint *url.URL, operation, body 
 	return data, nil
 }
 
-func (d *Device) authenticationTime() time.Time {
-	if d.cameraClock.IsZero() || d.cameraReadAt.IsZero() {
-		return d.now().UTC()
+// send performs one HTTP round trip and returns the response with its body
+// already read. It records the camera's HTTP Date for the clock fallback.
+func (d *Device) send(ctx context.Context, endpoint *url.URL, operation, action, envelope, authorization string) (*http.Response, []byte, error) {
+	if d.operations >= d.maxOperations {
+		return nil, nil, operationError(KindRefused, operation, "the camera did not answer within the operation limit")
 	}
-	return d.cameraClock.Add(d.now().Sub(d.cameraReadAt)).UTC()
+	d.operations++
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), strings.NewReader(envelope))
+	if err != nil {
+		return nil, nil, operationError(KindRefused, operation, "the ONVIF request could not be built")
+	}
+	request.Header.Set("Content-Type", `application/soap+xml; charset=utf-8; action="`+action+`"`)
+	request.Header.Set("SOAPAction", `"`+action+`"`)
+	if authorization != "" {
+		request.Header.Set("Authorization", authorization)
+	}
+	response, err := d.client.Do(request)
+	if err != nil {
+		return nil, nil, transportError(operation, err)
+	}
+	if date := response.Header.Get("Date"); date != "" {
+		if parsed, parseErr := http.ParseTime(date); parseErr == nil {
+			d.httpDate = parsed.UTC()
+			d.httpDateAt = d.now()
+		}
+	}
+	data, readErr := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes))
+	if readErr != nil {
+		_ = response.Body.Close()
+		return nil, nil, operationError(KindUnreachable, operation, "the camera response could not be read")
+	}
+	response.Body = io.NopCloser(bytes.NewReader(data))
+	return response, data, nil
+}
+
+func (d *Device) authenticationTime() time.Time {
+	if !d.cameraClock.IsZero() && !d.cameraReadAt.IsZero() {
+		return d.cameraClock.Add(d.now().Sub(d.cameraReadAt)).UTC()
+	}
+	if !d.httpDate.IsZero() && !d.httpDateAt.IsZero() {
+		return d.httpDate.Add(d.now().Sub(d.httpDateAt)).UTC()
+	}
+	return d.now().UTC()
 }
 
 func buildEnvelope(header, body string) string {
 	var buffer bytes.Buffer
 	buffer.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
-	buffer.WriteString(`<s:Envelope xmlns:s="` + soapNamespace + `" xmlns:tds="` + deviceNamespace + `" xmlns:tt="` + schemaNamespace + `">`)
+	buffer.WriteString(`<s:Envelope xmlns:s="` + soapNamespace + `" xmlns:tds="` + deviceNamespace + `" xmlns:tt="` + schemaNamespace + `" xmlns:trt="` + media1Namespace + `" xmlns:tr2="` + media2Namespace + `">`)
 	if header != "" {
 		buffer.WriteString(`<s:Header>`)
 		buffer.WriteString(header)
@@ -377,8 +493,12 @@ func operationName(operation string) string {
 	switch operation {
 	case "time read":
 		return "GetSystemDateAndTime"
-	case "capabilities read":
+	case "capabilities read", "security capabilities":
 		return "GetServiceCapabilities"
+	case "capabilities list":
+		return "GetCapabilities"
+	case "service list":
+		return "GetServices"
 	case "NTP setting":
 		return "SetNTP"
 	case "NTP mode setting", "time push":
@@ -507,6 +627,10 @@ func parseFaultError(data []byte, operation string) error {
 		code = strings.TrimSpace(fault.Code.Value)
 	}
 	lower := strings.ToLower(reason + " " + code)
+	if strings.Contains(lower, "timestamp") || strings.Contains(lower, "created") ||
+		strings.Contains(lower, "replay") || strings.Contains(lower, "clock") {
+		return operationError(KindAuthentication, operation, "the camera rejected the sign-in timestamp")
+	}
 	if strings.Contains(lower, "notauthorized") || strings.Contains(lower, "not authorized") ||
 		strings.Contains(lower, "authentication") || strings.Contains(lower, "permission") ||
 		strings.Contains(lower, "credential") || strings.Contains(fault.Code.Value, "NotAuthorized") {

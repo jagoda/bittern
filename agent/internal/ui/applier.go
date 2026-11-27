@@ -25,7 +25,14 @@ import (
 // live system. SecretsPath overrides the secrets.yaml beside appliance.yaml.
 type AgentApplier struct {
 	SecretsPath string
-	applyFn     func(*config.Config, apply.Options) (apply.Result, error)
+	// StateRoot holds the camera health cache where the profile result is
+	// recorded. The zero value uses /var/lib/bittern.
+	StateRoot string
+	// Profiles is the adoption-time ONVIF profile probe. The daemon supplies
+	// the bounded implementation; nil disables the probe and keeps the manual
+	// stream path.
+	Profiles ProfileCollector
+	applyFn  func(*config.Config, apply.Options) (apply.Result, error)
 }
 
 // Apply loads the existing appliance.yaml, applies the fields the wizard owns,
@@ -125,6 +132,10 @@ func (a AgentApplier) applySetup(ctx context.Context, request ApplyRequest, prog
 		}
 		return apply.Result{}, err
 	}
+	// Collect the camera's media profiles before the document is written, so
+	// the renderer reads a stored selection and never probes a camera. A failed
+	// probe stores its reason and changes nothing else.
+	a.collectCameraProfiles(ctx, validated, secretsPath)
 	data, err = yaml.Marshal(validated)
 	if err != nil {
 		return apply.Result{}, fmt.Errorf("ui: encode appliance.yaml: %w", err)

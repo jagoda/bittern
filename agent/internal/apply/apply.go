@@ -176,13 +176,24 @@ func apply(cfg *config.Config, options Options, redactor, secretRedactor *redact
 			secretsPath = candidate
 		}
 	}
+	// Upgrade an older complete-URL secret to the per-camera credential shape
+	// before the first read. Both shapes stay readable, so a failed migration
+	// is not an apply failure.
+	migrateSecrets(secretsPath)
 	envData, envValues, err := frigateCameraEnv(cfg, secretsPath)
 	if err != nil {
 		return Result{}, err
 	}
 	if envData != nil {
 		redactor.Add(envValues...)
-		secretRedactor.Add(envValues...)
+		// The rendered-file leak check needs the complete URLs, not a short
+		// username or password that can occur inside an ordinary word. The
+		// log redactor keeps every value.
+		for _, value := range envValues {
+			if strings.Contains(value, "://") {
+				secretRedactor.Add(value)
+			}
+		}
 		for _, file := range options.ExtraFiles {
 			source := strings.TrimPrefix(file.Path, "./")
 			if source == "frigate/cameras.env" || file.Destination == "var/lib/bittern/frigate/cameras.env" {

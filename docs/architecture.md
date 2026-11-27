@@ -175,8 +175,9 @@ match is configured.
 
 Rendered outputs are networkd interface and `.link` files, nftables rules, dnsmasq and chrony
 configuration, Frigate's `config.yml`, the compose file, and the `bittern-frigate.service` oneshot.
-Apply also writes the generated camera env file from `/etc/bittern/secrets.yaml`; the renderer never
-reads or writes a secret value. Generated files are never hand-edited on a device.
+Apply also writes the generated camera env file from the per-camera accounts in
+`/etc/bittern/secrets.yaml`; one account becomes one URL per profile, and the renderer never reads or
+writes a secret value. Generated files are never hand-edited on a device.
 
 Frigate's `config.yml` is generated from `appliance.yaml` by `bitternd`, which is the only writer.
 There is no mirroring and Frigate's UI is not a source of camera changes. A configuration with no
@@ -191,7 +192,7 @@ is not a valid service.
 | `/etc/bittern/secrets.yaml` | Generated secrets, including the TLS private key, mode 0600 | Excluded; use SOPS or manual escrow | Factory reset or wipe and reset, then regenerate |
 | `/etc/bittern/generated/` | Rendered network, firewall, DHCP, NTP, compose files | Not backed up; regenerated | Regenerated |
 | `/var/lib/bittern/frigate/config.yml` | Frigate config, generated from `appliance.yaml` | Included in config backups | Factory reset |
-| `/var/lib/bittern/frigate/cameras.env` | Generated camera RTSP URL env file, mode 0600, sourced from `/etc/bittern/secrets.yaml` | Excluded, like the secrets file | Factory reset or wipe and reset |
+| `/var/lib/bittern/frigate/cameras.env` | Generated camera RTSP URL env file, mode 0600; one URL per profile built from the per-camera account in `/etc/bittern/secrets.yaml` | Excluded, like the secrets file | Factory reset or wipe and reset |
 | `/var/lib/bittern/media/` | Recordings, snapshots, and the Frigate media database on a pool of one or more dedicated recording drives; a failed member loses only its share | No v1 recording backup ([OQ-16](open-questions.md)); media database included in update backups | Factory reset keeps the pool, recordings, snapshots, and database; reflash, OS update, and bundle rollback also keep them; wipe and reset logically deletes all three across every member ([ADR 0017](adr/0017-reset-levels-and-decommissioning.md), [ADR 0018](adr/0018-recording-capacity-pool.md)) |
 | `/var/lib/bittern/backups/`, `app/` | Update backups and bundle generations | Previous generation kept for rollback | Factory reset |
 | `/var/lib/docker/volumes/` | Docker volumes and the Frigate cache | Not backed up; the cache is rebuildable | Factory reset |

@@ -12,6 +12,8 @@ services:
         shm_size: 1gb
         security_opt:
             - no-new-privileges:true
+        env_file:
+            - /var/lib/bittern/frigate/cameras.env
         volumes:
             - /var/lib/bittern/frigate:/config
             - /var/lib/bittern/frigate/config.yml:/config/config.yml:ro

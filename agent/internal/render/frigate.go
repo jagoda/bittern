@@ -3,7 +3,10 @@ package render
 import (
 	"bytes"
 	"fmt"
+	"net"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -250,23 +253,30 @@ func FrigateImageDigest() (string, error) {
 }
 
 // FrigateCameraSecret is the interface the apply task uses to write the
-// generated env file. The renderer names the env var; apply reads the value
-// from the referenced key in /etc/bittern/secrets.yaml.
+// generated env file. The renderer names the env var and the profile; apply
+// reads the camera's sign-in from /etc/bittern/secrets.yaml and builds the
+// complete URL for that profile. The secret file holds the account once, never
+// one URL per profile.
 type FrigateCameraSecret struct {
 	CameraID  string `json:"camera_id"`
 	SecretKey string `json:"secret_key"`
 	EnvName   string `json:"env_name"`
+	Profile   string `json:"profile"`
 }
 
 // FrigateCameraSecrets lists the RTSP URL secrets required by the rendered
 // Frigate config. A camera without credentials_ref gets a direct URL and needs
-// no secret. The value at SecretKey is a complete RTSP URL, never a password
-// fragment.
+// no secret. The value at SecretKey is a per-camera account, never a password
+// fragment and never a complete URL.
+//
+// Both profiles get their own env var when the camera has a distinct sub
+// profile, so each quality has its own credentialed URL. A camera with one
+// stream emits one mapping; both go2rtc keys point at it.
 func FrigateCameraSecrets(cfg *config.Config) []FrigateCameraSecret {
 	if !hasEnabledFrigateCamera(cfg) {
 		return nil
 	}
-	secrets := make([]FrigateCameraSecret, 0, len(cfg.Cameras))
+	secrets := make([]FrigateCameraSecret, 0, len(cfg.Cameras)*len(livestream.Profiles()))
 	for _, camera := range cfg.Cameras {
 		if camera.CredentialsRef == nil || strings.TrimSpace(*camera.CredentialsRef) == "" {
 			continue
@@ -275,13 +285,41 @@ func FrigateCameraSecrets(cfg *config.Config) []FrigateCameraSecret {
 			CameraID:  camera.ID,
 			SecretKey: strings.TrimSpace(*camera.CredentialsRef),
 			EnvName:   FrigateRTSPEnvName(camera.ID),
+			Profile:   livestream.ProfileMain,
 		})
+		if hasDistinctSubProfile(camera) {
+			secrets = append(secrets, FrigateCameraSecret{
+				CameraID:  camera.ID,
+				SecretKey: strings.TrimSpace(*camera.CredentialsRef),
+				EnvName:   FrigateSubRTSPEnvName(camera.ID),
+				Profile:   livestream.ProfileSub,
+			})
+		}
 	}
 	return secrets
 }
 
-// FrigateRTSPEnvName maps a camera id to the env var referenced in config.yml.
+// hasDistinctSubProfile reports whether the camera has a sub profile whose path
+// differs from main. A sub profile naming the main path is one stream.
+func hasDistinctSubProfile(camera config.Camera) bool {
+	if !camera.HasProfile(livestream.ProfileSub) {
+		return false
+	}
+	return camera.StreamPath(livestream.ProfileSub) != camera.StreamPath(livestream.ProfileMain)
+}
+
+// FrigateRTSPEnvName maps a camera id to the main-stream env var referenced in
+// config.yml.
 func FrigateRTSPEnvName(cameraID string) string {
+	return frigateRTSPEnvName(cameraID, "")
+}
+
+// FrigateSubRTSPEnvName maps a camera id to the sub-stream env var.
+func FrigateSubRTSPEnvName(cameraID string) string {
+	return frigateRTSPEnvName(cameraID, "SUB_")
+}
+
+func frigateRTSPEnvName(cameraID, profile string) string {
 	var name strings.Builder
 	name.WriteString("FRIGATE_CAMERA_")
 	for _, char := range strings.ToUpper(cameraID) {
@@ -296,8 +334,51 @@ func FrigateRTSPEnvName(cameraID string) string {
 			name.WriteRune('_')
 		}
 	}
-	name.WriteString("_RTSP_URL")
+	name.WriteString("_")
+	name.WriteString(profile)
+	name.WriteString("RTSP_URL")
 	return name.String()
+}
+
+// CameraStreamURL builds the complete RTSP URL for one profile from the
+// camera's stored path and its per-camera account. Apply calls it to fill the
+// env file; the value never enters config.yml. An empty username produces a
+// URL with no user information.
+func CameraStreamURL(camera config.Camera, profile, username, password string) string {
+	return CameraStreamURLWithFallback(camera, profile, username, password, "")
+}
+
+// CameraStreamURLWithFallback is CameraStreamURL with the path from an older
+// complete-URL secret. The fallback is used only when the camera has no
+// explicit rtsp_path and no profile path, so an existing device keeps its
+// stream after the secrets migration.
+func CameraStreamURLWithFallback(camera config.Camera, profile, username, password, fallbackPath string) string {
+	parsed := &url.URL{
+		Scheme: "rtsp",
+		Host:   net.JoinHostPort(camera.Address, strconv.Itoa(camera.RTSPPortValue())),
+	}
+	if username != "" || password != "" {
+		if password == "" {
+			parsed.User = url.User(username)
+		} else {
+			parsed.User = url.UserPassword(username, password)
+		}
+	}
+	streamPath := camera.StreamPath(profile)
+	if fallbackPath != "" && camera.RTSPPath == nil && !camera.HasProfile(profile) {
+		streamPath = fallbackPath
+	}
+	path, query := splitStreamPath(streamPath)
+	parsed.Path = path
+	parsed.RawQuery = query
+	return parsed.String()
+}
+
+func splitStreamPath(value string) (string, string) {
+	if index := strings.IndexByte(value, '?'); index >= 0 {
+		return value[:index], value[index+1:]
+	}
+	return value, ""
 }
 
 func hasEnabledFrigateCamera(cfg *config.Config) bool {
@@ -574,7 +655,11 @@ func cameraRTSPPath(camera config.Camera) string {
 // profile path is rendered directly and a profile path takes precedence.
 func cameraStreamSource(camera config.Camera, profile string) string {
 	if camera.CredentialsRef != nil && strings.TrimSpace(*camera.CredentialsRef) != "" {
-		return "{" + FrigateRTSPEnvName(camera.ID) + "}"
+		envName := FrigateRTSPEnvName(camera.ID)
+		if profile == livestream.ProfileSub && hasDistinctSubProfile(camera) {
+			envName = FrigateSubRTSPEnvName(camera.ID)
+		}
+		return "{" + envName + "}"
 	}
 	return directRTSPURL(camera, camera.StreamPath(profile))
 }

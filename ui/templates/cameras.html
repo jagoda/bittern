@@ -40,6 +40,8 @@
     {{end}}
     <p class="camera-clock"><span class="state-badge state-{{cameraTimeClass .Time.State}}">{{cameraTimeLabel .Time.State}}</span> {{cameraTimePrimaryCopy .Time}}</p>
     {{if cameraTimeNextAction .Time.State}}<p class="hint camera-time-next"><strong>Next step</strong> {{cameraTimeNextAction .Time.State}}</p>{{end}}
+    <p class="camera-profiles"><span class="state-badge state-{{cameraProfileClass .Profiles.State}}">{{cameraProfileLabel .Profiles.State}}</span> {{.Profiles.Detail}}</p>
+    {{if .Profiles.Action}}<p class="hint camera-profile-next"><strong>Next step</strong> {{.Profiles.Action}}</p>{{end}}
     {{if $picture}}
     <figure class="camera-picture" data-picture>
       {{if $picture.URL}}

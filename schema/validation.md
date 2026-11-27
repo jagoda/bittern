@@ -153,14 +153,21 @@ camera; when there is one stream both keys point at it.
 A profile stores no host, userinfo, credential or complete URI. `profile_token` is an opaque ONVIF
 value, capped at 128 characters and never used as a URL. Width and height are the values the camera
 reports, not values Bittern assumes. Codec is informational; H.264 remains the only supported live
-codec. A camera that uses `credentials_ref` renders its one secret URL under both go2rtc keys until
-the secret interface carries one URL per profile, so status reports one distinct quality for that
-camera rather than claiming a substream.
+codec. A camera with `credentials_ref` stores one username and password under the reference, and the
+renderer builds each profile's complete URL from that one account and the profile path. Two profiles
+therefore produce two credentialed URLs without storing a URL or a second password. A camera with no
+sub profile emits the main URL under both go2rtc keys. A no-auth camera renders its paths directly.
 
 ## Credentials and the secrets boundary
 
 The schema has no credential value fields. A camera may carry `credentials_ref`, which is only a key
 name. The example uses placeholder keys such as `cameras.front_door`.
+
+The value at a reference is a camera account: `username`, `password`, and optionally
+`onvif_username` and `onvif_password` for a separate time and ONVIF-probe sign-in, all under the
+same key. The older scalar complete-URL shape and the mapping with `rtsp_url` remain readable, and
+the agent migrates them to the account shape on the next apply. A migrated no-auth camera has empty
+`username` and `password` members; it is not an error.
 
 The reference validator checks the syntax of the reference and stops there. It does not open
 `/etc/bittern/secrets.yaml`, and it cannot prove that the key exists. The agent must check existence

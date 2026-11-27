@@ -29,6 +29,7 @@ cameras:
     address: 10.110.0.20
     rtsp_port: 554
     rtsp_path: /stream1
+    credentials_ref: cameras.driveway
     profiles:
       main:
         profile_token: Profile_1
@@ -48,6 +49,7 @@ cameras:
     address: 10.110.0.21
     rtsp_port: 554
     rtsp_path: /stream1
+    credentials_ref: cameras.side_gate
 
 storage:
   recording:

@@ -35,6 +35,12 @@ func ensureCameraSecrets(cfg *config.Config, secretsPath string, cameraURLs map[
 	if strings.TrimSpace(secretsPath) == "" {
 		return errors.New("ui: secrets.yaml path is empty")
 	}
+	// Upgrade an older complete-URL secret to the per-camera credential shape
+	// before this function reads or writes it. The old shape stays readable if
+	// the migration leaves a value it cannot parse.
+	if _, err := secrets.MigrateCameraAccounts(secretsPath); err != nil {
+		return fmt.Errorf("ui: migrate secrets.yaml: %w", err)
+	}
 
 	document, err := loadSecretsDocument(secretsPath)
 	if err != nil {
@@ -48,7 +54,7 @@ func ensureCameraSecrets(cfg *config.Config, secretsPath string, cameraURLs map[
 		if requested {
 			key = strings.TrimSpace(*camera.CredentialsRef)
 		} else {
-			key = fmt.Sprintf("cameras.%s.rtsp_url", camera.ID)
+			key = fmt.Sprintf("cameras.%s", camera.ID)
 		}
 
 		exists, err := secretKeyExists(document, key)
@@ -180,6 +186,7 @@ func newMappingNode() *yaml.Node {
 }
 
 func secretKeyExists(document *yaml.Node, key string) (bool, error) {
+	key = cameraAccountKey(key)
 	root, err := secretsMapping(document)
 	if err != nil {
 		return false, err
@@ -201,13 +208,20 @@ func secretKeyExists(document *yaml.Node, key string) (bool, error) {
 	return usable, nil
 }
 
-// secretValueNode mirrors the apply lookup: a mapping is usable when it has an
-// rtsp_url member, while a scalar is usable when it is not null.
+// secretValueNode reports whether a camera secret is usable. The current
+// shape is a mapping with username and password; the older shapes are a scalar
+// complete URL or a mapping with rtsp_url.
 func secretValueNode(node *yaml.Node) (*yaml.Node, bool) {
 	if node == nil || node.Tag == "!!null" {
 		return nil, false
 	}
 	if node.Kind == yaml.MappingNode {
+		if _, ok := mappingValue(node, "username"); ok {
+			return node, true
+		}
+		if _, ok := mappingValue(node, "password"); ok {
+			return node, true
+		}
 		nested, ok := mappingValue(node, "rtsp_url")
 		if !ok {
 			return nil, false
@@ -217,7 +231,30 @@ func secretValueNode(node *yaml.Node) (*yaml.Node, bool) {
 	return node, true
 }
 
+// setSecretValue writes a camera account in the current shape. The wizard
+// still hands the applier one complete URL; it is split here so the file keeps
+// the sign-in once and never a URL.
 func setSecretValue(document *yaml.Node, key, value string) error {
+	account, err := secrets.AccountFromValue(value)
+	if err != nil {
+		return err
+	}
+	return setAccountAtKey(document, cameraAccountKey(key), account)
+}
+
+// cameraAccountKey normalizes the oldest reference form, which named the URL
+// member directly, to the camera mapping that now holds the account. A key
+// with fewer than three segments is left alone so a camera literally named
+// rtsp_url keeps its own key.
+func cameraAccountKey(key string) string {
+	key = strings.TrimSpace(key)
+	if strings.Count(key, ".") >= 2 && strings.HasSuffix(key, ".rtsp_url") {
+		return strings.TrimSuffix(key, ".rtsp_url")
+	}
+	return key
+}
+
+func setAccountAtKey(document *yaml.Node, key string, account secrets.CameraAccount) error {
 	root, err := secretsMapping(document)
 	if err != nil {
 		return err
@@ -228,17 +265,20 @@ func setSecretValue(document *yaml.Node, key, value string) error {
 		last := index == len(segments)-1
 		existing, ok := mappingValue(current, segment)
 		if last {
+			mapping := existing
 			if !ok {
-				current.Content = append(current.Content, scalarNode(segment), scalarNode(value))
-				return nil
+				mapping = newMappingNode()
+				current.Content = append(current.Content, scalarNode(segment), mapping)
 			}
-			if existing.Kind == yaml.MappingNode {
-				return fmt.Errorf("the key path ends at an existing mapping")
+			if mapping.Kind != yaml.MappingNode {
+				mapping.Kind = yaml.MappingNode
+				mapping.Tag = "!!map"
+				mapping.Value = ""
+				mapping.Style = 0
+				mapping.Content = nil
 			}
-			existing.Kind = yaml.ScalarNode
-			existing.Tag = "!!str"
-			existing.Value = value
-			existing.Style = 0
+			setMappingScalar(mapping, "username", account.Username)
+			setMappingScalar(mapping, "password", account.Password)
 			return nil
 		}
 		if !ok {
@@ -262,7 +302,7 @@ func removeCameraSecret(secretsPath, key string) error {
 	if strings.TrimSpace(secretsPath) == "" {
 		return errors.New("ui: secrets.yaml path is empty")
 	}
-	key = strings.TrimSpace(key)
+	key = cameraAccountKey(key)
 	if key == "" {
 		return nil
 	}
@@ -501,9 +541,11 @@ func ensureCameraONVIFSecrets(cfg *config.Config, secretsPath string, accounts m
 }
 
 // setSecretMembers writes named members inside the mapping at key. A scalar at
-// key is converted to a mapping whose rtsp_url member keeps the old value, so
-// the camera keeps one reference and one secret store.
+// key, or a mapping that still carries rtsp_url, is converted to the current
+// per-camera account shape first, so the camera keeps one reference and one
+// secret store.
 func setSecretMembers(document *yaml.Node, key string, members map[string]string) error {
+	key = cameraAccountKey(key)
 	root, err := secretsMapping(document)
 	if err != nil {
 		return err
@@ -514,33 +556,29 @@ func setSecretMembers(document *yaml.Node, key string, members map[string]string
 		last := index == len(segments)-1
 		existing, ok := mappingValue(current, segment)
 		if last {
-			mapping := existing
-			if !ok {
-				mapping = newMappingNode()
-				current.Content = append(current.Content, scalarNode(segment), mapping)
+			account := secrets.CameraAccount{}
+			if ok && existing.Kind == yaml.ScalarNode && existing.Tag != "!!null" {
+				parsed, err := secrets.AccountFromValue(existing.Value)
+				if err != nil {
+					return err
+				}
+				account = parsed
+			} else if ok && existing.Kind == yaml.MappingNode {
+				parsed, err := secrets.AccountFromValue(nodeToValue(existing))
+				if err != nil {
+					return err
+				}
+				account = parsed
 			}
-			switch {
-			case mapping.Kind == yaml.MappingNode:
-				for name, value := range members {
-					setMappingScalar(mapping, name, value)
-				}
-			case mapping.Kind == yaml.ScalarNode && mapping.Tag != "!!null":
-				// A URL stored as a scalar becomes the rtsp_url member of the
-				// mapping, then the time sign-in members are added beside it.
-				converted := newMappingNode()
-				setMappingScalar(converted, "rtsp_url", mapping.Value)
-				for name, value := range members {
-					setMappingScalar(converted, name, value)
-				}
-				*existing = *converted
-			default:
-				mapping = newMappingNode()
-				for name, value := range members {
-					setMappingScalar(mapping, name, value)
-				}
-				if ok {
-					*existing = *mapping
-				}
+			if err := setAccountAtKey(document, key, account); err != nil {
+				return err
+			}
+			mapping, ok := mappingValue(current, segment)
+			if !ok || mapping.Kind != yaml.MappingNode {
+				return fmt.Errorf("the key path does not end at a mapping")
+			}
+			for name, value := range members {
+				setMappingScalar(mapping, name, value)
 			}
 			return nil
 		}
@@ -556,6 +594,14 @@ func setSecretMembers(document *yaml.Node, key string, members map[string]string
 		current = existing
 	}
 	return nil
+}
+
+func nodeToValue(node *yaml.Node) any {
+	var value any
+	if err := node.Decode(&value); err != nil {
+		return nil
+	}
+	return value
 }
 
 func setMappingScalar(mapping *yaml.Node, key, value string) {

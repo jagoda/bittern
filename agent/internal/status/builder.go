@@ -678,6 +678,10 @@ func (b *Builder) redactDocument(document *Document) {
 		entry.Detail = redactor.String(entry.Detail)
 		entry.Time.Detail = redactor.String(entry.Time.Detail)
 		entry.Time.Zone = redactor.String(entry.Time.Zone)
+		entry.Profiles.Detail = redactor.String(entry.Profiles.Detail)
+		entry.Profiles.Action = redactor.String(entry.Profiles.Action)
+		entry.Profiles.MainToken = redactor.String(entry.Profiles.MainToken)
+		entry.Profiles.SubToken = redactor.String(entry.Profiles.SubToken)
 	}
 	if document.Sections.Frigate.Version != nil {
 		value := redactor.String(*document.Sections.Frigate.Version)

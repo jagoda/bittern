@@ -23,8 +23,8 @@ func TestRendererWritesTwoStreamsFromProfiles(t *testing.T) {
 		t.Fatalf("generated compose file is not valid YAML: %v", err)
 	}
 
-	const mainSource = "rtsp://10.110.0.20:554/Streaming/Channels/101?transport=tcp"
-	const subSource = "rtsp://10.110.0.20:554/Streaming/Channels/102"
+	const mainSource = "{FRIGATE_CAMERA_DRIVEWAY_RTSP_URL}"
+	const subSource = "{FRIGATE_CAMERA_DRIVEWAY_SUB_RTSP_URL}"
 	if got := document.Go2RTC.Streams["driveway_main"]; got != mainSource {
 		t.Fatalf("driveway_main source = %q, want %q", got, mainSource)
 	}
@@ -57,7 +57,7 @@ func TestRendererWritesOnePathWithoutProfiles(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(configFile), &document); err != nil {
 		t.Fatalf("generated Frigate config is not valid YAML: %v", err)
 	}
-	const source = "rtsp://10.110.0.21:554/stream1"
+	const source = "{FRIGATE_CAMERA_SIDE_GATE_RTSP_URL}"
 	if got := document.Go2RTC.Streams["side_gate_main"]; got != source {
 		t.Fatalf("side_gate_main source = %q, want %q", got, source)
 	}
@@ -175,6 +175,20 @@ func TestDistinctLiveQualities(t *testing.T) {
 				t.Fatalf("distinct qualities = %v, want %v", got, testCase.want)
 			}
 		})
+	}
+}
+
+func TestRendererDirectSourceWithoutCredentials(t *testing.T) {
+	camera := config.Camera{ID: "gate", Address: "10.77.0.30", RTSPPath: stringPointer("/stream1")}
+	streams := LiveStreams(camera)
+	if len(streams) != 2 {
+		t.Fatalf("streams = %+v", streams)
+	}
+	const want = "rtsp://10.77.0.30:554/stream1"
+	for _, stream := range streams {
+		if stream.Source != want {
+			t.Fatalf("%s source = %q, want %q", stream.Key, stream.Source, want)
+		}
 	}
 }
 

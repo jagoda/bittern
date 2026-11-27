@@ -82,6 +82,10 @@
             "push": false,
             "detail": "Bittern has not set this camera's clock yet."
           },
+          "profiles": {
+            "state": "not-probed",
+            "detail": "Bittern has not read this camera's stream profiles yet."
+          },
           "distinct_qualities": [
             "main"
           ],

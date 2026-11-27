@@ -23,10 +23,13 @@ import (
 
 	"bittern.invalid/agent/internal/apply"
 	"bittern.invalid/agent/internal/auth"
+	"bittern.invalid/agent/internal/cameraprofile"
 	"bittern.invalid/agent/internal/cameratime"
+	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/discovery"
 	"bittern.invalid/agent/internal/logging"
 	"bittern.invalid/agent/internal/redact"
+	"bittern.invalid/agent/internal/secrets"
 	"bittern.invalid/agent/internal/status"
 	"bittern.invalid/agent/internal/tlsutil"
 	bitternui "bittern.invalid/agent/internal/ui"
@@ -173,7 +176,13 @@ func run() error {
 		}
 		statusProvider := bitternui.StatusProvider(bitternui.BuilderStatusProvider{Builder: builder})
 		checksProvider := bitternui.ChecksProvider(bitternui.AgentChecks{Builder: builder})
-		applier := bitternui.Applier(bitternui.AgentApplier{SecretsPath: *uiSecrets})
+		applier := bitternui.Applier(bitternui.AgentApplier{
+			SecretsPath: *uiSecrets,
+			StateRoot:   *stateRoot,
+			Profiles: func(ctx context.Context, camera config.Camera, account secrets.CameraAccount) cameraprofile.Result {
+				return cameraprofile.Collect(ctx, camera, account, cameraprofile.Options{})
+			},
+		})
 		cameraDiscovery := bitternui.CameraDiscovery(discovery.NewService(discovery.Options{
 			Interface:  discovery.DefaultInterface,
 			ConfigPath: *configPath,

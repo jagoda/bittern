@@ -315,7 +315,7 @@ func TestAgentApplierWritesNoAuthCameraSecret(t *testing.T) {
 	if applied == nil || len(applied.Cameras) != 1 {
 		t.Fatalf("apply did not receive the camera: %+v", applied)
 	}
-	const key = "cameras.front_door.rtsp_url"
+	const key = "cameras.front_door"
 	if applied.Cameras[0].CredentialsRef == nil || *applied.Cameras[0].CredentialsRef != key {
 		t.Fatalf("camera credentials_ref = %v, want %s", applied.Cameras[0].CredentialsRef, key)
 	}
@@ -408,7 +408,7 @@ func TestAgentApplierWritesCredentialURLAndReservation(t *testing.T) {
 	if applied == nil || len(applied.Cameras) != 1 {
 		t.Fatalf("apply did not receive the camera: %+v", applied)
 	}
-	const key = "cameras.camera_1.rtsp_url"
+	const key = "cameras.camera_1"
 	if applied.Cameras[0].CredentialsRef == nil || *applied.Cameras[0].CredentialsRef != key {
 		t.Fatalf("camera credentials_ref = %v, want %s", applied.Cameras[0].CredentialsRef, key)
 	}
@@ -436,11 +436,12 @@ func TestAgentApplierWritesCredentialURLAndReservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), credentialURL) {
-		t.Fatalf("secrets.yaml does not carry the encoded URL: %s", data)
+	if !strings.Contains(string(data), "username: viewer") ||
+		!strings.Contains(string(data), "password: p@ss:word/1") {
+		t.Fatalf("secrets.yaml does not carry the camera account: %s", data)
 	}
-	if strings.Contains(string(data), "p@ss:word/1") {
-		t.Fatalf("secrets.yaml carries the raw password: %s", data)
+	if strings.Contains(string(data), "rtsp://") {
+		t.Fatalf("secrets.yaml still carries a complete URL: %s", data)
 	}
 	envPath := filepath.Join(liveRoot, "var/lib/bittern/frigate/cameras.env")
 	if got := string(system.files[envPath]); !strings.Contains(got, credentialURL) {
@@ -448,7 +449,7 @@ func TestAgentApplierWritesCredentialURLAndReservation(t *testing.T) {
 	}
 }
 
-func TestAgentApplierKeepsExistingCameraSecretByteForByte(t *testing.T) {
+func TestAgentApplierKeepsExistingCameraSecret(t *testing.T) {
 	configPath := writeApplierFixture(t)
 	secretsPath := filepath.Join(t.TempDir(), "secrets.yaml")
 	secretsBefore := []byte(`schema_version: 1
@@ -488,8 +489,12 @@ cameras:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(secretsBefore, secretsAfter) {
-		t.Fatalf("existing secrets changed:\nwant:\n%s\ngot:\n%s", secretsBefore, secretsAfter)
+	if !strings.Contains(string(secretsAfter), "username: viewer") ||
+		!strings.Contains(string(secretsAfter), "password: secret") {
+		t.Fatalf("existing camera account was not preserved:\n%s", secretsAfter)
+	}
+	if strings.Contains(string(secretsAfter), "rtsp://") {
+		t.Fatalf("migration left a complete URL in secrets.yaml:\n%s", secretsAfter)
 	}
 	if applied == nil || applied.Cameras[0].CredentialsRef == nil ||
 		*applied.Cameras[0].CredentialsRef != key {

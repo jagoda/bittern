@@ -219,6 +219,7 @@ type pageData struct {
 	Cameras                []cameraView
 	CameraErrors           map[string]string
 	CameraList             status.CamerasSection
+	ProfileNotices         []profileNotice
 	Pictures               map[string]*cameraPicture
 	Flash                  string
 	FlashError             string
@@ -269,6 +270,8 @@ func parseTemplates() (*template.Template, error) {
 		"cameraTimeMechanismLabel": cameraTimeMechanismLabel,
 		"cameraTimeNextAction":     cameraTimeNextAction,
 		"cameraTimePrimaryCopy":    cameraTimePrimaryCopy,
+		"cameraProfileClass":       cameraProfileClass,
+		"cameraProfileLabel":       cameraProfileLabel,
 		"hasError":                 hasError,
 		"localTime":                localTime,
 		"localTimePtr":             localTimePtr,

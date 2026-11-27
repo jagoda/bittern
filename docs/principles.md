@@ -574,8 +574,10 @@ does not apply gets a one-line reason in the review.
   `TestAgentApplierWritesCredentialURLAndReservation`,
   `TestAgentApplierRejectsMissingCredentialSecretBeforeWritingConfig`, and the redaction tests under
   [agent/internal/redact](../agent/internal/redact/).
-- Do: Store the RTSP URL under `cameras.<id>.rtsp_url`, render only the key name, and print the setup
-  token only on the local console or in the fragment.
+- Do: Store the camera username and password under `cameras.<id>`, build each profile URL from that
+  one account at apply time, render only the key name and the profile path, and print the setup token
+  only on the local console or in the fragment. A complete URL is accepted for compatibility and
+  migrated, not written again.
 - Don't: Put a camera password in `appliance.yaml`, a query string, a log line, or a support bundle.
 - Check: The redaction tests, the applier tests, and the BIT-019 scan of the journal, logs, status,
   and support bundle cover the new secret. A security review rejects a secret without a leak test.

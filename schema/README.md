@@ -156,7 +156,7 @@ the display label. Addresses must be unique, must be on `cam0`, and must not be 
 | `mac` | string, MAC address | no | none | Camera MAC. When set, the camera is inside a Bittern-owned DHCP reservation and may use an address inside the dynamic pool |
 | `vendor` | string, 1 to 128 characters | no | none | Device-reported manufacturer from ONVIF discovery, shown in the camera list |
 | `model` | string, 1 to 128 characters | no | none | Device-reported model or name from ONVIF discovery, shown in the camera list |
-| `credentials_ref` | string, key pattern | no | none | Key in `/etc/bittern/secrets.yaml` whose value is the complete camera RTSP URL; required when the camera needs authentication, never a credential value |
+| `credentials_ref` | string, key pattern | no | none | Key in `/etc/bittern/secrets.yaml` for this camera's username and password, and optionally its separate ONVIF account; required when the camera needs authentication, never a credential value |
 | `profiles` | object | no | none | Optional ONVIF main and sub profiles from ADR 0037. Absent means the camera-level path is the only stream |
 
 ### cameras[].profiles
@@ -178,11 +178,11 @@ at it.
 
 A profile stores no host, userinfo, credential or full URI. The schema rejects a path that does not
 begin with `/`, contains `://` or `@`, or exceeds the string cap. The camera-level `rtsp_path` remains
-the manual or fallback path. A camera that uses `credentials_ref` renders its one secret URL under
-both keys until the secret interface carries one URL per profile; the profile paths apply to cameras
-without a reference, and status reports that camera as having one distinct quality. Profiles are
-collected at adoption, not by the migration; a version 2 document migrates with no `profiles` key and
-therefore keeps the one-stream behaviour.
+the manual or fallback path. A camera that uses `credentials_ref` stores one account under that key;
+the renderer builds each profile's URL from the account and the profile path, so two profiles produce
+two credentialed URLs and one stream produces one URL under both keys. Profiles are collected at
+adoption by the bounded ONVIF Media probe, not by the migration and never at render time. A version 2
+document migrates with no `profiles` key and therefore keeps the one-stream behaviour.
 
 A camera address inside the dynamic pool is accepted only when `mac` is set. The renderer then
 emits one `dhcp-host=<mac>,<address>` line into `/etc/dnsmasq.d/bittern-reservation.conf`.

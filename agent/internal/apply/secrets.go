@@ -3,22 +3,22 @@ package apply
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/render"
+	"bittern.invalid/agent/internal/secrets"
 )
 
 const defaultSecretsPath = "/etc/bittern/secrets.yaml"
 
 // frigateCameraEnv builds the Frigate camera environment file from the
-// referenced values in secrets.yaml. It returns the file bytes and the secret
-// values that must be registered with the redactor. A missing or malformed
-// URL is a hard failure naming the camera; there is no unauthenticated
-// fallback.
+// per-camera accounts in secrets.yaml. The renderer names the env var and the
+// profile; this function builds that profile's complete URL from the one
+// stored account and the profile path. It returns the file bytes and every
+// credential value that must be registered with the redactor. A missing or
+// malformed account is a hard failure naming the camera; there is no
+// unauthenticated fallback.
 func frigateCameraEnv(cfg *config.Config, secretsPath string) ([]byte, []string, error) {
 	mappings := render.FrigateCameraSecrets(cfg)
 	if len(mappings) == 0 {
@@ -27,30 +27,40 @@ func frigateCameraEnv(cfg *config.Config, secretsPath string) ([]byte, []string,
 	if secretsPath == "" {
 		secretsPath = defaultSecretsPath
 	}
-	data, err := os.ReadFile(secretsPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("apply: camera %q has no RTSP URL secret: read %s: %w", mappings[0].CameraID, secretsPath, err)
-	}
-	var document any
-	if err := yaml.Unmarshal(data, &document); err != nil {
-		return nil, nil, fmt.Errorf("apply: camera %q has no RTSP URL secret: parse %s: %w", mappings[0].CameraID, secretsPath, err)
+	cameras := make(map[string]config.Camera, len(cfg.Cameras))
+	for _, camera := range cfg.Cameras {
+		cameras[camera.ID] = camera
 	}
 
 	var lines strings.Builder
-	values := make([]string, 0, len(mappings))
+	values := make([]string, 0, len(mappings)*4)
 	seenEnv := make(map[string]string, len(mappings))
+	seenValue := make(map[string]bool, len(mappings))
+	accounts := make(map[string]secrets.CameraAccount, len(mappings))
 	for _, mapping := range mappings {
-		value, ok := lookupSecret(document, mapping.SecretKey)
+		camera, ok := cameras[mapping.CameraID]
 		if !ok {
-			return nil, nil, fmt.Errorf("apply: camera %q has no RTSP URL at %q in %s", mapping.CameraID, mapping.SecretKey, secretsPath)
+			return nil, nil, fmt.Errorf("apply: camera %q has no configuration", mapping.CameraID)
 		}
-		text, ok := value.(string)
-		if !ok {
-			return nil, nil, fmt.Errorf("apply: camera %q RTSP URL at %q in %s is not a string", mapping.CameraID, mapping.SecretKey, secretsPath)
+		account, loaded := accounts[mapping.SecretKey]
+		if !loaded {
+			var found bool
+			var err error
+			account, found, err = secrets.LoadCameraAccount(secretsPath, mapping.SecretKey)
+			if err != nil {
+				return nil, nil, fmt.Errorf("apply: camera %q sign-in at %q: %w", mapping.CameraID, mapping.SecretKey, err)
+			}
+			if !found {
+				return nil, nil, fmt.Errorf("apply: camera %q has no sign-in at %q in %s", mapping.CameraID, mapping.SecretKey, secretsPath)
+			}
+			if err := validateAccount(account); err != nil {
+				return nil, nil, fmt.Errorf("apply: camera %q sign-in at %q: %w", mapping.CameraID, mapping.SecretKey, err)
+			}
+			accounts[mapping.SecretKey] = account
 		}
-		text = strings.TrimSpace(text)
-		if err := validateRTSPURL(text); err != nil {
-			return nil, nil, fmt.Errorf("apply: camera %q RTSP URL at %q in %s is invalid: %w", mapping.CameraID, mapping.SecretKey, secretsPath, err)
+		value := render.CameraStreamURLWithFallback(camera, mapping.Profile, account.Username, account.Password, account.LegacyPath)
+		if err := validateRTSPURL(value); err != nil {
+			return nil, nil, fmt.Errorf("apply: camera %q profile %q URL: %w", mapping.CameraID, mapping.Profile, err)
 		}
 		if previous, duplicate := seenEnv[mapping.EnvName]; duplicate {
 			return nil, nil, fmt.Errorf("apply: cameras %q and %q map to the same environment variable %s", previous, mapping.CameraID, mapping.EnvName)
@@ -58,14 +68,32 @@ func frigateCameraEnv(cfg *config.Config, secretsPath string) ([]byte, []string,
 		seenEnv[mapping.EnvName] = mapping.CameraID
 		lines.WriteString(mapping.EnvName)
 		lines.WriteByte('=')
-		lines.WriteString(text)
+		lines.WriteString(value)
 		lines.WriteByte('\n')
-		values = append(values, text)
+		if !seenValue[value] {
+			seenValue[value] = true
+			values = append(values, value)
+		}
+		for _, secret := range account.Values() {
+			if !seenValue[secret] {
+				seenValue[secret] = true
+				values = append(values, secret)
+			}
+		}
 	}
 	return []byte(lines.String()), values, nil
 }
 
-// CameraSecretValues returns the same camera RTSP URL values Apply registers
+func validateAccount(account secrets.CameraAccount) error {
+	for _, value := range []string{account.Username, account.Password, account.ONVIFUsername, account.ONVIFPassword} {
+		if strings.ContainsAny(value, "\r\n\x00") {
+			return fmt.Errorf("a sign-in value contains a line break or a null byte")
+		}
+	}
+	return nil
+}
+
+// CameraSecretValues returns the same camera credential values Apply registers
 // with its redactor. The update engine calls it so an error from a probe or a
 // data adapter is redacted with the values from secrets.yaml, not only the
 // literals the caller supplied.
@@ -94,38 +122,16 @@ func validateRTSPURL(value string) error {
 	return nil
 }
 
-// lookupSecret resolves a dotted credentials_ref against a YAML document. A
-// literal key containing dots wins over traversal, and a reference to a
-// camera mapping resolves its rtsp_url member so the shorter
-// cameras.front_door form remains valid.
-func lookupSecret(document any, key string) (any, bool) {
-	root, ok := document.(map[string]any)
-	if !ok {
-		return nil, false
+// migrateSecrets upgrades an older camera secret shape before the first read.
+// A migration failure does not stop the apply because the old shape remains
+// readable; the error is reported when the camera account cannot be used.
+func migrateSecrets(secretsPath string) {
+	if strings.TrimSpace(secretsPath) == "" {
+		return
 	}
-	if value, ok := root[key]; ok {
-		return secretValue(value)
+	if _, err := secrets.MigrateCameraAccounts(secretsPath); err != nil {
+		// The read path accepts both shapes, so this is not fatal. Never log
+		// the path's contents or an account value.
+		_ = err
 	}
-	var current any = root
-	for _, segment := range strings.Split(key, ".") {
-		mapping, ok := current.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		current, ok = mapping[segment]
-		if !ok {
-			return nil, false
-		}
-	}
-	return secretValue(current)
-}
-
-func secretValue(value any) (any, bool) {
-	if mapping, ok := value.(map[string]any); ok {
-		if nested, ok := mapping["rtsp_url"]; ok {
-			return nested, true
-		}
-		return nil, false
-	}
-	return value, value != nil
 }

@@ -56,3 +56,30 @@ func securityHeader(credentials Credentials, created time.Time) (string, error) 
 func writeXMLText(buffer *bytes.Buffer, value string) {
 	_ = xml.EscapeText(buffer, []byte(value))
 }
+
+// securityHeaderText builds a WS-Security UsernameToken with the password in
+// text form. Callers must use it only over HTTPS and only with an explicit
+// opt-in; a password in a header is visible to the SOAP layer.
+func securityHeaderText(credentials Credentials, created time.Time) (string, error) {
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return "", fmt.Errorf("generate a security nonce: %w", err)
+	}
+	createdText := created.UTC().Format("2006-01-02T15:04:05.000Z")
+	var buffer bytes.Buffer
+	buffer.WriteString(`<wsse:Security xmlns:wsse="` + wsseNamespace + `" xmlns:wsu="` + wsuNamespace + `" s:mustUnderstand="1">`)
+	buffer.WriteString(`<wsse:UsernameToken>`)
+	buffer.WriteString(`<wsse:Username>`)
+	writeXMLText(&buffer, credentials.Username)
+	buffer.WriteString(`</wsse:Username>`)
+	buffer.WriteString(`<wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">`)
+	writeXMLText(&buffer, credentials.Password)
+	buffer.WriteString(`</wsse:Password>`)
+	buffer.WriteString(`<wsse:Nonce EncodingType="` + nonceEncoding + `">`)
+	buffer.WriteString(base64.StdEncoding.EncodeToString(nonce))
+	buffer.WriteString(`</wsse:Nonce>`)
+	buffer.WriteString(`<wsu:Created>` + createdText + `</wsu:Created>`)
+	buffer.WriteString(`</wsse:UsernameToken>`)
+	buffer.WriteString(`</wsse:Security>`)
+	return buffer.String(), nil
+}

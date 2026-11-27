@@ -1,0 +1,17 @@
+{{define "profile-notices"}}
+{{if .ProfileNotices}}
+<div class="card">
+  <h2>Streams</h2>
+  <p>Bittern read each camera's stream settings during setup. This is what it found.</p>
+  <dl class="facts">
+    {{range .ProfileNotices}}
+    <dt>{{.CameraName}}</dt>
+    <dd data-camera-profile-state="{{.State}}">
+      <span class="state-badge state-{{.Class}}">{{.Label}}</span> {{.Detail}}
+      {{if .Action}}<p class="hint"><strong>Next step</strong> {{.Action}}</p>{{end}}
+    </dd>
+    {{end}}
+  </dl>
+</div>
+{{end}}
+{{end}}

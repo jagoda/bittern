@@ -93,7 +93,7 @@ It is omitted only when the probe fails.
 | `render` | `generation`, `apply_state`, `file_count`, `last_render`, `validation[]` with `name`, `state`, `message` | `generation` is the applied generation from `<state-root>/current` and is null before the first successful apply; `last_render` is null when no successful in-memory render has run |
 | `time` | `state`, `synchronised`, `source`, `stratum`, `offset_milliseconds`, `last_sync`, `zone`, `local_now`, `last_error` | `state` is `ok`, `never-synchronised`, `drifted`, or `unknown`; `source` is null when no upstream source is selected; `last_sync`, `stratum`, and `offset_milliseconds` are null until a first observation; `local_now` is the build time in the configured zone |
 | `frigate` | `configured`, `reachable`, `version`, `camera_count`, `image.state`, `image.digest`, `image.last_error`, `last_error` | `configured` is false and `state` is `unknown` when no camera is enabled; `camera_count` is the number of enabled cameras from `appliance.yaml`, so an unreachable API still reports the configured count; `version` is null until the API answers; `image` is always present and its `digest` is the pinned sha256 value |
-| `cameras` | `items[]` with `id`, `name`, `address`, `mac`, `vendor`, `model`, `enabled`, `stream`, `snapshot`, `recording`, `time`, `distinct_qualities`, `last_seen`, `detail`, `snapshot_at`, `snapshot_bytes` | The list comes from `appliance.yaml` and the camera health cache, not a live camera call. `snapshot` and `stream` are `unknown` until the wizard or an explicit test has run; `last_seen` is null until a check records it; `recording` follows the Frigate section; `time` is the camera clock state below; `distinct_qualities` names the live qualities that render to different streams, so the UI can show one stream instead of offering a false main and sub choice |
+| `cameras` | `items[]` with `id`, `name`, `address`, `mac`, `vendor`, `model`, `enabled`, `stream`, `snapshot`, `recording`, `time`, `profiles`, `distinct_qualities`, `last_seen`, `detail`, `snapshot_at`, `snapshot_bytes` | The list comes from `appliance.yaml` and the camera health cache, not a live camera call. `snapshot` and `stream` are `unknown` until the wizard or an explicit test has run; `last_seen` is null until a check records it; `recording` follows the Frigate section; `time` is the camera clock state below; `profiles` is the stream-profile result below; `distinct_qualities` names the live qualities that render to different streams, so the UI can show one stream instead of offering a false main and sub choice |
 | `storage` | `path`, `present`, `detail_state`, `free_bytes`, `reserve_bytes`, `member_count`, `missing_members[]` | `present` is evidence that a recording drive for the path is attached, not that the directory exists; `detail_state` is `ready`, `not-attached`, `not-mounted`, or `write-test-failed`, and is empty only when the section is `unknown` or the probe cannot read the mount table; `free_bytes` is null unless the path is mounted, so the OS filesystem is never measured as recording storage; `member_count` reports the single media path known to this build, so a configured multi-drive pool is not enumerated until the pool mount work lands |
 | `network` | `lan0` and `cam0`, each with `address`, `carrier`, `last_error` | `address` and `carrier` are null when the interface or sysfs evidence is unavailable |
 | `updates` | `state`, `current_slot`, `current_version`, `current_generation`, `running_generation`, `committed_generation`, `committed_version`, `channel`, `last_check`, `available_version`, `available_generation`, `rollback`, `last_operation`, `current_operation`, `base` | `current_slot` is always null until the OS A/B work claims it; `current_version` and `current_generation` are the running bundle and are null on a kit baseline; `committed_generation` is 0 on a kit baseline; `base` is null until the first update commits; `last_check.result` is `never` before the first check; `current_operation` is absent unless an update or rollback journal is running |
@@ -162,6 +162,37 @@ time, and the last confirmed sync are technical details; the state and its
 detail are the owner copy. The camera time result never changes the overall
 appliance state by itself, because a camera that refuses time still records
 video.
+
+### Camera stream profiles
+
+The `profiles` entry on each camera is the adoption-time ONVIF Media result
+from [ADR 0037](adr/0037-nvr-grid-per-pane-quality-and-full-screen.md) and
+[BIT-027](plan/implementation-plan.md#bit-027-robust-onvif-profiles-ptz-and-field-interoperability).
+It records what the camera advertises, which media service answered, which
+scheme and account worked, where the first authenticated timestamp came from,
+and the reason a sub stream is absent. It never holds a complete URI or a
+credential. A camera is probed once at adoption; the renderer never probes.
+
+| State | Meaning | Primary copy | Next step |
+| --- | --- | --- | --- |
+| `ok` | Two usable profiles were selected | This camera offers two streams. Bittern uses the sharper one for one camera and the lighter one for the camera wall. | None. |
+| `one-stream` | One usable profile, or two profiles that share an encoder | This camera offers one stream. Bittern uses it for both views. | Turn on a second, lighter stream in the camera's own settings, then run setup again. |
+| `onvif-disabled` | The camera does not answer ONVIF, or has it switched off | This camera does not answer ONVIF. It records through the stream address you entered. | Turn on ONVIF in the camera's own settings, then run setup again to use its lighter stream. |
+| `sign-in-rejected` | The camera refused every sign-in scheme and account | This camera refused the sign-in Bittern used for its stream settings. | Check the camera sign-in, or add the camera's ONVIF sign-in on the camera form. |
+| `no-media-service` | ONVIF answers but advertises no Media1 or Media2 service | This camera answers ONVIF but does not offer its stream settings. | Turn on the camera's media or ONVIF profile service, then run setup again. |
+| `no-profile` | Profiles are empty or none is an eligible H.264 or H.265 stream | This camera did not list a video profile Bittern can use. | Check the camera's stream settings, or add the stream address on the camera form. |
+| `no-stream` | Profiles exist but no stream URI passed validation | This camera did not return a usable stream address. | Check the camera's stream settings, or add the stream address on the camera form. |
+| `unreachable` | The camera did not answer the ONVIF endpoint | Bittern could not reach this camera to read its stream settings. | Check the camera's power and network cable, then run setup again. |
+| `clock-unavailable` | The camera rejected the first authenticated timestamp | Bittern could not read this camera's clock, so the camera refused its stream settings. | Set the camera's clock in its own settings, then run setup again. |
+| `malformed` | The camera answered with XML or a service list the client could not read | This camera returned stream settings Bittern could not read. | Update the camera firmware, or add the stream address on the camera form. |
+| `not-probed` | No probe has run for this camera | Bittern has not read this camera's stream profiles yet. | Run setup or edit the camera again. |
+
+Every failure state is a capability record, not an adoption failure. Adoption
+commits the camera, its reservation, and its credential; the manual stream
+address remains in use. The status and the setup wizard both show the primary
+copy and the next step, because a camera with ONVIF switched off or a separate
+ONVIF account is common and the owner must see the action rather than find it
+in a log.
 
 ### Timestamps in the browser
 
