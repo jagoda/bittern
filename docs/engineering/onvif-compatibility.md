@@ -49,7 +49,7 @@ instead of copying that evidence.
 | Model | text or `unknown` | Device-reported model. Never a serial number. |
 | Firmware | text or `unknown` | Device-reported firmware version. A range is allowed only when the evidence covers the range. |
 | ONVIF works | `yes`, `partial`, `no`, `unknown` | Endpoint, auth, profile, high stream and snapshot as defined above. |
-| Manual floor | `yes`, `no`, `unknown` | Manual RTSP plus snapshot works without ONVIF. |
+| Manual floor | `yes`, `no`, `unknown` | Manual RTSP works without ONVIF. A snapshot may come from the stream or from the camera; the Snapshot column records the camera endpoint. |
 | Device service | `http:80`, `https:443`, `http:8000`, `unknown`, with the path | Where the device service answered. The path is expected to be `/onvif/device_service`; a different path needs a quirk. |
 | Services | `Device`, `Media1`, `Media2`, `PTZ`, `Events`, `Imaging`, or `none`, or a combination | Services that answered a namespace or `XAddr` query. Absence is a capability gap, not an adoption failure. |
 | Media | `media1`, `media2`, `both`, `none`, `unknown` | The service used for the row. `both` records that both were advertised; the detail says which was authoritative. |

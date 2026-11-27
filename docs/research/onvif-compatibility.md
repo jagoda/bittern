@@ -367,7 +367,8 @@ The practical consequence is that a camera whose clock is far from the timestamp
 reject an otherwise correct password. The exact window is vendor-specific and undocumented in the
 sources found. A client library issue reports about ten seconds of replay protection on Axis
 cameras; a support article describes ONVIF authentication failures when clocks differ but does not
-state a window. Both are unverified field reports. [S25]; [S24]. The safe rule is not "assume five
+state a window. The exact figures are unverified: [S25] is a client-library report and [S24] is a
+vendor support article that does not state a window. The safe rule is not "assume five
 minutes"; the safe rule is "timestamp from the camera's own clock, and treat a timestamp rejection
 as a distinct failure."
 
