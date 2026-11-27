@@ -1475,7 +1475,7 @@ func TestCameraListShowsManagedFieldsAndActions(t *testing.T) {
 		"Streaming",
 		"Picture received",
 		"Recording",
-		"2026-11-14 12:00:00",
+		"14 Nov 2026, 12:00 UTC",
 		"Enabled",
 		"/ui/cameras/front_door/edit",
 		"/ui/cameras/front_door/snapshot",
@@ -1751,4 +1751,83 @@ func TestStatusPageShowsTheRecordingSoftwareBeforeTheFirstCamera(t *testing.T) {
 	if strings.Contains(body, "ghcr.io") {
 		t.Fatal("status page shows the raw image reference in primary copy")
 	}
+}
+
+// TestWizardCapturesBrowserTimezone posts the time zone the review page
+// captured from the browser, and proves the request carries it to the applier.
+func TestWizardCapturesBrowserTimezone(t *testing.T) {
+	applier := &fakeApplier{}
+	server, client := newTestServer(t, Options{Applier: applier})
+	review := completeToReview(t, client, server.URL)
+	assertContains(t, review,
+		`id="setup-timezone"`,
+		`name="timezone"`,
+		`value="UTC"`,
+		`data-timezone-set="false"`,
+		"/ui/static/setup-timezone.js",
+	)
+	statusCode, done := postPage(t, client, server.URL+"/ui/wizard/apply", url.Values{
+		"timezone": {"Europe/Berlin"},
+	})
+	if statusCode != http.StatusOK {
+		t.Fatalf("apply status: %d\n%s", statusCode, done)
+	}
+	if len(applier.calls) != 1 {
+		t.Fatalf("apply calls: %d", len(applier.calls))
+	}
+	if applier.calls[0].Timezone != "Europe/Berlin" {
+		t.Fatalf("timezone in apply request = %q, want Europe/Berlin", applier.calls[0].Timezone)
+	}
+}
+
+// TestWizardTimezoneFallsBackToUTC covers JavaScript off and an unusable
+// browser value: the apply still runs and the zone is UTC.
+func TestWizardTimezoneFallsBackToUTC(t *testing.T) {
+	cases := []struct {
+		name   string
+		values url.Values
+	}{
+		{name: "no field", values: url.Values{}},
+		{name: "empty field", values: url.Values{"timezone": {""}}},
+		{name: "unreadable value", values: url.Values{"timezone": {"Mars/Olympus_Mons"}}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			applier := &fakeApplier{}
+			server, client := newTestServer(t, Options{Applier: applier})
+			completeToReview(t, client, server.URL)
+			statusCode, done := postPage(t, client, server.URL+"/ui/wizard/apply", testCase.values)
+			if statusCode != http.StatusOK {
+				t.Fatalf("apply status: %d\n%s", statusCode, done)
+			}
+			if len(applier.calls) != 1 {
+				t.Fatalf("apply calls: %d", len(applier.calls))
+			}
+			if applier.calls[0].Timezone != "UTC" {
+				t.Fatalf("timezone in apply request = %q, want UTC", applier.calls[0].Timezone)
+			}
+		})
+	}
+}
+
+// TestWizardKeepsTheOwnerTimezoneOverride proves a submitted zone is kept on
+// the review page rather than being replaced by the browser prefill again.
+func TestWizardKeepsTheOwnerTimezoneOverride(t *testing.T) {
+	server, client := newTestServer(t, Options{Applier: &fakeApplier{err: context.Canceled}})
+	completeToReview(t, client, server.URL)
+	statusCode, body := postPage(t, client, server.URL+"/ui/wizard/apply", url.Values{
+		"timezone": {"America/New_York"},
+	})
+	if statusCode != http.StatusOK {
+		t.Fatalf("apply status: %d\n%s", statusCode, body)
+	}
+	statusCode, review := getPage(t, client, server.URL+"/ui/wizard/review")
+	if statusCode != http.StatusOK {
+		t.Fatalf("review status: %d", statusCode)
+	}
+	assertContains(t, review,
+		`data-timezone="America/New_York"`,
+		`data-timezone-set="true"`,
+		`value="America/New_York"`,
+	)
 }

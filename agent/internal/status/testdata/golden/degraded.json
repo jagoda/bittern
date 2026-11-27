@@ -41,6 +41,17 @@
         }
       ]
     },
+    "time": {
+      "state": "ok",
+      "synchronised": true,
+      "source": "192.0.2.10",
+      "stratum": 2,
+      "offset_milliseconds": 3,
+      "last_sync": "2026-11-14T11:55:00Z",
+      "zone": "UTC",
+      "local_now": "2026-11-14T12:00:00Z",
+      "last_error": ""
+    },
     "frigate": {
       "state": "degraded",
       "configured": true,

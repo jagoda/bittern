@@ -16,6 +16,8 @@
     <dd>{{if .Preview}}Preview, not saved{{else}}Not saved yet{{end}}</dd>
     <dt>Hostname</dt>
     <dd>{{.Plan.Hostname}}</dd>
+    <dt>Time zone</dt>
+    <dd data-timezone="{{.Plan.Timezone}}">{{.Plan.Timezone}}</dd>
     <dt>House network</dt>
     <dd>{{if eq .Plan.LANMode "DHCP"}}Automatic address{{else}}Address{{end}}, currently {{.Plan.LANAddress}}</dd>
     <dt>Camera network</dt>
@@ -62,14 +64,20 @@
 <div class="card">
   <h2>Apply the configuration</h2>
   <p>Bittern checks the configuration, saves it, and starts the recording service. If a check fails, nothing changes.</p>
-  <p class="hint">The apply can take a minute or two while the recording service starts. The next page names the step that is running and how long it has taken. You can leave it; the apply continues on the appliance.</p>
   <form method="post" action="/ui/wizard/apply" data-busy="true" data-busy-label="Starting the apply...">
     {{template "csrf" .}}
+    <div class="field">
+      <label for="setup-timezone">Time zone</label>
+      <p class="hint" id="setup-timezone-hint">Times are shown in this zone, and the cameras follow the appliance clock. Bittern keeps the appliance clock in UTC, so daylight saving changes only what is shown.</p>
+      <input id="setup-timezone" name="timezone" type="text" value="{{.Timezone}}" autocomplete="off" spellcheck="false" aria-describedby="setup-timezone-hint" data-timezone-set="{{if .TimezoneSet}}true{{else}}false{{end}}" />
+    </div>
     <div class="form-actions">
       <button type="submit">Apply configuration</button>
       <a href="/ui/wizard/camera">Change cameras</a>
       <a href="/ui/wizard">Back to welcome</a>
     </div>
   </form>
+  <p class="hint">The apply can take a minute or two while the recording service starts. The next page names the step that is running and how long it has taken. You can leave it; the apply continues on the appliance.</p>
 </div>
+<script src="/ui/static/setup-timezone.js" defer="defer"></script>
 {{template "foot" .}}{{end}}

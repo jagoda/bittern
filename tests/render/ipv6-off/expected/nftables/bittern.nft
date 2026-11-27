@@ -37,6 +37,10 @@ table inet bittern {
 
         # Cameras get DHCP and NTP only. cam0 has no DNS service.
         iifname "cam0" udp dport 67 accept
+
+        # The only NTP accept. Time is served on the camera segment only; lan0
+        # and the tailnet get no answer, and a missing camera role removes the
+        # rule instead of leaving a listener open (ADR 0035).
         iifname "cam0" udp dport 123 accept
     }
 

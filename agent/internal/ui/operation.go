@@ -13,6 +13,7 @@ import (
 	"bittern.invalid/agent/internal/apply"
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/render"
+	"bittern.invalid/agent/internal/timezone"
 )
 
 const (
@@ -434,7 +435,7 @@ func writeOperation(root string, record *Operation) error {
 	return nil
 }
 
-func operationView(record *Operation, now time.Time, busy bool) OperationView {
+func operationView(record *Operation, now time.Time, busy bool, location *time.Location) OperationView {
 	if record == nil {
 		return OperationView{}
 	}
@@ -506,12 +507,12 @@ func operationView(record *Operation, now time.Time, busy bool) OperationView {
 		}
 	}
 	if startErr == nil {
-		view.StartedAt = started.UTC().Format("2006-01-02 15:04:05")
+		view.StartedAt = timezone.Format(started, location)
 		view.Elapsed = humanDuration(finished.Sub(started))
 	}
 	if record.FinishedAt != "" {
 		if parsed, err := time.Parse(time.RFC3339, record.FinishedAt); err == nil {
-			view.FinishedAt = parsed.UTC().Format("2006-01-02 15:04:05")
+			view.FinishedAt = timezone.Format(parsed, location)
 		}
 	}
 	return view

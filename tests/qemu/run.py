@@ -2007,8 +2007,10 @@ class FirstbootScenario:
         self.run_phase("cam0-down", self.assert_cam0_down_status)
         self.run_phase("dhcp-lease", self.assert_dhcp_lease)
         self.run_phase("wizard", self.drive_wizard)
+        self.run_phase("time", self.assert_time_serving)
         self.run_phase("post-apply-reboot", self.reboot_after_apply)
         self.run_phase("post-reboot", self.assert_appliance_units_after_reboot)
+        self.run_phase("time-after-reboot", self.assert_time_serving)
         self.run_phase("live-view", self.assert_live_view)
         self.run_phase("docker-frigate", self.restart_docker_with_frigate)
         self.run_phase("assertions", self.assert_applied)
@@ -2682,6 +2684,166 @@ class FirstbootScenario:
             f"({FRIGATE_IMAGE_DIGEST}) is present locally"
         )
 
+    # The NTP probe binds its source address so the request leaves on the
+    # interface under test. A camera-segment request must be answered; a
+    # house-network request must not be, because chrony never listens there.
+    NTP_PROBE = r"""
+import socket
+import sys
+
+host = sys.argv[1]
+source = sys.argv[2]
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.settimeout(3)
+sock.bind((source, 0))
+request = b"\x1b" + 47 * b"\x00"
+try:
+    sock.sendto(request, (host, 123))
+    response, _ = sock.recvfrom(48)
+except OSError as error:
+    print("no-reply " + type(error).__name__)
+    sys.exit(1)
+print("reply " + str(len(response)))
+"""
+
+    def assert_time_serving(self) -> str:
+        # ADR 0035: chrony serves on the camera interface and nowhere else,
+        # the rendered configuration is the one that survives a reboot, and no
+        # boot unit waits for synchronisation.
+        appliance = self.appliance
+        cam_address = self.config["network"]["cam"]["appliance_address"]
+        subnet = self.config["network"]["cam"]["subnet"]
+        config = appliance.ssh(
+            "sudo -n cat /etc/chrony/chrony.conf", timeout=30
+        ).stdout
+        for directive in (
+            "bindacqdevice lan0",
+            "makestep 1.0 3",
+            "rtcsync",
+            "local stratum 10",
+            f"bindaddress {cam_address}",
+            f"allow {subnet}",
+        ):
+            if directive not in config.splitlines():
+                raise HarnessError(
+                    f"the live chrony configuration is missing {directive!r}:\n{config}"
+                )
+        if "port 0" in config.splitlines():
+            raise HarnessError(
+                "the live chrony configuration disabled the camera NTP server:\n" + config
+            )
+
+        listeners = appliance.ssh("ss -lun", timeout=30).stdout
+        if f"{cam_address}:123" not in listeners:
+            raise HarnessError(
+                f"chrony is not listening on the camera address {cam_address}:123:\n{listeners}"
+            )
+        for wildcard in ("0.0.0.0:123", "*:123", "[::]:123"):
+            if wildcard in listeners:
+                raise HarnessError(
+                    f"chrony listens on every address ({wildcard}):\n{listeners}"
+                )
+        lan_address = appliance.ssh(
+            "ip -4 -o addr show dev lan0 | awk '{print $4}' | cut -d/ -f1 | head -n 1",
+            timeout=30,
+        ).stdout.strip()
+        if not lan_address:
+            raise HarnessError("the appliance has no lan0 address for the NTP probe")
+        if f"{lan_address}:123" in listeners:
+            raise HarnessError(
+                f"chrony listens on the house network address {lan_address}:123:\n{listeners}"
+            )
+
+        firewall = appliance.ssh(
+            "sudo -n nft list chain inet bittern input", timeout=30
+        ).stdout
+        ntp_accepts = [
+            line.strip()
+            for line in firewall.splitlines()
+            if "udp dport 123" in line and line.strip().endswith("accept")
+        ]
+        if ntp_accepts != ['iifname "cam0" udp dport 123 accept']:
+            raise HarnessError(
+                "the firewall NTP accepts are not exactly one on cam0: "
+                f"{ntp_accepts!r}\n{firewall}"
+            )
+
+        camera_reply = appliance.ssh(
+            f"python3 -c {shlex.quote(self.NTP_PROBE)} {cam_address} {cam_address}",
+            timeout=30,
+            check=False,
+        )
+        if camera_reply.returncode != 0 or not camera_reply.stdout.startswith("reply"):
+            raise HarnessError(
+                "a request on the camera interface was not answered: "
+                f"{camera_reply.stdout}{camera_reply.stderr}"
+            )
+        house_reply = appliance.ssh(
+            f"python3 -c {shlex.quote(self.NTP_PROBE)} {lan_address} {lan_address}",
+            timeout=30,
+            check=False,
+        )
+        if house_reply.returncode == 0 and house_reply.stdout.startswith("reply"):
+            raise HarnessError(
+                f"a request on the house network was answered: {house_reply.stdout}"
+            )
+
+        waits = appliance.ssh(
+            "systemctl is-enabled chrony-wait.service systemd-time-wait-sync.service "
+            "2>/dev/null || true",
+            timeout=30,
+        ).stdout.split()
+        for state in waits:
+            if state in ("enabled", "enabled-runtime"):
+                raise HarnessError(
+                    "a boot unit still waits for time synchronisation: "
+                    f"{waits!r}"
+                )
+
+        configured = appliance.ssh(
+            "sudo -n sh -c \"grep -E '^[[:space:]]+timezone:' /etc/bittern/appliance.yaml "
+            "| head -n 1 | sed 's/.*timezone:[[:space:]]*//'\"",
+            timeout=30,
+        ).stdout.strip()
+        if configured != "Europe/Berlin":
+            raise HarnessError(
+                f"the wizard time zone was not written: {configured!r}"
+            )
+        document = self.status_payload()
+        section = document.get("sections", {}).get("time", {})
+        if section.get("state") not in ("ok", "never-synchronised", "drifted", "unknown"):
+            raise HarnessError(
+                f"the status time section has no documented state: {section!r}"
+            )
+        if section.get("zone") != "Europe/Berlin":
+            raise HarnessError(
+                f"the status time zone is not the configured zone: {section!r}"
+            )
+        if not section.get("local_now", "").endswith(("+01:00", "+02:00")):
+            raise HarnessError(
+                f"the status local time does not carry the Berlin offset: {section!r}"
+            )
+
+        evidence = (
+            f"$ cat /etc/chrony/chrony.conf\n{config}\n"
+            f"$ ss -lun\n{listeners}\n"
+            f"$ nft list chain inet bittern input\n{firewall}\n"
+            f"$ NTP probe cam0 {cam_address} from {cam_address}\n"
+            f"{camera_reply.stdout}{camera_reply.stderr}\n"
+            f"$ NTP probe lan0 {lan_address} from {lan_address}\n"
+            f"{house_reply.stdout}{house_reply.stderr}\n"
+            f"$ GET /api/status time\n{json.dumps(section, indent=2, sort_keys=True)}\n"
+        )
+        (self.log_dir / "time-serving.txt").write_text(
+            self.redact(evidence), encoding="utf-8"
+        )
+        self.capture("time-serving.txt", evidence)
+        return (
+            f"chrony listens on {cam_address}:123 only, answers on the camera "
+            f"segment and not on {lan_address}, the only firewall NTP accept is on "
+            f"cam0, no boot unit waits for time, and the wizard zone is Berlin"
+        )
+
     def reboot_after_apply(self) -> str:
         # Apply must have enabled the rendered unit before this point. Record
         # the pre-reboot state for the failure message, then reboot without any
@@ -3136,12 +3298,14 @@ class FirstbootScenario:
                 "password_confirm": self.admin_password,
             },
         )
-        if status != 303 or location != "/ui/status":
+        # Setup is not complete until the configuration is applied, so the
+        # authenticated landing is the wizard, not status.
+        if status != 303 or location != "/ui/wizard":
             raise HarnessError(
                 f"a second setup submission returned HTTP {status} Location {location!r}"
             )
         status, location, _ = client._request("GET", "/ui/setup")
-        if status != 303 or location != "/ui/status":
+        if status != 303 or location != "/ui/wizard":
             raise HarnessError(
                 f"a setup reload returned HTTP {status} Location {location!r}"
             )
@@ -3195,7 +3359,9 @@ class FirstbootScenario:
         require_data(body, "data-camera-address", self.camera_address, "review page")
         require_data(body, "data-camera-port", str(self.camera_port), "review page")
         require_data(body, "data-camera-path", self.camera_path, "review page")
-        location, _ = client.post("/ui/wizard/apply", timeout=1800)
+        location, _ = client.post(
+            "/ui/wizard/apply", {"timezone": "Europe/Berlin"}, timeout=1800
+        )
         if location.startswith("/ui/wizard/apply"):
             deadline = time.monotonic() + 1800
             while time.monotonic() < deadline:
@@ -3413,9 +3579,10 @@ class FirstbootScenario:
             {"username": "admin", "password": self.admin_password},
             expect=303,
         )
-        if location != "/ui/status":
+        # With an applied camera, the signed-in landing is live view.
+        if location != "/ui/live":
             raise HarnessError(
-                f"live view sign-in returned Location {location!r}, expected /ui/status"
+                f"live view sign-in returned Location {location!r}, expected /ui/live"
             )
         page = client.get_page("/ui/live/camera_1")
         require_data(page, "data-live-player", "true", "live page")

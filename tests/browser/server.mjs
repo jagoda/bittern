@@ -170,6 +170,8 @@ export async function startBitternd({
       `127.0.0.1:${uiPort}`,
       "--config",
       configPath,
+      "--state-root",
+      stateRoot,
       "--ui-secrets",
       secretsPath,
       "--ui-auth-state",

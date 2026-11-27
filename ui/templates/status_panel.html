@@ -4,7 +4,7 @@
   <h2 id="status-summary-heading">Overall state</h2>
   <p><span class="state-badge state-{{.Status.State}}">{{overallLabel .Status.State}}</span></p>
   <p>{{.Status.Reason}}</p>
-  <p class="meta">Last checked {{datetime .Status.GeneratedAt}} UTC. This page is read-only.</p>
+  <p class="meta">Last checked {{localTime .Status.GeneratedAt .Zone}}. This page is read-only.</p>
   {{if and .MockPreview .StateOptions}}
   <nav class="state-links" aria-label="Preview status states">
     <h3>Preview another state</h3>
@@ -76,7 +76,7 @@
     <dt>Files written</dt>
     <dd>{{.Status.Sections.Render.FileCount}}</dd>
     <dt>Last written</dt>
-    <dd>{{ptrTime .Status.Sections.Render.LastRender}}</dd>
+    <dd>{{localTimePtr .Status.Sections.Render.LastRender .Zone}}</dd>
   </dl>
   {{if .Status.Sections.Render.Validation}}
   <p class="table-caption" id="status-render-checks">Configuration file checks</p>
@@ -113,6 +113,24 @@
   <p>No configuration file checks have reported yet.</p>
   {{end}}
   {{end}}
+</section>
+
+<section class="card" aria-labelledby="status-time">
+  <div class="section-heading">
+    <h2 id="status-time">Clock</h2>
+    <span class="state-badge state-{{timeStateClass .Status.Sections.Time.State}}">{{timeStateLabel .Status.Sections.Time.State}}</span>
+  </div>
+  <p>{{timePrimaryCopy .Status.Sections.Time}}</p>
+  {{if timeNextAction .Status.Sections.Time.State}}<p><strong>Next step</strong> {{timeNextAction .Status.Sections.Time.State}}</p>{{end}}
+  <dl class="facts">
+    <dt>Appliance time</dt>
+    <dd>{{if .Status.Sections.Time.LocalNow.IsZero}}Not available{{else}}{{localTime .Status.Sections.Time.LocalNow .Status.Sections.Time.Zone}}{{end}}</dd>
+    <dt>Time zone</dt>
+    <dd>{{.Status.Sections.Time.Zone}}</dd>
+    <dt>Last checked</dt>
+    <dd>{{localTimePtr .Status.Sections.Time.LastSync .Status.Sections.Time.Zone}}</dd>
+  </dl>
+  <p class="hint">{{timeCameraCopy}}</p>
 </section>
 
 <section class="card" aria-labelledby="status-frigate">
@@ -222,7 +240,7 @@
     <dt>Last reset</dt>
     <dd>{{if .Status.Sections.Reset.CompletedAt}}Completed{{else}}No reset recorded{{end}}</dd>
     <dt>Completed</dt>
-    <dd>{{ptrTime .Status.Sections.Reset.CompletedAt}}</dd>
+    <dd>{{localTimePtr .Status.Sections.Reset.CompletedAt .Zone}}</dd>
   </dl>
 </section>
 
@@ -244,7 +262,7 @@
     <dt>Overall state</dt>
     <dd><code>{{.Status.State}}</code></dd>
     <dt>Status generated</dt>
-    <dd>{{datetime .Status.GeneratedAt}} UTC</dd>
+    <dd>{{localTime .Status.GeneratedAt .Zone}}</dd>
     <dt>Configuration file</dt>
     <dd><code>{{.Status.Sections.Config.Path}}</code></dd>
     <dt>Configuration format version</dt>
@@ -262,7 +280,21 @@
     <dt>Files written</dt>
     <dd>{{.Status.Sections.Render.FileCount}}</dd>
     <dt>Last written</dt>
-    <dd>{{ptrTime .Status.Sections.Render.LastRender}}</dd>
+    <dd>{{localTimePtr .Status.Sections.Render.LastRender .Zone}}</dd>
+    <dt>Clock state</dt>
+    <dd><code>{{.Status.Sections.Time.State}}</code></dd>
+    <dt>Clock set from a source</dt>
+    <dd>{{yesno .Status.Sections.Time.Synchronised}}</dd>
+    {{if .Status.Sections.Time.Source}}<dt>Time source</dt>
+    <dd>{{ptrString .Status.Sections.Time.Source}}</dd>{{end}}
+    {{if .Status.Sections.Time.Stratum}}<dt>Time source level</dt>
+    <dd>{{ptrInt .Status.Sections.Time.Stratum}}</dd>{{end}}
+    {{if .Status.Sections.Time.OffsetMilliseconds}}<dt>Clock offset</dt>
+    <dd>{{ptrInt64 .Status.Sections.Time.OffsetMilliseconds}} milliseconds</dd>{{end}}
+    <dt>Clock zone</dt>
+    <dd>{{.Status.Sections.Time.Zone}}</dd>
+    {{if .Status.Sections.Time.LastError}}<dt>Clock read error</dt>
+    <dd>{{.Status.Sections.Time.LastError}}</dd>{{end}}
     <dt>Recording service state</dt>
     <dd><code>{{.Status.Sections.Frigate.State}}</code></dd>
     {{if .Status.Sections.Frigate.Version}}<dt>Recording service version</dt>
@@ -310,7 +342,7 @@
     <dt>Reset level</dt>
     <dd>{{ptrString .Status.Sections.Reset.Level}}</dd>
     <dt>Reset completed</dt>
-    <dd>{{ptrTime .Status.Sections.Reset.CompletedAt}}</dd>
+    <dd>{{localTimePtr .Status.Sections.Reset.CompletedAt .Zone}}</dd>
     {{with .Status.Sections.Hardware}}
     <dt>Hardware state</dt>
     <dd><code>{{.State}}</code></dd>

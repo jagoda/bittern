@@ -43,6 +43,15 @@ do-not-edit header to those outputs.
 The templates are Go `text/template` inputs. They contain placeholders and comments only; the
 do-not-edit header is added by the renderer so every family has the same first lines.
 
+The chrony template implements the appliance half of
+[ADR 0035](../docs/adr/0035-appliance-as-time-authority.md). It binds acquisition to `lan0`, binds the
+NTP server to the camera address, allows the camera subnet only, and carries `local stratum 10` so an
+appliance with no source still gives every camera one clock. `makestep 1.0 3` and `rtcsync` keep the
+system clock and the RTC in UTC. When the document has no camera address the template emits `port 0`
+instead of `bindaddress` and `allow`: chrony disables the server rather than binding every address,
+and a bare `allow` (which admits every client) is never rendered. The nftables template accepts UDP
+123 on `cam0` only, and removes that accept when the camera role is absent.
+
 The Go module is under `agent/`, and `go:embed` cannot reach above its module root. A build step
 copies this directory, `defaults/`, and `schema/appliance.schema.json` into the gitignored
 `agent/internal/assets/` tree. `make assets` runs the copy, and `make test` and `make render`

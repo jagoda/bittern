@@ -358,11 +358,16 @@ These are open after step 5. The first is the next action; the rest do not block
    install path is a bridge, and the first device that is not the maintainer's needs a reproducible
    supported base. Decide it before that trigger; it does not block the bench rollout.
 7. **Time synchronisation.** [ADR 0035](../adr/0035-appliance-as-time-authority.md) is accepted. It
-   follows the apply-on-update and migration persistence work. Its tzdata copy, status `time`
-   section, and ONVIF time client use the same app bundle and delivery mechanism; it must not add a
-   second subsystem write path. If it adds a signed manifest field for the IANA release, the v2 field
-   set and the release tooling must agree before either ships. The time-source choice itself remains
+   follows the apply-on-update and migration persistence work. Its tzdata copy and ONVIF time client
+   use the same app bundle and delivery mechanism; it must not add a second subsystem write path. If
+   it adds a signed manifest field for the IANA release, the v2 field set and the release tooling
+   must agree before either ships. The time-source choice itself remains
    [OQ-20](../open-questions.md).
+   **Appliance half landed 2026-11-27:** the rendered chrony configuration is a client on `lan0` and
+   a camera-only server with `local stratum 10`, the firewall accepts NTP on `cam0` only, the wizard
+   captures `identity.timezone` with a UTC fallback, browser timestamps render in that zone, and the
+   status `time` section reports `ok`, `never-synchronised`, `drifted`, or `unknown`. The camera half
+   is the remaining slice. See [the appliance time note](../notes/2026-11-27-appliance-time.md).
 
 **Subsystem delivery order (2026-11-26).** For the work this ADR creates, the order is: first this
 decision and the manifest v2 change; then the apply-on-update and migration persistence work, with

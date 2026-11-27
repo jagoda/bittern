@@ -10,12 +10,29 @@ temporary directory and compares the tree byte for byte.
 | `ipv6-off` | `ipv6-off/appliance.yaml` | `ipv6-off/expected/` | `cam0` is IPv4-only; Tailscale adds no inbound tailnet service rule; `lan0` matches by MAC and `cam0` by PCI path in the `.link` files |
 | `poc-gk41` | `schema/examples/poc-gk41.yaml` | `poc-gk41/expected/` | Coral USB detection plus VAAPI decode: `/dev/bus/usb`, `/dev/dri`, and the numeric `video` (44) and `render` (992) GIDs |
 | `hailo-qsv` | `hailo-qsv/appliance.yaml` | `hailo-qsv/expected/` | Hailo-8 detection plus QSV decode: `/dev/hailo0` and `/dev/dri`, with no `/dev/bus/usb`; direct RTSP URLs and no env file |
-| `no-cameras` | `no-cameras/appliance.yaml` | `no-cameras/expected/` | No Frigate config, compose file, or unit, because Frigate with zero cameras is not a valid service |
+| `no-cameras` | `no-cameras/appliance.yaml` | `no-cameras/expected/` | No Frigate config, compose file, or unit, because Frigate with zero cameras is not a valid service; chrony still serves the configured camera network |
+| `camera-role-absent` | Built in the test, with no `cam0` address | `camera-role-absent/expected/` | The chrony server is disabled with `port 0` rather than binding every address, no `allow` line is rendered, and nftables accepts no NTP packet |
 | `reserved-camera` | `reserved-camera/appliance.yaml` | `reserved-camera/expected/` | A camera inside the dynamic pool with a MAC renders `dnsmasq/reservations.conf` with one `dhcp-host` entry; a camera without a MAC is rejected |
 | `overlap` | `overlap/appliance.yaml` | none | `lan0` and `cam0` overlap; validation fails at `$.network.lan0.subnet` with `network.subnet-overlap` and no file is written |
 
 The `overlap` case deliberately has no `expected/` directory. The test asserts that validation fails
-and that the output directory stays empty. `networkd/10-lan0.link` and `networkd/10-cam0.link` are
+and that the output directory stays empty. The `camera-role-absent` case is a partial document that
+cannot pass schema validation, so it is rendered directly from a built `config.Config` rather than
+from a fixture path. It covers the staged-document safety rule: an unconfigured camera role must not
+leave an NTP listener open.
+
+## Time contract
+
+The chrony and nftables goldens are the appliance half of
+[ADR 0035](../../docs/adr/0035-appliance-as-time-authority.md), and two Go tests assert the rules
+rather than only the bytes:
+
+| Rule | Test |
+| --- | --- |
+| Acquisition is bound to `lan0`, the server to the camera address, and the allowed client set is the camera subnet | `TestChronyServesCameraNetworkOnly` |
+| The local reference is present and keeps cameras on one clock with no source | `TestChronyServesCameraNetworkOnly` |
+| A document without a camera role has `port 0`, no `bindaddress`, and no `allow` | `TestChronyDisablesServerWithoutCameraRole` |
+| Exactly one `udp dport 123 accept` exists, on `cam0`, and none exists on `lan0`, the tailnet, or an absent camera role | `TestNftablesAllowsNTPOnCameraInterfaceOnly` | `networkd/10-lan0.link` and `networkd/10-cam0.link` are
 renderer output when the document has `network.*.match`; the files carry the same do-not-edit header
 as every other generated file.
 

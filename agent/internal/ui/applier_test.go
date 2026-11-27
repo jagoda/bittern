@@ -80,6 +80,7 @@ func TestAgentApplierPersistsWizardChangesAndCallsApply(t *testing.T) {
 	err := applier.Apply(context.Background(), ApplyRequest{
 		ConfigPath:  configPath,
 		Hostname:    "kitchen",
+		Timezone:    "Europe/Berlin",
 		LANMode:     "DHCP",
 		LANAddress:  "192.168.50.20/24",
 		CAM0Address: "10.77.0.1/24",
@@ -94,6 +95,9 @@ func TestAgentApplierPersistsWizardChangesAndCallsApply(t *testing.T) {
 	}
 	if applied.Identity.Hostname != "kitchen" {
 		t.Fatalf("hostname = %q, want kitchen", applied.Identity.Hostname)
+	}
+	if applied.Identity.Timezone != "Europe/Berlin" {
+		t.Fatalf("timezone = %q, want Europe/Berlin", applied.Identity.Timezone)
 	}
 	if applied.Network.LAN0.Subnet != "192.168.50.0/24" {
 		t.Fatalf("lan0 subnet = %q, want 192.168.50.0/24", applied.Network.LAN0.Subnet)
@@ -115,6 +119,52 @@ func TestAgentApplierPersistsWizardChangesAndCallsApply(t *testing.T) {
 	}
 	if reloaded.Identity.Hostname != "kitchen" || len(reloaded.Cameras) != 1 {
 		t.Fatalf("written config was not updated: %+v", reloaded)
+	}
+	if reloaded.Identity.Timezone != "Europe/Berlin" {
+		t.Fatalf("written timezone = %q, want Europe/Berlin", reloaded.Identity.Timezone)
+	}
+}
+
+// TestAgentApplierTimezoneFallback proves an empty or unreadable browser zone
+// still completes setup and lands on UTC. No path writes a local time and the
+// schema is unchanged.
+func TestAgentApplierTimezoneFallback(t *testing.T) {
+	cases := []struct {
+		name     string
+		timezone string
+		want     string
+	}{
+		{name: "empty", timezone: "", want: "UTC"},
+		{name: "unreadable", timezone: "Mars/Olympus_Mons", want: "UTC"},
+		{name: "local is refused", timezone: "Local", want: "UTC"},
+		{name: "valid", timezone: "America/New_York", want: "America/New_York"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			configPath := writeApplierFixture(t)
+			applier := AgentApplier{applyFn: func(*config.Config, apply.Options) (apply.Result, error) {
+				return apply.Result{Status: apply.StatusApplied, Generation: 1}, nil
+			}}
+			err := applier.Apply(context.Background(), ApplyRequest{
+				ConfigPath:  configPath,
+				Hostname:    "bittern",
+				Timezone:    testCase.timezone,
+				LANMode:     "DHCP",
+				LANAddress:  "192.168.50.20/24",
+				CAM0Address: "10.77.0.1/24",
+				StoragePath: "/mnt/recordings",
+			})
+			if err != nil {
+				t.Fatalf("apply: %v", err)
+			}
+			reloaded, validationErrors := config.Load(configPath)
+			if len(validationErrors) != 0 {
+				t.Fatalf("written config is invalid: %v", validationErrors)
+			}
+			if reloaded.Identity.Timezone != testCase.want {
+				t.Fatalf("timezone = %q, want %q", reloaded.Identity.Timezone, testCase.want)
+			}
+		})
 	}
 }
 

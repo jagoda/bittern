@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"bittern.invalid/agent/internal/status"
+	"bittern.invalid/agent/internal/timezone"
 )
 
 func ptrString(value *string) string {
@@ -37,13 +38,6 @@ func ptrBool(value *bool) string {
 	return yesno(*value)
 }
 
-func ptrTime(value *time.Time) string {
-	if value == nil {
-		return "Unknown"
-	}
-	return datetime(*value)
-}
-
 func yesno(value bool) string {
 	if value {
 		return "Yes"
@@ -51,15 +45,53 @@ func yesno(value bool) string {
 	return "No"
 }
 
-func datetime(value time.Time) string {
-	return value.UTC().Format("2006-01-02 15:04:05")
+// localTime renders a timestamp in the configured IANA zone with the zone
+// abbreviation and offset, for example "26 Nov 2026, 21:53 CET (UTC+01:00)".
+func localTime(value time.Time, zone string) string {
+	return timezone.Format(value, timezone.Load(zone))
 }
 
-func datetimePtr(value *time.Time) string {
+// localTimePtr is localTime for an optional timestamp.
+func localTimePtr(value *time.Time, zone string) string {
 	if value == nil {
-		return "Not seen yet"
+		return "Not yet"
 	}
-	return datetime(*value)
+	return localTime(*value, zone)
+}
+
+// offsetPhrase turns the current clock offset into plain language. The source
+// sign is not shown: an owner needs the size, not the direction.
+func offsetPhrase(milliseconds *int64) string {
+	if milliseconds == nil {
+		return "an unknown amount"
+	}
+	absolute := *milliseconds
+	if absolute < 0 {
+		absolute = -absolute
+	}
+	switch {
+	case absolute < 1000:
+		return "less than a second"
+	case absolute < 60000:
+		return "about " + countPhrase(int64(float64(absolute)/1000+0.5), "second")
+	case absolute < 3600000:
+		return "about " + countPhrase(int64(float64(absolute)/60000+0.5), "minute")
+	default:
+		return "more than an hour"
+	}
+}
+
+func countPhrase(value int64, unit string) string {
+	if value == 1 {
+		return "one " + unit
+	}
+	if value >= 2 && value <= 10 {
+		return map[int64]string{
+			2: "two", 3: "three", 4: "four", 5: "five",
+			6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten",
+		}[value] + " " + unit + "s"
+	}
+	return strconv.FormatInt(value, 10) + " " + unit + "s"
 }
 
 func bytesPtr(value *uint64) string {
@@ -153,6 +185,33 @@ func recordingSoftwareLabel(state string) string {
 		return "Not available"
 	default:
 		return "Unknown"
+	}
+}
+
+// timeStateLabel is the badge label for the appliance clock state. The copy
+// stays plain; mechanisms such as NTP belong in technical details.
+func timeStateLabel(state status.TimeState) string {
+	switch state {
+	case status.TimeOK:
+		return "Checked"
+	case status.TimeNeverSynchronised:
+		return "Not checked"
+	case status.TimeDrifted:
+		return "May be off"
+	default:
+		return "Not checked"
+	}
+}
+
+// timeStateClass maps the clock state onto the shared badge classes.
+func timeStateClass(state status.TimeState) string {
+	switch state {
+	case status.TimeOK:
+		return "ok"
+	case status.TimeNeverSynchronised, status.TimeDrifted:
+		return "degraded"
+	default:
+		return "unknown"
 	}
 }
 

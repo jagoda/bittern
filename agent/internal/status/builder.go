@@ -55,6 +55,9 @@ func New(configPath string, options Options) *Builder {
 	if probes.Render == nil {
 		probes.Render = defaults.Render
 	}
+	if probes.Time == nil {
+		probes.Time = defaults.Time
+	}
 	if probes.Frigate == nil {
 		probes.Frigate = defaults.Frigate
 	}
@@ -169,6 +172,7 @@ func (b *Builder) Build(ctx context.Context) Document {
 	}
 
 	document.Sections.Render = b.buildRender(configValid, configObservation.Config, &reasons)
+	document.Sections.Time = b.buildTime(configObservation.Config, b.probes.Time.Probe(ctx))
 	configuredCameras, frigateConfigured := frigateCameraState(configObservation.Config)
 	var frigateObservation FrigateObservation
 	// A configuration with no enabled camera has no Frigate service to probe.
@@ -656,6 +660,12 @@ func (b *Builder) redactDocument(document *Document) {
 		entry.Name = redactor.String(entry.Name)
 		entry.Message = redactor.String(entry.Message)
 	}
+	document.Sections.Time.LastError = redactor.String(document.Sections.Time.LastError)
+	if document.Sections.Time.Source != nil {
+		value := redactor.String(*document.Sections.Time.Source)
+		document.Sections.Time.Source = &value
+	}
+	document.Sections.Time.Zone = redactor.String(document.Sections.Time.Zone)
 	document.Sections.Frigate.LastError = redactor.String(document.Sections.Frigate.LastError)
 	document.Sections.Frigate.Image.LastError = redactor.String(document.Sections.Frigate.Image.LastError)
 	for index := range document.Sections.Cameras.Items {

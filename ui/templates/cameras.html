@@ -21,7 +21,7 @@
     </div>
     <p class="camera-ident">
       <span>{{.Address}}</span>
-      <span class="camera-seen">{{if .LastSeen}}Last seen {{datetimePtr .LastSeen}} UTC{{else}}Not seen yet{{end}}</span>
+      <span class="camera-seen">{{if .LastSeen}}Last seen {{localTimePtr .LastSeen $.Zone}}{{else}}Not seen yet{{end}}</span>
     </p>
     {{if .Enabled}}
     {{if and (eq .Stream "ok") (eq .Snapshot "ok") (eq .Recording "ok")}}
@@ -68,7 +68,7 @@
         <dt>Recording</dt>
         <dd><span class="state-badge state-{{.Recording}}">{{if eq .Recording "unknown"}}Recording not checked{{else}}{{cameraRecordingLabel .Recording}}{{end}}</span></dd>
         <dt>Last picture</dt>
-        <dd>{{if .SnapshotAt}}{{datetimePtr .SnapshotAt}} UTC{{else}}Not tested yet{{end}}</dd>
+        <dd>{{if .SnapshotAt}}{{localTimePtr .SnapshotAt $.Zone}}{{else}}Not tested yet{{end}}</dd>
         <dt>Hardware address</dt>
         <dd>{{if .MAC}}{{.MAC}}{{else}}Not recorded{{end}}</dd>
         <dt>Vendor or model</dt>

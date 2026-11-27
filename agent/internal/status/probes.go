@@ -296,6 +296,7 @@ func hardwareAccelerators(accelerators hardware.Accelerators) []string {
 type Probes struct {
 	Config       ConfigProbe
 	Render       RenderProbe
+	Time         TimeProbe
 	Frigate      FrigateProbe
 	FrigateImage FrigateImageProbe
 	Storage      StorageProbe
@@ -310,6 +311,7 @@ func DefaultProbes() Probes {
 	return Probes{
 		Config:       FileConfigProbe{},
 		Render:       RenderProbeFunc(render.Render),
+		Time:         &ChronyTimeProbe{},
 		Frigate:      NewHTTPFrigateProbe(DefaultFrigateURL, 2*time.Second),
 		FrigateImage: &LocalFrigateImageProbe{},
 		Storage:      &FileStorageProbe{},

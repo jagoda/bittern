@@ -25,6 +25,16 @@ the kit-only rerun are in
 [the update scenario note](../../docs/notes/2026-11-22-qemu-update-scenario.md) and
 [the wave three note](../../docs/notes/2026-11-22-beta-kit-wave-three.md).
 
+The `firstboot` scenario also runs the `time` and `time-after-reboot` phases from
+[ADR 0035](../../docs/adr/0035-appliance-as-time-authority.md). They assert that the live
+`/etc/chrony/chrony.conf` carries `bindacqdevice lan0`, `bindaddress <cam0>`, `allow <cam0 subnet>`,
+`local stratum 10`, `makestep 1.0 3`, and `rtcsync`; that `ss -lun` shows a listener on the camera
+address only; that a request on the camera interface is answered and one on the house network is not;
+that the only firewall `udp dport 123` accept is on `cam0`; that `chrony-wait.service` and
+`systemd-time-wait-sync.service` are not enabled; and that the wizard's `Europe/Berlin` zone reached
+`appliance.yaml` and the status `time` section. The second phase repeats the serving assertions after
+the post-apply reboot.
+
 The carrierless run and measured phase times are in
 [the first-boot note](../../docs/notes/2026-11-14-qemu-firstboot.md).
 

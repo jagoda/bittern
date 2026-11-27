@@ -15,7 +15,7 @@ set -eu
 # systemd-resolved is absent. The beta kit must install the resolver and let
 # it take its DNS servers from the lan0 DHCP lease; do not hard-code a public
 # resolver.
-PACKAGES='docker.io docker-cli docker-compose nftables dnsmasq chrony curl ca-certificates systemd-resolved qrencode sqlite3'
+PACKAGES='docker.io docker-cli docker-compose nftables dnsmasq chrony tzdata curl ca-certificates systemd-resolved qrencode sqlite3'
 RESOLV_CONF=/etc/resolv.conf
 RESOLV_CONF_BACKUP=/etc/resolv.conf.bittern-poc.bak
 RESOLVED_STUB_RESOLV_CONF='../run/systemd/resolve/stub-resolv.conf'
@@ -761,6 +761,31 @@ enable_unit() {
     log "$_eu_unit: enabled for the next boot"
 }
 
+disable_sync_wait_units() {
+    # Boot never waits for a clock source (ADR 0035). Debian ships the wait
+    # units disabled, but an image preset or an operator can enable them, and
+    # chrony-wait has no upper bound on a device with no internet. The
+    # appliance must boot and serve time to cameras without one, so convergence
+    # here removes both. A missing unit is not an error.
+    for _ds_unit in chrony-wait.service systemd-time-wait-sync.service; do
+        if ! systemctl list-unit-files --no-legend "$_ds_unit" 2>/dev/null | grep -q .; then
+            continue
+        fi
+        run systemctl disable --now "$_ds_unit" || true
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "would verify: systemctl is-enabled $_ds_unit"
+            continue
+        fi
+        _ds_state=$(systemctl is-enabled "$_ds_unit" 2>/dev/null || true)
+        case "$_ds_state" in
+            enabled|enabled-runtime)
+                die "$_ds_unit still waits for time synchronisation and would stall a boot without a source"
+                ;;
+        esac
+        log "$_ds_unit: disabled; boot does not wait for time synchronisation"
+    done
+}
+
 enable_units() {
     # One owner for every unit the payload installs. Debian may enable some of
     # these from a package postinst, but Bittern does not rely on that: a clean
@@ -1111,6 +1136,7 @@ configure_resolver
 ensure_dnsmasq_include
 install_files
 enable_units
+disable_sync_wait_units
 remove_bootstrap_network
 
 if [ "$DRY_RUN" -eq 1 ]; then

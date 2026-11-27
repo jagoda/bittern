@@ -51,6 +51,18 @@ func healthyProbes(t *testing.T) Probes {
 			return ConfigObservation{Present: true, Config: cfg}
 		}),
 		Render: RenderProbeFunc(render.Render),
+		Time: TimeProbeFunc(func(context.Context) TimeObservation {
+			lastSync := fixedNow.Add(-5 * time.Minute)
+			return TimeObservation{
+				Available:          true,
+				Synchronised:       true,
+				Source:             "192.0.2.10",
+				Stratum:            2,
+				OffsetMilliseconds: 3,
+				OffsetKnown:        true,
+				LastSync:           &lastSync,
+			}
+		}),
 		Frigate: FrigateProbeFunc(func(context.Context) FrigateObservation {
 			return FrigateObservation{
 				Reachable:   true,

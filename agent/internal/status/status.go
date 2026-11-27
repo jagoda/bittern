@@ -61,6 +61,7 @@ type Document struct {
 type Sections struct {
 	Config   ConfigSection    `json:"config"`
 	Render   RenderSection    `json:"render"`
+	Time     TimeSection      `json:"time"`
 	Frigate  FrigateSection   `json:"frigate"`
 	Cameras  CamerasSection   `json:"cameras"`
 	Storage  StorageSection   `json:"storage"`
@@ -120,6 +121,22 @@ type RenderCheck struct {
 	Name    string       `json:"name"`
 	State   SectionState `json:"state"`
 	Message string       `json:"message"`
+}
+
+// TimeSection reports the appliance clock state from ADR 0035. State is one of
+// ok, never-synchronised, drifted, or unknown; the time section uses its own
+// vocabulary because the owner action differs. LocalNow and Zone carry the
+// same display rule as every other timestamp: a zone label is always present.
+type TimeSection struct {
+	State              TimeState  `json:"state"`
+	Synchronised       bool       `json:"synchronised"`
+	Source             *string    `json:"source"`
+	Stratum            *int       `json:"stratum"`
+	OffsetMilliseconds *int64     `json:"offset_milliseconds"`
+	LastSync           *time.Time `json:"last_sync"`
+	Zone               string     `json:"zone"`
+	LocalNow           time.Time  `json:"local_now"`
+	LastError          string     `json:"last_error"`
 }
 
 // FrigateSection reports the rendered camera inventory, the recording

@@ -261,6 +261,7 @@ func mockBooting(now time.Time) status.Document {
 				Present: false,
 				Errors:  []status.ValidationError{},
 			},
+			Time: mockTimeUnknown(now),
 			Render: status.RenderSection{
 				State:      status.SectionUnknown,
 				Validation: []status.RenderCheck{},
@@ -316,6 +317,33 @@ func mockFailed(now time.Time) status.Document {
 	return document
 }
 
+// mockTimeOK is the preview of a clock that is checked and fresh.
+func mockTimeOK(now time.Time) status.TimeSection {
+	lastSync := now.Add(-2 * time.Minute)
+	source := "192.0.2.10"
+	stratum := 2
+	offset := int64(2)
+	return status.TimeSection{
+		State:              status.TimeOK,
+		Synchronised:       true,
+		Source:             &source,
+		Stratum:            &stratum,
+		OffsetMilliseconds: &offset,
+		LastSync:           &lastSync,
+		Zone:               "UTC",
+		LocalNow:           now,
+	}
+}
+
+// mockTimeUnknown is the preview before a first clock observation.
+func mockTimeUnknown(now time.Time) status.TimeSection {
+	return status.TimeSection{
+		State:    status.TimeUnknown,
+		Zone:     "UTC",
+		LocalNow: now,
+	}
+}
+
 func mockReadyUpdates(now time.Time) status.UpdatesSection {
 	checked := now.Add(-5 * time.Minute).UTC().Format(time.RFC3339)
 	version := "0.18.2"
@@ -360,6 +388,7 @@ func mockBase(now time.Time) status.Document {
 				Valid:         true,
 				Errors:        []status.ValidationError{},
 			},
+			Time: mockTimeOK(now),
 			Render: status.RenderSection{
 				State:      status.SectionOK,
 				FileCount:  4,

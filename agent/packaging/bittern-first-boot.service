@@ -1,5 +1,9 @@
 # First-boot provisioning for a fresh Bittern install. The beta preparation kit installs it.
 # The unit runs once before bitternd and skips itself after the marker exists.
+#
+# No ordering against chrony.service or time-sync.target is deliberate (ADR
+# 0035): first boot must never wait for a clock source, and an offline
+# appliance must still finish setup. The clock settles later.
 [Unit]
 Description=Bittern first boot provisioning
 Documentation=file:/usr/share/doc/bittern/README.md

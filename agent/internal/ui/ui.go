@@ -20,8 +20,10 @@ import (
 
 	"bittern.invalid/agent/internal/assets"
 	"bittern.invalid/agent/internal/auth"
+	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/discovery"
 	"bittern.invalid/agent/internal/status"
+	"bittern.invalid/agent/internal/timezone"
 )
 
 const (
@@ -201,6 +203,8 @@ type pageData struct {
 	ContinueAction         string
 	Snapshots              []SnapshotResult
 	Plan                   ApplyRequest
+	Timezone               string
+	TimezoneSet            bool
 	Cameras                []cameraView
 	CameraErrors           map[string]string
 	CameraList             status.CamerasSection
@@ -237,6 +241,9 @@ type pageData struct {
 	NavSection             string
 	ShowSetupNav           bool
 	ShowLiveNav            bool
+	// Zone is the configured IANA time zone. Every browser-facing timestamp
+	// renders in it with a zone label; the clock itself stays UTC.
+	Zone string
 }
 
 func parseTemplates() (*template.Template, error) {
@@ -246,9 +253,15 @@ func parseTemplates() (*template.Template, error) {
 		"cameraRecordingLabel":   cameraRecordingLabel,
 		"cameraSnapshotLabel":    cameraSnapshotLabel,
 		"cameraStreamLabel":      cameraStreamLabel,
-		"datetime":               datetime,
-		"datetimePtr":            datetimePtr,
 		"hasError":               hasError,
+		"localTime":              localTime,
+		"localTimePtr":           localTimePtr,
+		"offsetPhrase":           offsetPhrase,
+		"timeCameraCopy":         timeCameraCopy,
+		"timeNextAction":         timeNextAction,
+		"timePrimaryCopy":        timePrimaryCopy,
+		"timeStateClass":         timeStateClass,
+		"timeStateLabel":         timeStateLabel,
 		"humanBytes":             humanBytes,
 		"join":                   strings.Join,
 		"overallLabel":           overallLabel,
@@ -256,12 +269,22 @@ func parseTemplates() (*template.Template, error) {
 		"ptrInt":                 ptrInt,
 		"ptrInt64":               ptrInt64,
 		"ptrString":              ptrString,
-		"ptrTime":                ptrTime,
 		"recordingSoftwareLabel": recordingSoftwareLabel,
 		"sectionLabel":           sectionLabel,
 		"yesno":                  yesno,
 	}
 	return template.New("bittern").Funcs(functions).ParseFS(assets.UI, "ui/templates/*.html")
+}
+
+// timezoneName reads the configured IANA zone for display. The configuration
+// is the single source; an unreadable value falls back to UTC and is never
+// rewritten here.
+func (h *handler) timezoneName() string {
+	cfg, validationErrors := config.Load(h.configPath())
+	if len(validationErrors) != 0 || cfg == nil {
+		return timezone.Default
+	}
+	return timezone.Normalize(cfg.Identity.Timezone)
 }
 
 func (h *handler) render(w http.ResponseWriter, r *http.Request, code int, name string, data pageData) {
@@ -279,6 +302,7 @@ func (h *handler) render(w http.ResponseWriter, r *http.Request, code int, name 
 	}
 	data.CurrentPath = r.URL.Path
 	data.NavSection = navSection(r.URL.Path)
+	data.Zone = h.timezoneName()
 	data.ShowSetupNav = !h.setupInitialized()
 	data.ShowLiveNav = h.configuredCameraCount() > 0
 	var output bytes.Buffer

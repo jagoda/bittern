@@ -165,10 +165,11 @@ func (h *handler) cameraPictures(r *http.Request, document status.Document) map[
 	if at == "" || at == "preview" {
 		at = strconv.FormatInt(checkedAt.UnixNano(), 10)
 	}
-	caption = fmt.Sprintf("Test picture from %s, taken at %s UTC.", camera.Name, datetime(*checkedAt))
+	stamp := localTime(*checkedAt, h.timezoneName())
+	caption = fmt.Sprintf("Test picture from %s, taken at %s.", camera.Name, stamp)
 	return map[string]*cameraPicture{cameraID: &cameraPicture{
 		URL:      BasePath + "/cameras/" + url.PathEscape(camera.ID) + "/picture?at=" + url.QueryEscape(at),
-		Alt:      fmt.Sprintf("Test picture from %s, taken at %s UTC.", camera.Name, datetime(*checkedAt)),
+		Alt:      fmt.Sprintf("Test picture from %s, taken at %s.", camera.Name, stamp),
 		Caption:  caption,
 		Fallback: "Bittern could not show the test picture. The camera is still configured; test the picture again.",
 	}}

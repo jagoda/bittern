@@ -19,6 +19,7 @@ import (
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/discovery"
 	"bittern.invalid/agent/internal/redact"
+	"bittern.invalid/agent/internal/timezone"
 )
 
 const (
@@ -91,6 +92,7 @@ type ApplyRequest struct {
 	ConfigPath  string
 	SecretsPath string
 	Hostname    string
+	Timezone    string
 	LANMode     string
 	LANAddress  string
 	CAM0Address string
@@ -610,6 +612,10 @@ func (h *handler) apply(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, BasePath+"/wizard/camera", http.StatusSeeOther)
 		return
 	}
+	// The review step carries the time zone the browser reported, or the
+	// owner's override. An unusable value falls back to UTC and the apply
+	// still runs (ADR 0035 section 8).
+	session.setTimezone(r.PostFormValue("timezone"))
 
 	request := h.applyRequest(r, session)
 	_, started, err := h.operations.start(operationKindApply, operationCameras(request.Cameras))
@@ -692,7 +698,7 @@ func (h *handler) showApplyOperation(w http.ResponseWriter, r *http.Request) {
 		Title:                "Applying configuration",
 		Step:                 5,
 		Preview:              h.preview,
-		Operation:            operationView(record, h.now(), r.URL.Query().Get("busy") == "1"),
+		Operation:            operationView(record, h.now(), r.URL.Query().Get("busy") == "1", timezone.Load(h.timezoneName())),
 		OperationFragmentURL: BasePath + "/wizard/apply/fragment",
 	})
 }
@@ -704,7 +710,7 @@ func (h *handler) showApplyOperationFragment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.render(w, r, http.StatusOK, "operation-live", pageData{
-		Operation: operationView(record, h.now(), false),
+		Operation: operationView(record, h.now(), false, timezone.Load(h.timezoneName())),
 	})
 }
 
@@ -729,7 +735,7 @@ func (h *handler) showApplyResult(w http.ResponseWriter, r *http.Request) {
 		Title:     title,
 		Step:      resultStep(record),
 		Preview:   h.preview,
-		Operation: operationView(record, h.now(), false),
+		Operation: operationView(record, h.now(), false, timezone.Load(h.timezoneName())),
 	})
 }
 
@@ -789,22 +795,25 @@ func (h *handler) session(w http.ResponseWriter, r *http.Request) (*wizardSessio
 
 func (h *handler) reviewData(r *http.Request, session *wizardSession) pageData {
 	pending := session.cameraList()
-	request := h.applyRequestFor(r, pending)
+	request := h.applyRequestFor(r, session, pending)
+	zone, zoneSet := session.timezoneValue()
 	return pageData{
 		Title:        "Review configuration",
 		Step:         5,
 		Preview:      h.preview,
 		Plan:         request,
+		Timezone:     zone,
+		TimezoneSet:  zoneSet,
 		Cameras:      pendingCameraViews(pending),
 		CameraErrors: session.applyFailures(),
 	}
 }
 
 func (h *handler) applyRequest(r *http.Request, session *wizardSession) ApplyRequest {
-	return h.applyRequestFor(r, session.cameraList())
+	return h.applyRequestFor(r, session, session.cameraList())
 }
 
-func (h *handler) applyRequestFor(r *http.Request, pending []pendingCamera) ApplyRequest {
+func (h *handler) applyRequestFor(r *http.Request, session *wizardSession, pending []pendingCamera) ApplyRequest {
 	network := h.checks.Network(r.Context())
 	storage := h.checks.Storage(r.Context())
 	cameras := make([]config.Camera, 0, len(pending))
@@ -815,9 +824,11 @@ func (h *handler) applyRequestFor(r *http.Request, pending []pendingCamera) Appl
 			credentials[entry.Camera.ID] = entry.CredentialURL
 		}
 	}
+	zone, _ := session.timezoneValue()
 	return ApplyRequest{
 		ConfigPath:        h.configPath(),
 		Hostname:          "bittern",
+		Timezone:          zone,
 		LANMode:           "DHCP",
 		LANAddress:        network.LANAddress,
 		CAM0Address:       network.CAMAddress,
@@ -1165,12 +1176,41 @@ type wizardSession struct {
 	mu            sync.Mutex
 	token         string
 	expires       time.Time
+	timezone      string
+	timezoneSet   bool
 	Cameras       []pendingCamera
 	nextCamera    int
 	Notice        string
 	Applied       bool
 	Snapshots     []SnapshotResult
 	ApplyFailures map[string]string
+}
+
+// setTimezone stores the zone submitted from the review step. An empty value
+// leaves the session unset so the browser prefill can run again; the stored
+// value is normalized, so an unusable one becomes UTC and never reaches the
+// configuration.
+func (s *wizardSession) setTimezone(value string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value = strings.TrimSpace(value)
+	if value == "" {
+		s.timezoneSet = false
+		return
+	}
+	s.timezone = timezone.Normalize(value)
+	s.timezoneSet = true
+}
+
+// timezoneValue returns the current zone and whether the owner or browser has
+// set one. An unset zone is reported as UTC, the working default.
+func (s *wizardSession) timezoneValue() (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.timezoneSet && s.timezone != "" {
+		return s.timezone, true
+	}
+	return timezone.Default, false
 }
 
 func (s *wizardSession) cameraList() []pendingCamera {

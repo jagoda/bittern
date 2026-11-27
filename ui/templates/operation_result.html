@@ -52,9 +52,9 @@
     <dt>Result</dt>
     <dd><span class="state-badge state-{{.Operation.StateClass}}">{{.Operation.StateLabel}}</span></dd>
     <dt>Started</dt>
-    <dd>{{.Operation.StartedAt}} UTC</dd>
+    <dd>{{.Operation.StartedAt}}</dd>
     <dt>Finished</dt>
-    <dd>{{.Operation.FinishedAt}} UTC</dd>
+    <dd>{{.Operation.FinishedAt}}</dd>
     <dt>Time taken</dt>
     <dd>{{.Operation.Elapsed}}</dd>
     {{if .Operation.StepsTotal}}<dt>Steps done</dt>
@@ -115,9 +115,9 @@
     {{if eq .Operation.State "rolled-back"}}<dt>Previous configuration</dt>
     <dd>Restored</dd>{{end}}
     <dt>Started</dt>
-    <dd>{{.Operation.StartedAt}} UTC</dd>
+    <dd>{{.Operation.StartedAt}}</dd>
     <dt>Finished</dt>
-    <dd>{{.Operation.FinishedAt}} UTC</dd>
+    <dd>{{.Operation.FinishedAt}}</dd>
     <dt>Time taken</dt>
     <dd>{{.Operation.Elapsed}}</dd>
     {{if .Operation.StepsTotal}}<dt>Steps completed</dt>

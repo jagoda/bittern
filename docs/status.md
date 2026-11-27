@@ -79,14 +79,15 @@ The top level is stable for schema 1:
 ```
 
 `generated_at` is the UTC time of the build. `sections` always contains
-`config`, `render`, `frigate`, `cameras`, `storage`, `network`, `updates`, and
-`reset`. `hardware` is present when hardware detection succeeds. It is omitted
-only when the probe fails.
+`config`, `render`, `time`, `frigate`, `cameras`, `storage`, `network`,
+`updates`, and `reset`. `hardware` is present when hardware detection succeeds.
+It is omitted only when the probe fails.
 
 | Section | Fields | Unknown or absent data |
 | --- | --- | --- |
 | `config` | `path`, `present`, `schema_version`, `valid`, `errors[]` with `path`, `rule`, `message` | `schema_version` is null when the document cannot be parsed far enough to read it |
 | `render` | `generation`, `apply_state`, `file_count`, `last_render`, `validation[]` with `name`, `state`, `message` | `generation` is the applied generation from `<state-root>/current` and is null before the first successful apply; `last_render` is null when no successful in-memory render has run |
+| `time` | `state`, `synchronised`, `source`, `stratum`, `offset_milliseconds`, `last_sync`, `zone`, `local_now`, `last_error` | `state` is `ok`, `never-synchronised`, `drifted`, or `unknown`; `source` is null when no upstream source is selected; `last_sync`, `stratum`, and `offset_milliseconds` are null until a first observation; `local_now` is the build time in the configured zone |
 | `frigate` | `configured`, `reachable`, `version`, `camera_count`, `image.state`, `image.digest`, `image.last_error`, `last_error` | `configured` is false and `state` is `unknown` when no camera is enabled; `camera_count` is the number of enabled cameras from `appliance.yaml`, so an unreachable API still reports the configured count; `version` is null until the API answers; `image` is always present and its `digest` is the pinned sha256 value |
 | `cameras` | `items[]` with `id`, `name`, `address`, `mac`, `vendor`, `model`, `enabled`, `stream`, `snapshot`, `recording`, `last_seen`, `detail`, `snapshot_at`, `snapshot_bytes` | The list comes from `appliance.yaml` and the camera health cache, not a live camera call. `snapshot` and `stream` are `unknown` until the wizard or an explicit test has run; `last_seen` is null until a check records it; `recording` follows the Frigate section |
 | `storage` | `path`, `present`, `detail_state`, `free_bytes`, `reserve_bytes`, `member_count`, `missing_members[]` | `present` is evidence that a recording drive for the path is attached, not that the directory exists; `detail_state` is `ready`, `not-attached`, `not-mounted`, or `write-test-failed`, and is empty only when the section is `unknown` or the probe cannot read the mount table; `free_bytes` is null unless the path is mounted, so the OS filesystem is never measured as recording storage; `member_count` reports the single media path known to this build, so a configured multi-drive pool is not enumerated until the pool mount work lands |
@@ -94,6 +95,62 @@ only when the probe fails.
 | `updates` | `state`, `current_slot`, `current_version`, `current_generation`, `running_generation`, `committed_generation`, `committed_version`, `channel`, `last_check`, `available_version`, `available_generation`, `rollback`, `last_operation`, `current_operation`, `base` | `current_slot` is always null until the OS A/B work claims it; `current_version` and `current_generation` are the running bundle and are null on a kit baseline; `committed_generation` is 0 on a kit baseline; `base` is null until the first update commits; `last_check.result` is `never` before the first check; `current_operation` is absent unless an update or rollback journal is running |
 | `reset` | `level`, `completed_at` | Both are null until BIT-010 implements a reset record |
 | `hardware` | `cpu.model`, `cpu.cores`, `memory_bytes`, `accelerators[]` | The whole section is omitted only when the hardware probe fails; missing files inside the detection roots produce empty fields and an empty accelerator list instead |
+
+### Appliance clock
+
+The `time` section is the appliance half of [ADR 0035](adr/0035-appliance-as-time-authority.md).
+The probe runs `chronyc -n tracking` and `chronyc -n sources` with a one second
+bound each, both read-only. It never sets the system clock or the hardware clock.
+When `chronyc` is absent or cannot reach `chronyd`, the section is `unknown`
+with `last_error`; a missing probe is not a fault.
+
+The section uses its own state vocabulary because the owner action differs from
+the four shared section states:
+
+| State | Meaning | Primary copy | Next step |
+| --- | --- | --- | --- |
+| `ok` | The clock was set from a source and the last update is fresh | The appliance clock is set from the house network. | None. |
+| `never-synchronised` | No successful update since `chronyd` started, or no source is reachable | The appliance has not been able to check the time since it started. Its clock may be wrong, and the cameras follow it. | Check the house network connection. |
+| `drifted` | A source updated the clock before, but the last update is more than two hours old or the source was lost | The appliance last checked the time on 24 November 2026 at 21:53 CET (UTC+01:00). Its clock may be off by about two seconds. | Check the house network connection. |
+| `unknown` | The probe cannot read the running daemon | Bittern cannot read the appliance clock. | Restart the appliance, then check again. |
+
+`last_sync` is chrony's reference time, the last successful update. A daemon
+that has never had one reports the Unix epoch and is `never-synchronised`; a
+daemon that had one and lost every source keeps the old reference time and is
+`drifted`. Two hours is several missed updates at chrony's longest default poll
+interval (about 17 minutes), so a late poll is not reported as drift.
+
+`source` is the selected upstream address, or null for the local reference and
+for a never-synchronised clock. `stratum` and `offset_milliseconds` are
+technical details; the offset sign is positive when the system clock is ahead
+of its source. `zone` is the configured `identity.timezone`, and `local_now` is
+the build time in that zone. Both follow the display rule: a timestamp always
+carries its zone label and offset, or an explicit `UTC`.
+
+A non-`ok` clock does not change the overall state. An appliance with no
+internet is a supported configuration and still gives every camera one
+consistent clock through the local reference, which is the trade-off ADR 0035
+records. The time section carries the warning and the next action on its own.
+The `time` probe is not one of the apply-time native checks; `nft -c`,
+`dnsmasq --test`, `chronyd -p`, and the Frigate config check remain apply-time
+gates.
+
+### Timestamps in the browser
+
+Every timestamp the UI renders uses the configured zone with its abbreviation
+and offset, for example `26 Nov 2026, 21:53 CET (UTC+01:00)`. A UTC timestamp is
+labelled once, for example `26 Nov 2026, 12:00 UTC`; a raw UTC value is never
+shown unlabelled. The pages that show a timestamp are the status page
+(`generated_at`, `render.last_render`, `reset.completed_at`, and the clock
+fields), the camera list (last seen and last picture), the operation progress
+and result pages (started, finished, and time taken), the update card (last
+check), and the test-picture caption.
+
+Daylight saving comes from the IANA database through the configured zone name,
+never from a stored offset or arithmetic. A transition changes what is
+displayed; it does not change the clock, the RTC, or any recorded instant. The
+status document's `generated_at`, `last_sync`, and `local_now` carry the same
+information for the CLI and support.
 
 Hardware detection is read-only. It reads `/proc`, `/sys`, and `/dev`, never
 writes those trees, and needs no elevated privileges. The `accelerators` list

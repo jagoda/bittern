@@ -131,7 +131,10 @@ func runChronyCheck(t *testing.T, configPath string) {
 	if err != nil {
 		t.Fatalf("chronyd -p rejected the rendered config: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "bindaddress") {
+	// chronyd -p prints the parsed configuration. The drift file is present in
+	// both the serving and the disabled camera-role renders, so it proves the
+	// command parsed this file rather than printing nothing.
+	if !strings.Contains(string(output), "driftfile /var/lib/chrony/chrony.drift") {
 		t.Fatalf("chronyd -p did not print the rendered config: %s", output)
 	}
 }

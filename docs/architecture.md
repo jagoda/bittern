@@ -85,12 +85,21 @@ for NTP, and a gateway option pointing at the appliance for camera compatibility
 and no general DNS. `chrony` is a client on `lan0` and an NTP server on `cam0`.
 
 The appliance is the time authority for the camera segment
-([ADR 0035](adr/0035-appliance-as-time-authority.md)). `chrony` consumes time on `lan0` only and
-serves it on `cam0` only, and it carries a local reference so an appliance with no internet still
-gives every camera one clock. Cameras are pointed at the appliance by NTP where they support it, and
-by an ONVIF time write where they do not. A camera that refuses is still adopted and reported. The
-decision is accepted and not built yet; the status `time` section and the per-camera time state are
-part of the same work.
+([ADR 0035](adr/0035-appliance-as-time-authority.md)). The rendered chrony configuration is a client
+on `lan0` (`bindacqdevice lan0`, the provisional `pool.ntp.org` source set from
+[OQ-20](open-questions.md)) and a server on `cam0` only (`bindaddress <cam0 address>`,
+`allow <cam0 subnet>`). The firewall accepts UDP 123 on `cam0` and nowhere else; a management client
+that asks the appliance for time gets no answer. `makestep 1.0 3` steps a large correction only in
+the first three clock updates, `rtcsync` keeps the hardware clock in UTC, and `local stratum 10`
+keeps cameras on one clock when no source is reachable. `chronyd` does not correct the clock without
+a source, and the status `time` section reports `never-synchronised` or `drifted` in plain language
+rather than claiming the clock is right.
+
+Nothing in the boot path waits for synchronisation: first boot is ordered after local filesystems and
+before `bitternd`, with no ordering against `chrony.service`, and the installer disables
+`chrony-wait.service` and `systemd-time-wait-sync.service`. The appliance boots and serves time to
+cameras on a network with no internet. The camera half, an NTP setting where the camera supports it
+and an ONVIF time write where it does not, is a separate slice and is not built yet.
 
 ## Runtime components
 
@@ -128,10 +137,10 @@ the owner. Storage faults never resolve into a healthy-looking page. The render 
 reports the applied generation and the last apply state from `apply.Inspect`, so a failed or
 rolled-back transaction stays visible without inventing a new current generation. Update and reset
 data are explicitly unknown until BIT-009 and BIT-010 implement their records. Hardware detection
-adds CPU, memory, and accelerator evidence when the probe succeeds. The contract does not yet carry a
-`time` section; [ADR 0035](adr/0035-appliance-as-time-authority.md) decides one for the appliance
-clock and each camera's time state. The schema, fields, redaction rules, and API are in
-[status.md](status.md).
+adds CPU, memory, and accelerator evidence when the probe succeeds. The `time` section reports the
+appliance clock state, source, offset, last successful update, and zone from read-only `chronyc`
+commands ([ADR 0035](adr/0035-appliance-as-time-authority.md)); the per-camera time state belongs to
+the camera slice. The schema, fields, redaction rules, and API are in [status.md](status.md).
 
 ## Configuration flow
 

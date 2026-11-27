@@ -16,6 +16,7 @@ import (
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/logging"
 	"bittern.invalid/agent/internal/redact"
+	"bittern.invalid/agent/internal/timezone"
 )
 
 // AgentApplier persists the wizard configuration and runs the apply
@@ -67,6 +68,12 @@ func (a AgentApplier) applySetup(ctx context.Context, request ApplyRequest, prog
 
 	if hostname := strings.TrimSpace(request.Hostname); hostname != "" {
 		cfg.Identity.Hostname = hostname
+	}
+	// The zone is display and camera-time only. Normalize rejects an unreadable
+	// browser value and keeps UTC, so a setup never writes a broken zone and
+	// the clock itself is untouched.
+	if zone := strings.TrimSpace(request.Timezone); zone != "" {
+		cfg.Identity.Timezone = timezone.Normalize(zone)
 	}
 	if mode := strings.ToLower(strings.TrimSpace(request.LANMode)); mode != "" {
 		cfg.Network.LAN0.Mode = mode

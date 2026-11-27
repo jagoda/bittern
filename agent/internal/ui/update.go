@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"bittern.invalid/agent/internal/status"
+	"bittern.invalid/agent/internal/timezone"
 	"bittern.invalid/agent/internal/update"
 )
 
@@ -338,10 +339,10 @@ type updateView struct {
 }
 
 func (h *handler) updateCard(document status.Document) updateView {
-	return buildUpdateView(document, h.updates.Progress())
+	return buildUpdateView(document, h.updates.Progress(), timezone.Load(h.timezoneName()))
 }
 
-func buildUpdateView(document status.Document, progress UpdateProgress) updateView {
+func buildUpdateView(document status.Document, progress UpdateProgress, location *time.Location) updateView {
 	updates := document.Sections.Updates
 	view := updateView{
 		StateName:       "unknown",
@@ -356,7 +357,7 @@ func buildUpdateView(document status.Document, progress UpdateProgress) updateVi
 		LastCheckResult: checkResultLabel(updates.LastCheck.Result),
 	}
 	if updates.LastCheck.CheckedAt != nil {
-		view.LastCheckAt = formatRFC3339(*updates.LastCheck.CheckedAt)
+		view.LastCheckAt = formatTimestamp(*updates.LastCheck.CheckedAt, location)
 		view.ShowLastCheck = true
 	}
 	if updates.LastCheck.Result != "" && updates.LastCheck.Result != update.CheckNever {
@@ -813,10 +814,10 @@ func int64Pointer(value int64) *int64 {
 	return &value
 }
 
-func formatRFC3339(value string) string {
+func formatTimestamp(value string, location *time.Location) string {
 	parsed, err := time.Parse(time.RFC3339, value)
 	if err != nil {
 		return value
 	}
-	return parsed.UTC().Format("2006-01-02 15:04:05")
+	return timezone.Format(parsed, location)
 }

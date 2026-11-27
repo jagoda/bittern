@@ -40,10 +40,16 @@ func Render(cfg *config.Config) ([]File, error) {
 		return nil, fmt.Errorf("render: unsupported appliance.yaml schema version %d", cfg.SchemaVersion)
 	}
 
-	camPrefix, err := parsePrefix(cfg.Network.CAM0.Address)
+	camRole, err := parseCameraRole(cfg.Network.CAM0.Address)
 	if err != nil {
 		return nil, fmt.Errorf("render: cam0 address: %w", err)
 	}
+	// A camera role without an address is not reachable through a validated
+	// document, but Render is also called with a staged or partial document.
+	// Nothing that depends on the camera address is rendered in that case, and
+	// the chrony and nftables outputs below stay closed rather than binding
+	// every address.
+	camPrefix := camRole.prefix
 
 	files := make([]File, 0, 7)
 	networkdLAN, err := execute("networkd/lan0.network.tmpl", cfg.SchemaVersion, struct {
@@ -68,7 +74,9 @@ func Render(cfg *config.Config) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	files = append(files, File{Path: "networkd/10-cam0.network", Data: networkdCAM})
+	if camRole.configured {
+		files = append(files, File{Path: "networkd/10-cam0.network", Data: networkdCAM})
+	}
 
 	links, err := linkFiles(cfg)
 	if err != nil {
@@ -79,9 +87,11 @@ func Render(cfg *config.Config) ([]File, error) {
 	nftables, err := execute("nftables/bittern.nft.tmpl", cfg.SchemaVersion, struct {
 		TailscaleEnabled   bool
 		TailscaleInterface string
+		CameraConfigured   bool
 	}{
 		TailscaleEnabled:   cfg.Privacy.Tailscale.Enabled,
 		TailscaleInterface: "tailscale0",
+		CameraConfigured:   camRole.configured,
 	})
 	if err != nil {
 		return nil, err
@@ -110,7 +120,9 @@ func Render(cfg *config.Config) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	files = append(files, File{Path: "dnsmasq/dnsmasq.conf", Data: dnsmasq})
+	if camRole.configured {
+		files = append(files, File{Path: "dnsmasq/dnsmasq.conf", Data: dnsmasq})
+	}
 
 	reservations, err := reservationFile(cfg)
 	if err != nil {
@@ -121,11 +133,13 @@ func Render(cfg *config.Config) ([]File, error) {
 	}
 
 	chrony, err := execute("chrony/chrony.conf.tmpl", cfg.SchemaVersion, struct {
-		BindAddress  string
-		CameraSubnet string
+		BindAddress      string
+		CameraSubnet     string
+		CameraConfigured bool
 	}{
-		BindAddress:  camPrefix.Addr().String(),
-		CameraSubnet: camPrefix.Masked().String(),
+		BindAddress:      camPrefix.Addr().String(),
+		CameraSubnet:     camPrefix.Masked().String(),
+		CameraConfigured: camRole.configured,
 	})
 	if err != nil {
 		return nil, err
