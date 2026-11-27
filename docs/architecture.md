@@ -13,7 +13,9 @@ A Bittern appliance sits between a house LAN, a private camera segment, and opti
 - **House LAN and internet.** Admin browsers reach only the Bittern UI, which is server-rendered Go
   templates with HTMX over TLS on 443 ([ADR 0019](adr/0019-ui-stack.md)). Live video is a Bittern
   page on the same surface, using go2rtc MSE or HLS through `bitternd`
-  ([ADR 0034](adr/0034-live-view-owned-by-bittern.md)). Frigate's UI is not exposed on `lan0`; 8971
+  ([ADR 0034](adr/0034-live-view-owned-by-bittern.md)); the wall, per-pane quality and full-screen
+  rules are in [ADR 0037](adr/0037-nvr-grid-per-pane-quality-and-full-screen.md). Frigate's UI is not
+  exposed on `lan0`; 8971
   binds to loopback, and deliberate support access uses the planned tailnet-only `tailscale serve`
   path in [BIT-022](plan/implementation-plan.md#bit-022-tailscale-remote-access-and-frigate-ui-support-path).
   Live view, event review, playback and camera settings are planned as Bittern UI surfaces in
@@ -76,7 +78,9 @@ port are fixed by [ADR 0019](adr/0019-ui-stack.md). The renderer accepts 443 on 
 `tailscale0` when Tailscale is enabled. Frigate's UI and API are not LAN services: `8971` and `5000`
 bind loopback, and go2rtc's `1984` and `8554` stay blocked from `lan0`. Live view uses MSE or HLS
 through the authenticated 443 surface, so WebRTC on `8555` also stays closed
-([ADR 0034](adr/0034-live-view-owned-by-bittern.md)). Cameras cannot reach the LAN, internet, or each
+([ADR 0034](adr/0034-live-view-owned-by-bittern.md),
+[ADR 0037](adr/0037-nvr-grid-per-pane-quality-and-full-screen.md)). Cameras cannot reach the LAN,
+internet, or each
 other except for their streams. Docker host networking keeps container traffic under the same
 firewall instead of bypassing it through NAT.
 

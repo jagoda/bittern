@@ -1,7 +1,7 @@
 # Design system changelog
 
-- Date: 2026-11-21
-- Status: Accepted; v0.21 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
+- Date: 2026-11-27
+- Status: Accepted; v0.22 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
   implemented in `ui/static/bittern.css` and the templates; the v0.3 flow layer is binding from v0.6,
   when [ADR 0027](../adr/0027-flow-layer-above-patterns.md) was accepted with amendments P1 and P3.
 - Applies to: every change to a token, a component, a pattern, a flow, or a rule in
@@ -18,6 +18,27 @@ like at vN, and why is it different now".
 Versions are internal to the design documents. Bittern does not publish a package and has no
 second consumer, so there is no SemVer promise, no changeset tooling, and no codemod. A version is
 a date-stamped batch of class changes; the date is how it maps to an app release.
+
+## v0.22: 2026-11-27
+
+- Class: pattern and component
+- What changed: the live view becomes a full-bleed wall of 1, 4, 6, 8, 9 or 16 panes from one area
+  rule, with no per-pane chrome and a one pixel gap. Each pane chooses main, sub or snapshot; sub is
+  the multi-pane default and main the single-pane default. A class prior of 4, 8 or 16 live panes
+  with a dropped-frame signal demotes the least-visible automatic pane to a 15 second snapshot and
+  promotes it back after a quiet window. Full screen fits the chosen layout, not one player, and the
+  controls live in an overlay that hides after three seconds, is inert and click-through when
+  hidden, and is revealed by Tab. Panes are named by content, the wall is one tab stop, and the
+  selected pane uses the inset focus ring and the overlay text instead of a border
+  ([patterns.md](patterns.md#live-view), LV9, LV10, LV12 and LV14 to LV17;
+  [components.md](components.md#live-player-island)).
+- Why: the maintainer decided the card grid and the nine-pane ceiling do not match the NVR job. Six
+  and eight with a primary pane, sixteen on a large screen, per-pane quality, and a full screen that
+  keeps the wall are the product shape, and the old chrome and ceiling were guesses.
+- Evidence: [ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md). This is a decision
+  record, not an implementation. The pattern rules are the review target until
+  [BIT-023](../plan/implementation-plan.md#bit-023-live-view) lands the wall, the overlay, the
+  capacity state machine and the browser checks.
 
 ## v0.21: 2026-11-26
 

@@ -1,6 +1,6 @@
 # Patterns
 
-- Date: 2026-11-18; updated 2026-11-22
+- Date: 2026-11-18; updated 2026-11-27
 - Status: Accepted. The token and component layer underneath these patterns is implemented in
   `ui/static/bittern.css` and the templates. The pattern rules remain the review target where the
   current screens do not yet meet them, and the v0.3 flow layer in [flows.md](flows.md) remains
@@ -206,32 +206,33 @@ limitation are recorded in
 **Job.** Show the cameras clearly, say whether each stream is live, and recover or name the exact
 failure without reloading the appliance.
 
-**Primary action.** While the streams play there is no filled action. The profile control is a
+**Primary action.** While the streams play there is no filled action. The quality control is a
 secondary choice. When a stream cannot start, the player's one retry action is the next step, and
-the snapshot remains visible. The layout preset and the tile camera picker are secondary controls.
+the snapshot remains visible. The layout picker and the pane camera picker are secondary controls.
 
 **Steps.**
 
 1. Read the grid or the single camera: each camera name, its live state and the sentence that says
    what is happening.
 2. Watch a stream, or read the snapshot when the stream cannot start.
-3. Choose a layout of one, two, four or nine tiles, or leave it automatic. Bittern remembers the
-   choice on this device only.
-4. Assign a camera to an empty or replaced tile, or clear a tile.
-5. Open a tile full width in place and return to the grid without losing the other streams.
-6. Open a player in browser full screen for a closer look, then leave with the control, Escape or
-   Back without losing the other streams or scrolling the page underneath.
-7. Switch between the main and sub profiles on the single-camera view; the player says which one is
-   playing.
+3. Choose a layout of one, four, six, eight, nine or sixteen panes, or leave it automatic. Bittern
+   remembers the choice on this device only.
+4. Assign a camera to an empty or replaced pane, or clear a pane.
+5. Select a pane and choose its quality: main, sub or snapshot. A manual choice stays until the owner
+   changes it.
+6. Enter full screen to fit the chosen layout to the whole screen, then leave with the overlay control
+   or Escape without losing the streams or scrolling the page underneath.
+7. Read each pane's camera name and state in its overlay; the name fades with the overlay, and a
+   failed pane keeps its name and one sentence.
 8. If a stream stalls or drops, read the bounded reconnect attempt and wait, or take the named next
    action.
 
-**Components.** Page shell, page title block, card and plain section, status badge, live player
-island, live grid tile, camera picker, preset picker, button, link.
+**Components.** Page shell, page title block, plain section, status badge, live player island, live
+pane and overlay, camera picker, layout picker, button, link.
 
-**States.** No cameras, one camera, several cameras, a grid with empty tiles, connecting, playing,
-switching, stalled, reconnecting, offline, unsupported codec, session ended, device limit, a layout
-above the device ceiling, not started on this screen, no JavaScript, camera removed, camera
+**States.** No cameras, one camera, several cameras, a grid with empty panes, connecting, playing,
+switching, stalled, reconnecting, offline, unsupported codec, session ended, device limit, a wall
+above the tested capacity, not started on this screen, no JavaScript, camera removed, camera
 disabled, snapshot available and snapshot unavailable.
 
 **Rules.**
@@ -244,17 +245,21 @@ disabled, snapshot available and snapshot unavailable.
 | LV4 | Recovery is bounded and visible. The page names the attempt and the wait, then falls back to HLS or the snapshot. | Q5; the player state walk and the proxy tests. |
 | LV5 | The profile control names the playing profile. A camera with one configured stream says so rather than offering a false quality choice. | Q9; template read and the profile switch test. |
 | LV6 | The browser receives no upstream URL, camera address, stream name or credential. | Q10; the live template scan and the proxy tests. |
-| LV7 | The viewport ceiling is enforced before a connection opens, and the active count is exposed. | Q4 and Q8; the browser ceiling checks at 360, 390, 1280 and 1920. |
+| LV7 | The class prior and the current capacity are enforced before a connection opens, and the active count is exposed. | Q4 and Q8; the browser capacity checks at 360, 390, 1280 and 1920. |
 | LV8 | Without JavaScript the page still shows the latest snapshot and a named next action. | Q5; the no-JavaScript template path. |
-| LV9 | The layout is data: a preset is a tile count and a per-tile camera assignment, resolved by the server from a first-party per-device cookie. A new preset is a count, not a template. | Q1; the layout, cookie and preset tests; the preset screenshots. |
-| LV10 | A stored layout above the device ceiling starts only the tiles the ceiling allows, says so in one sentence, and never shows an error. The proxy enforces its own hard maximum. | Q5; the phone ceiling check and the proxy session-limit test. |
-| LV11 | Each tile is its own player island. One failing camera names itself in its own tile while the others keep playing, and replacing one tile replaces only that island. | Q5 and Q11; the failure and assignment checks; the template guard. |
-| LV12 | Full width selects one tile in place, switches it to the main profile and back to sub, and the other streams keep playing. | Q11 to Q16; the full-width check. |
-| LV13 | A poll during playback leaves every player, every open picker and the chosen preset alone. | Q6; the grid poll check and the player isolation guard. |
-| LV14 | The media box sizes from the space it is given on both axes. It is never the stream's native size, never wider than its container and never taller than the available height. An aspect box reserves the space before the first frame, so metadata cannot move the layout. The desktop grid fits the viewport without page scrolling; the phone shows one tile in the available area without horizontal scrolling. | Q4; the 1920x1080 and 3840x2160 browser cases at four widths, the reserved-box check and the QEMU live phase. |
-| LV15 | Browser full screen contains the video, keeps the player controls and status reachable, does not scroll the page underneath, and leaves through the control, Escape or Back. | Q6 and Q8; the large-stream full-screen checks at four widths. |
+| LV9 | The layout is data: one of 1, 4, 6, 8, 9 or 16 panes from one area rule over a grid of areas, `auto` resolved from the enabled inventory, a per-pane camera assignment, and a per-device cookie. A new count is a row in the area function, not a template. | Q1; the area, layout, cookie and preset tests; the layout screenshots. |
+| LV10 | A class prior of 4, 8 or 16 live panes and a dropped-frame signal decide how many panes play. Demotion takes the least-visible automatic pane after two 10 second windows above 2 percent, promotion returns one pane after 300 seconds quiet and 60 seconds below 0.5 percent, a manual quality is never touched, and the proxy enforces a hard 16. The page says when it is above the tested capacity. | Q5; the capacity, hysteresis, manual-choice and proxy-limit tests. |
+| LV11 | Each pane is its own player island. One failing camera names itself in its own pane while the others keep playing, and replacing one pane replaces only that island. | Q5 and Q11; the failure and assignment checks; the template guard. |
+| LV12 | A pane plays sub by default in a multi-pane layout and main in the single-pane layout, and its main, sub and snapshot control switches at runtime without a reload. Full screen keeps the layout and the pane choices instead of switching one pane to main. | Q11 to Q16; the quality and full-screen checks. |
+| LV13 | A poll during playback leaves every player, every open control and the chosen layout alone. | Q6; the grid poll check and the player isolation guard. |
+| LV14 | The media box sizes from the space it is given on both axes. It is never the stream's native size, never wider than its container and never taller than the available height. The picture is contained and letterboxed, never cropped. An aspect box reserves the space before the first frame, so metadata cannot move the layout. The grid fills the view without page scrolling; the phone shows one pane in the available area without horizontal scrolling. | Q4; the 1920x1080 and 3840x2160 browser cases at four widths, the reserved-box check and the QEMU live phase. |
+| LV15 | Full screen contains the current layout, with no header, toolbar, border or padding. The layout, the pane names and the quality choices are unchanged; the one pixel gap remains. | Q6 and Q8; the full-screen checks for six and eight at four widths. |
+| LV16 | Controls in full screen are overlays: shown on pointer movement, a key press, a tap or focus, hidden after three seconds. A hidden overlay is inert and click-through. Tab reveals it with visible focus, Escape exits full screen, and the no-JavaScript overlay is visible by default. | Q6 and Q8; the overlay click-through, Tab and Escape checks; the no-JavaScript template path. |
+| LV17 | The pane wall is one tab stop with a roving tabindex and arrow-key geometry. The selected pane is the focused pane, shown by the inset focus ring and the camera name and quality in the overlay, never by a border. Every pane has a camera name. | Q6 and Q9; the keyboard pass and the selected-pane check. |
 
-Slice 1a implements LV1 to LV8. Slice 1b implements LV9 to LV13.
+Slice 1a implements LV1 to LV8. Slice 1b implements LV9 to LV13. [ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md)
+replaces LV9, LV10, LV12, LV14 and LV15 and adds LV16 and LV17; BIT-023 implements the replacement
+and the rules are the review target until it lands.
 
 ## Managed-device list and detail
 

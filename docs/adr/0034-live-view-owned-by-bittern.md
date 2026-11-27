@@ -4,7 +4,8 @@
 and the Frigate API for snapshots and camera state, and never embeds the Frigate UI or its web
 player.*
 
-- Status: Accepted
+- Status: Accepted; grid, stream-quality and full-screen clauses superseded in part by
+  [ADR 0037](./0037-nvr-grid-per-pane-quality-and-full-screen.md)
 - Date: 2026-11-26
 - Deciders: maintainer
 - Related: [ADR-0003](./0003-frigate-as-nvr-engine.md),
@@ -16,6 +17,7 @@ player.*
   [ADR-0025](./0025-browser-check-for-the-responsive-ui.md),
   [ADR-0026](./0026-design-system-and-ui-review.md),
   [ADR-0027](./0027-flow-layer-above-patterns.md),
+  [ADR-0037](./0037-nvr-grid-per-pane-quality-and-full-screen.md),
   [architecture](../architecture.md), [open questions](../open-questions.md),
   [implementation plan](../plan/implementation-plan.md), [UI README](../../ui/README.md),
   [upstream verification](../notes/2026-11-26-live-view-upstream-verification.md),

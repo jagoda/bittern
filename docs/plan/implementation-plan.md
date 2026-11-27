@@ -4,8 +4,9 @@ This plan turns accepted decisions into an ordered, testable sequence: a phase i
 exists and is verified, not when directories exist. The agent language is Go
 ([ADR 0015](../adr/0015-agent-language.md)); the UI stack is server-rendered Go templates with HTMX
 over TLS ([ADR 0019](../adr/0019-ui-stack.md)). Live view is specified by
-[ADR 0034](../adr/0034-live-view-owned-by-bittern.md) and is not implemented. The links at the end
-are the required reading.
+[ADR 0034](../adr/0034-live-view-owned-by-bittern.md), with the grid, per-pane quality and full
+screen in [ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md); slices 1a and 1b are
+implemented. The links at the end are the required reading.
 
 ## Current state
 
@@ -117,7 +118,8 @@ are the required reading.
 - Stop and write an ADR when contradicting one, because silent deviations are how docs become fiction.
   Contracts come before stacks: [ADR 0015](../adr/0015-agent-language.md) fixes the agent language,
   and [ADR 0019](../adr/0019-ui-stack.md) fixes the UI stack. Live view is decided by
-  [ADR 0034](../adr/0034-live-view-owned-by-bittern.md).
+  [ADR 0034](../adr/0034-live-view-owned-by-bittern.md), and the wall, quality and full-screen rules
+  by [ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md).
 - Generated files are never hand-edited: if the renderer cannot express a setting, fix the schema. Every
   risky change is reversible, and risky features ship off by default.
 - Default to automatic detection and configuration: management and camera NICs by carrier and role,
@@ -296,8 +298,9 @@ The maintainer fixed this order in session on 2026-11-22. It is recorded in
     BIT-020 and the clean-install fixes.
 18. **BIT-023 live view, BIT-024 event list and review, BIT-025 playback and timeline, BIT-026
     camera and detector configuration.** These are the NVR product surfaces. BIT-023 follows
-    [ADR 0034](../adr/0034-live-view-owned-by-bittern.md) and can implement. BIT-025 and BIT-026
-    wait for BIT-012. They do not preempt any item above.
+    [ADR 0034](../adr/0034-live-view-owned-by-bittern.md) and the grid, capacity and full-screen
+    rules in [ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md) and can implement.
+    BIT-025 and BIT-026 wait for BIT-012. They do not preempt any item above.
 19. **BIT-027 robust ONVIF profiles, PTZ and field interoperability.** A later stream after the NVR
     surfaces; it does not preempt this queue.
 20. **BIT-042 release channel and CI pipeline.** The CI and publication work in the release work
@@ -1667,7 +1670,7 @@ live verification path until the Bittern NVR surfaces land.
 ### BIT-023 Live view
 **Status.** In progress. Slice 1a implements the single-camera page at `/ui/live/{camera}`, the
 authenticated MSE and HLS proxy, the snapshot fallback, the renderer `go2rtc.streams` block and
-`cameras.<name>.live.streams` mapping, the player isolation guard and the 1/4/9 viewport ceiling
+`cameras.<name>.live.streams` mapping, the player isolation guard and the first viewport ceiling
 structure. Slice 1b implements `/ui/live` as the grid: the 1/2/4/9 presets, the per-device layout
 cookie, the server-resolved tile assignment, one player island per tile, the in-place full-width
 view, the saved-layout clamp and the two-camera QEMU live phase. The real-hardware sizing fix sizes
@@ -1675,12 +1678,15 @@ the player to both axes, fits the desktop grid in the viewport and adds browser 
 QEMU camera now serves 1920x1080 and the live phase asserts no guest page overflow. Evidence: [the
 live view slice 1a note](../notes/2026-11-26-live-view-slice-1a.md), [the live view slice 1b
 note](../notes/2026-11-26-live-view-slice-1b.md) and [the live view sizing
-note](../notes/2026-11-26-live-view-sizing.md). PTZ, audio, event review and playback remain out of
-scope.
+note](../notes/2026-11-26-live-view-sizing.md). [ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md)
+replaces the 1/2/4/9 presets, the tile chrome and the 1/4/9 ceiling with the six layouts, per-pane
+quality and the capacity model; that work is not started. PTZ, audio, event review and playback
+remain out of scope.
 
 **Goal.** Give the owner a live camera view in the Bittern UI on the authenticated 443 surface,
-following [ADR 0034](../adr/0034-live-view-owned-by-bittern.md), with no exposure of port 8555 and no
-embedded Frigate UI.
+following [ADR 0034](../adr/0034-live-view-owned-by-bittern.md) and
+[ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md), with no exposure of port 8555
+and no embedded Frigate UI.
 **Scope.**
 - [ADR 0034](../adr/0034-live-view-owned-by-bittern.md) is accepted and [OQ-23](../open-questions.md)
   is resolved. The plan, architecture, open questions and UI README link the decision.
@@ -1692,26 +1698,54 @@ embedded Frigate UI.
   transport over `/api/ws?src=<stream>` and HLS as the fallback over `/api/stream.m3u8?src=<stream>`,
   both proxied through `bitternd`. Do not add a second browser listener, do not expose 8555, 1984,
   8554, 8971 or 5000, and do not route `lan0` to `cam0`. WebRTC is not used in v1.
-- The renderer emits `go2rtc.streams` and `cameras.<name>.live.streams`. Add the smallest schema
-  change for a named second stream and a migration test. Until BIT-027 collects real ONVIF profiles,
-  `main` and `sub` resolve to the single configured path and the page says one stream.
+- The renderer emits `go2rtc.streams` and `cameras.<name>.live.streams`. Add schema version 3 with
+  the optional camera `profiles` object from ADR 0037, a v2 to v3 migration and its golden tests.
+  Until BIT-027 collects real ONVIF profiles, `profiles` is absent, both `main` and `sub` resolve to
+  the single configured path and the page says one stream. The renderer emits both keys from the two
+  paths when they exist and keeps one path under both keys when they do not.
 - Authenticate every player, playlist, segment, key and WebSocket request with the administrator
   session. Do not put camera credentials, RTSP URLs, go2rtc stream names, or Frigate credentials in
   the browser. Close playback on logout, session expiry, or camera removal, and never cache media
   with `no-store`.
 - The player container is never inside an HTMX swap region. Add the template guard and the runtime
   `closest()` check from ADR 0034. A sibling status region may poll; the player region may not.
-- Layout is data: presets 1, 2, 4 and 9, a per-tile camera assignment, a versioned per-device cookie,
-  server-side resolution at render time, and the viewport default with the 1/4/9 device ceiling.
-  A stored preset is clamped to the ceiling and the page says so.
+- Layout is data: the layouts 1, 4, 6, 8, 9 and 16 from the single area rule in ADR 0037, `auto`
+  resolved from the enabled inventory, a per-pane camera assignment, a versioned per-device cookie
+  with one quality value per pane, and server-side resolution at render time. A stored value outside
+  the set clamps down and the page says so.
+- The live grid fills the view with no per-pane chrome: a one pixel gap and no border, radius,
+  padding, surface, heading bar, status card or picker between panes. Controls and the camera name
+  live in an overlay inside each pane, and a pane in a failure state keeps its name and one sentence.
+- Per-pane quality: sub by default in every multi-pane layout, main in the single-pane layout, and a
+  main, sub and snapshot control for the selected pane. A manual choice is stored in the layout
+  cookie and wins over automation. The control is absent when the camera has one stream.
+- Capacity: class priors of 4, 8 and 16 live panes, the 2 percent and 0.5 percent dropped-frame
+  thresholds, the 20 second demotion evidence, the 300 second quiet period and the 60 second
+  promotion window from ADR 0037. Demotion and promotion touch automatic panes only, demote the
+  least visible pane, and step down main to sub before a pane is demoted. The proxy hard maximum
+  becomes 16.
+- Panes beyond capacity refresh the authenticated snapshot every 15 seconds while visible, stop
+  while `document.hidden` is true, and resume with one immediate fetch.
+- Full screen requests full screen on the grid and keeps the current layout, with no header,
+  toolbar, border or padding. The overlay is shown on pointer movement, a key press, a tap or focus,
+  hides after three seconds, is `inert` and click-through when hidden, reveals on Tab with visible
+  focus, and exits on Escape. The layout picker and quality controls work without JavaScript as
+  forms.
+- The pane wall is one tab stop with a roving tabindex, arrow key geometry, Home and End, and a
+  selected pane shown by the inset focus ring and the camera name and quality in the overlay, never
+  by a tile border.
 - Keep the default data flow local. Do not add STUN, a public relay, or a cloud dependency. Audio
   stays muted and out of scope until OQ-21.
 - Add browser cases with 1920x1080 and 3840x2160 stubbed streams at all four widths, a no-overflow
   assertion on both axes for the grid and full screen, and a reserved-box check that metadata cannot
-  move the player. Add tests with the QEMU virtual camera or a fixture: authorized MSE and HLS playback,
+  move the player. Add the ADR 0037 cases: every layout at four widths, a sixteen-pane wall with
+  sixteen stubbed streams, a hidden overlay click-through, Tab reveal and Escape, full screen of six
+  and eight, a synthetic-counter demotion and promotion walk, the snapshot interval, and the one
+  pixel gap. Add tests with the QEMU virtual camera or a fixture: authorized MSE and HLS playback,
   unauthorized refusal for navigation, playlist, segment and WebSocket requests, session expiry,
-  camera offline, reconnect, layout cookie validation, device ceiling, player isolation, and no
-  listener on 8555. Add phone and desktop checks and the nftables golden assertion.
+  camera offline, reconnect, layout cookie validation, per-pane quality, capacity and hysteresis,
+  player isolation, the schema migration, the renderer's two-key output, and no listener on 8555.
+  Add phone and desktop checks and the nftables golden assertion.
 **Acceptance.**
 - The ADR is accepted, OQ-23 is resolved, and the plan, architecture, open questions and UI README
   link the decision.
@@ -1726,17 +1760,31 @@ embedded Frigate UI.
   exists.
 - Camera credentials, RTSP URLs, go2rtc stream names, session identifiers and media URLs with
   secrets are absent from logs, status, support bundle and the browser DOM.
-- The live page passes the BIT-020 checks at 390 by 844 and 1280 by 800, is keyboard reachable, and
+- The live page passes the BIT-020 checks at 360, 390, 1280 and 1920, is keyboard reachable, and
   has a working HLS or snapshot fallback. The player is never inside an HTMX swap region and the
   template guard test proves it.
-- The layout is remembered per device, resolves at render time, defaults by viewport, and enforces
-  the 1/4/9 UI ceiling. A phone's UI starts one active tile, and the proxy enforces the hard
-  nine-connection maximum.
-- `make check` passes, with Go tests for the proxy auth, WebSocket and HLS boundaries, layout
-  validation, player isolation, QEMU or fixture playback, and firewall evidence.
-**Depends on.** BIT-008, BIT-020, BIT-022, ADR 0034. **Size.** L.
+- The six layouts render from the one area rule, `auto` resolves from the enabled inventory, and a
+  stored layout outside the set clamps down. The live grid fills the view with no per-pane chrome and
+  the one pixel gap, and every pane has a name and a selected state without a tile border.
+- Per-pane quality switches main, sub and snapshot at runtime, survives a reload in the cookie, and a
+manual choice is never overridden by capacity. A one-stream camera has no quality control.
+- Capacity starts at 4, 8 or 16 by class, demotes the least-visible automatic pane after two hot
+windows, never demotes a manual pane, promotes one pane after the quiet window, and does not
+oscillate. Snapshot panes refresh every 15 seconds and stop while the tab is hidden.
+- Full screen contains the current layout with no header or toolbar, the overlay is click-through
+when hidden and revealed by Tab with visible focus, and Escape exits.
+- The schema v2 to v3 migration adds no profiles, the renderer writes both keys from profiles when
+they exist and one path when they do not, and the old document, the new document and the one-stream
+camera all render and apply.
+- The proxy enforces the hard sixteen-connection maximum, and a phone never opens more than its prior
+without a manual choice.
+- `make check` passes, with Go tests for the proxy auth, WebSocket and HLS boundaries, layout and
+area validation, quality and capacity state, player isolation, QEMU or fixture playback, the
+migration, the renderer, and firewall evidence.
+**Depends on.** BIT-008, BIT-020, BIT-022, ADR 0034, ADR 0037. **Size.** L.
 **Out of scope.** PTZ (BIT-027), audio (OQ-21), event review (BIT-024), recorded playback (BIT-025),
-  the gated advanced Frigate UI (OQ-38), and the kiosk (OQ-25).
+  the gated advanced Frigate UI (OQ-38), the kiosk (OQ-25), moving Frigate detection to the sub
+  stream, and recorded quality changes.
 
 ### BIT-024 Event list and review
 **Goal.** Let the owner review Frigate events, thumbnails, and clips in the Bittern UI with filters,
@@ -1864,6 +1912,14 @@ reference device is a recent Axis PTZ.
   a sub stream: stream URIs per profile, snapshot URIs, media and encoder configuration, resolution
   and codec where reported, and the PTZ or event configuration attached to the profile. The owner
   picks from the profiles the camera advertises; the rest stay visible and unselected.
+- Persist the selected main and sub profiles in the schema version 3 camera `profiles` object from
+  [ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md): the ONVIF profile token, the
+  RTSP and snapshot paths reduced to path and query components, the reported width, height and codec,
+  and no host, userinfo or credential. Collect them with `GetProfiles`, `GetStreamUri` and
+  `GetSnapshotUri` at adoption, map `main` to the largest reported H.264 profile and `sub` to the
+  smallest strictly smaller one, and leave `sub` absent when there is no smaller profile. Reuse the
+  schema 3 fields, the v2 to v3 migration and the renderer's two-key output that BIT-023 lands; do
+  not add a second profile shape.
 - Select the media and encoder configuration explicitly. Resolve the profile to encoder mapping from
   the advertised configuration, including the cases where two profiles share one encoder or one
   encoder serves several stream URIs, and show the stream path with the profile token that produced
@@ -1929,6 +1985,10 @@ reference device is a recent Axis PTZ.
 **Acceptance.**
 - The services and profiles a camera advertises are enumerated and shown with their evidence, and each
   profile that maps to a use case is selectable for stream, snapshot, PTZ, and events.
+- The selected main and sub profiles are stored in the schema `profiles` object with path and query
+  components only, and no host, userinfo or credential. The renderer emits both go2rtc streams and
+  both friendly names from them, and a camera with one profile stores no `sub` and degrades to the
+  one-stream page. A camera with no Media service keeps the manual RTSP path and still adopts.
 - The Axis reference device completes the field suite: profile negotiation, presets, continuous move,
   home and stop, snapshot, an event source, and its quirks. Its model and firmware are in the OQ-10
   matrix with the evidence, and no credential is recorded.
@@ -1954,8 +2014,9 @@ reference device is a recent Axis PTZ.
   migration, and a migration test.
 - `make check` passes with the new protocol, UI, golden render, and redaction tests.
 **Depends on.** BIT-008, BIT-023, BIT-024, BIT-026, and the interoperability rules in ADR 0024 (ONVIF
-discovery levels and field interoperability). **Size.** L. It is a future stream after the NVR
-surfaces and does not preempt the near-term queue.
+discovery levels and field interoperability), plus the schema profiles, migration and renderer output
+decided by [ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md). **Size.** L. It is a
+future stream after the NVR surfaces and does not preempt the near-term queue.
 
 ### BIT-028 Camera onboarding UX
 **Goal.** Make camera onboarding discovery-first and understandable when a camera needs

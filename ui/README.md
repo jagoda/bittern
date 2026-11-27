@@ -5,9 +5,11 @@ Go `html/template` with HTMX for partial updates, and every page works without J
 ([ADR 0019](../docs/adr/0019-ui-stack.md)). It covers the first-run wizard, camera onboarding,
 status and health, update controls, logs, support bundle download, and reset. It talks to `bitternd`
 over a local API and never writes rendered system files itself; mutations go through the agent apply
-transaction. Live view follows [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md); the
-single-camera view, the grid and the browser full-screen mode are implemented. The Frigate UI is
-not a product surface.
+transaction. Live view follows [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md), with the
+wall, per-pane quality and full-screen rules in
+[ADR 0037](../docs/adr/0037-nvr-grid-per-pane-quality-and-full-screen.md); the single-camera view and
+the first grid slice are implemented, and the ADR 0037 wall, overlay and capacity model are not. The
+Frigate UI is not a product surface.
 
 The product serves the UI over TLS on `0.0.0.0:443` with a self-signed certificate generated at
 first boot. The wizard and every page show its SHA-256 fingerprint; the browser warning is explained
