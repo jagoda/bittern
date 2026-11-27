@@ -76,6 +76,12 @@
           "stream": "unknown",
           "snapshot": "unknown",
           "recording": "degraded",
+          "time": {
+            "state": "never-synchronised",
+            "ntp": false,
+            "push": false,
+            "detail": "Bittern has not set this camera's clock yet."
+          },
           "last_seen": null,
           "detail": "No camera check has run since the last adoption or test."
         }

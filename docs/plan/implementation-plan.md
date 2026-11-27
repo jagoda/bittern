@@ -366,8 +366,13 @@ These are open after step 5. The first is the next action; the rest do not block
    **Appliance half landed 2026-11-27:** the rendered chrony configuration is a client on `lan0` and
    a camera-only server with `local stratum 10`, the firewall accepts NTP on `cam0` only, the wizard
    captures `identity.timezone` with a UTC fallback, browser timestamps render in that zone, and the
-   status `time` section reports `ok`, `never-synchronised`, `drifted`, or `unknown`. The camera half
-   is the remaining slice. See [the appliance time note](../notes/2026-11-27-appliance-time.md).
+   status `time` section reports `ok`, `never-synchronised`, `drifted`, or `unknown`. See
+   [the appliance time note](../notes/2026-11-27-appliance-time.md).
+   **Camera half landed 2026-11-27:** detection of NTP, pushed time, both, or neither; the ONVIF
+   client with endpoint validation and camera-clock authentication; the 15 minute verified check
+   with bounded backoff; and the per-camera clock state in the status contract. See
+   [the camera time note](../notes/2026-11-27-camera-time-onvif.md). The tzdata bundle copy and the
+   manifest v2 field set remain out of scope.
 
 **Subsystem delivery order (2026-11-26).** For the work this ADR creates, the order is: first this
 decision and the manifest v2 change; then the apply-on-update and migration persistence work, with

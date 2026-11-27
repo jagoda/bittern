@@ -250,3 +250,46 @@ func repositoryRoot(t *testing.T) string {
 		dir = parent
 	}
 }
+
+func TestPOSIXOffsetUsesTheOffsetInForceNow(t *testing.T) {
+	berlin := Load("Europe/Berlin")
+	cases := []struct {
+		name string
+		when time.Time
+		want string
+	}{
+		{
+			name: "winter",
+			when: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+			want: "CET-1",
+		},
+		{
+			name: "summer",
+			when: time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC),
+			want: "CEST-2",
+		},
+		{
+			name: "after spring forward",
+			when: time.Date(2026, 3, 29, 1, 30, 0, 0, time.UTC),
+			want: "CEST-2",
+		},
+		{
+			name: "before fall back",
+			when: time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC),
+			want: "CEST-2",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := POSIXOffset(testCase.when, berlin); got != testCase.want {
+				t.Fatalf("POSIXOffset = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+	if got := POSIXOffset(time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC), Load("Asia/Kathmandu")); got != "<+0545>-5:45" {
+		t.Fatalf("Kathmandu POSIXOffset = %q", got)
+	}
+	if got := POSIXOffset(time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC), time.UTC); got != "UTC0" {
+		t.Fatalf("UTC POSIXOffset = %q", got)
+	}
+}

@@ -51,6 +51,10 @@ type Options struct {
 	Discovery CameraDiscovery
 	// Snapshot proves the applied camera reaches Frigate. Nil omits the check.
 	Snapshot SnapshotChecker
+	// CameraTime asks the camera time runner to re-detect and synchronise the
+	// cameras after an adoption or edit. It never waits, so adoption cannot be
+	// delayed or failed by a camera that refuses time.
+	CameraTime CameraTimeNotifier
 	// Picture fetches one test picture for the authenticated preview route.
 	// Nil uses Snapshot when it implements PictureFetcher, otherwise the route
 	// reports that the picture is unavailable.
@@ -70,6 +74,11 @@ type Options struct {
 	// Go2RTCURL is the loopback go2rtc base used by the live media proxy.
 	// Empty uses http://127.0.0.1:1984. Tests point it at a local server.
 	Go2RTCURL string
+}
+
+// CameraTimeNotifier marks cameras for one bounded time sync after adoption.
+type CameraTimeNotifier interface {
+	RequestSync(cameraIDs ...string)
 }
 
 // CameraDiscovery is the camera list shown by the wizard. The production
@@ -142,6 +151,7 @@ func newHandler(options Options) (*handler, *routeMux, error) {
 		fingerprint: options.CertificateFingerprint,
 		discovery:   options.Discovery,
 		snapshot:    options.Snapshot,
+		cameraTime:  options.CameraTime,
 		picture:     options.Picture,
 		configFile:  options.ConfigPath,
 		secretsFile: options.SecretsPath,
@@ -170,6 +180,7 @@ type handler struct {
 	fingerprint string
 	discovery   CameraDiscovery
 	snapshot    SnapshotChecker
+	cameraTime  CameraTimeNotifier
 	picture     PictureFetcher
 	configFile  string
 	secretsFile string
@@ -248,30 +259,35 @@ type pageData struct {
 
 func parseTemplates() (*template.Template, error) {
 	functions := template.FuncMap{
-		"bytesPtr":               bytesPtr,
-		"cableLabel":             cableLabel,
-		"cameraRecordingLabel":   cameraRecordingLabel,
-		"cameraSnapshotLabel":    cameraSnapshotLabel,
-		"cameraStreamLabel":      cameraStreamLabel,
-		"hasError":               hasError,
-		"localTime":              localTime,
-		"localTimePtr":           localTimePtr,
-		"offsetPhrase":           offsetPhrase,
-		"timeCameraCopy":         timeCameraCopy,
-		"timeNextAction":         timeNextAction,
-		"timePrimaryCopy":        timePrimaryCopy,
-		"timeStateClass":         timeStateClass,
-		"timeStateLabel":         timeStateLabel,
-		"humanBytes":             humanBytes,
-		"join":                   strings.Join,
-		"overallLabel":           overallLabel,
-		"ptrBool":                ptrBool,
-		"ptrInt":                 ptrInt,
-		"ptrInt64":               ptrInt64,
-		"ptrString":              ptrString,
-		"recordingSoftwareLabel": recordingSoftwareLabel,
-		"sectionLabel":           sectionLabel,
-		"yesno":                  yesno,
+		"bytesPtr":                 bytesPtr,
+		"cableLabel":               cableLabel,
+		"cameraRecordingLabel":     cameraRecordingLabel,
+		"cameraSnapshotLabel":      cameraSnapshotLabel,
+		"cameraStreamLabel":        cameraStreamLabel,
+		"cameraTimeClass":          cameraTimeClass,
+		"cameraTimeLabel":          cameraTimeLabel,
+		"cameraTimeMechanismLabel": cameraTimeMechanismLabel,
+		"cameraTimeNextAction":     cameraTimeNextAction,
+		"cameraTimePrimaryCopy":    cameraTimePrimaryCopy,
+		"hasError":                 hasError,
+		"localTime":                localTime,
+		"localTimePtr":             localTimePtr,
+		"offsetPhrase":             offsetPhrase,
+		"timeCameraCopy":           timeCameraCopy,
+		"timeNextAction":           timeNextAction,
+		"timePrimaryCopy":          timePrimaryCopy,
+		"timeStateClass":           timeStateClass,
+		"timeStateLabel":           timeStateLabel,
+		"humanBytes":               humanBytes,
+		"join":                     strings.Join,
+		"overallLabel":             overallLabel,
+		"ptrBool":                  ptrBool,
+		"ptrInt":                   ptrInt,
+		"ptrInt64":                 ptrInt64,
+		"ptrString":                ptrString,
+		"recordingSoftwareLabel":   recordingSoftwareLabel,
+		"sectionLabel":             sectionLabel,
+		"yesno":                    yesno,
 	}
 	return template.New("bittern").Funcs(functions).ParseFS(assets.UI, "ui/templates/*.html")
 }

@@ -49,7 +49,7 @@
 {{end}}
 
 {{define "camera-advanced-fields"}}
-<details class="disclosure advanced-settings"{{if or (hasError .Errors "mac") (hasError .Errors "username") (hasError .Errors "password")}} open="open"{{end}}>
+<details class="disclosure advanced-settings"{{if or (hasError .Errors "mac") (hasError .Errors "username") (hasError .Errors "password") (hasError .Errors "onvif_username") (hasError .Errors "onvif_password")}} open="open"{{end}}>
   <summary>Hardware address and sign-in</summary>
   <p class="hint">Optional. Add the hardware address only when Bittern did not find the camera, and the camera sign-in only when the camera needs one.</p>
   <fieldset>
@@ -74,6 +74,22 @@
       <p class="hint" id="camera-password-hint">{{if .Editing}}Leave blank to keep the saved sign-in. Stored on the appliance and never shown again.{{else if .CameraSettings}}Leave blank to keep the sign-in you entered. It is written only when you apply, and never shown again.{{else}}Leave both sign-in fields blank for a camera without one. It is written only when you apply, and never shown again.{{end}}</p>
       {{if hasError .Errors "password"}}<p class="field-error" id="camera-password-error">{{index .Errors "password"}}</p>{{end}}
       <input id="camera-password" name="password" type="password" maxlength="256" autocomplete="new-password" value="" aria-describedby="camera-password-hint{{if hasError .Errors "password"}} camera-password-error{{end}}"{{if hasError .Errors "password"}} aria-invalid="true"{{end}} />
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Camera time sign-in</legend>
+    <p class="hint">Optional. Use this only when the camera has a separate account for setting its clock. It is stored under the same saved sign-in, never a second secret store.</p>
+    <div class="field">
+      <label for="camera-onvif-username">Camera time username</label>
+      <p class="hint" id="camera-onvif-username-hint">The account the camera accepts for time changes, not the stream account.</p>
+      {{if hasError .Errors "onvif_username"}}<p class="field-error" id="camera-onvif-username-error">{{index .Errors "onvif_username"}}</p>{{end}}
+      <input id="camera-onvif-username" name="onvif_username" type="text" value="{{.Form.ONVIFUsername}}" maxlength="128" autocomplete="off" aria-describedby="camera-onvif-username-hint{{if hasError .Errors "onvif_username"}} camera-onvif-username-error{{end}}"{{if hasError .Errors "onvif_username"}} aria-invalid="true"{{end}} />
+    </div>
+    <div class="field">
+      <label for="camera-onvif-password">Camera time password</label>
+      <p class="hint" id="camera-onvif-password-hint">{{if .Editing}}Leave blank to keep the saved time sign-in. Stored on the appliance and never shown again.{{else if .CameraSettings}}Leave blank to keep the time sign-in you entered.{{else}}Leave both fields blank when the stream sign-in also works for time changes.{{end}}</p>
+      {{if hasError .Errors "onvif_password"}}<p class="field-error" id="camera-onvif-password-error">{{index .Errors "onvif_password"}}</p>{{end}}
+      <input id="camera-onvif-password" name="onvif_password" type="password" maxlength="256" autocomplete="new-password" value="" aria-describedby="camera-onvif-password-hint{{if hasError .Errors "onvif_password"}} camera-onvif-password-error{{end}}"{{if hasError .Errors "onvif_password"}} aria-invalid="true"{{end}} />
     </div>
   </fieldset>
 </details>

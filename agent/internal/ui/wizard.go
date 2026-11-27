@@ -103,6 +103,16 @@ type ApplyRequest struct {
 	// written to secrets.yaml; it is never rendered or included in
 	// appliance.yaml.
 	CameraCredentials map[string]string
+	// CameraONVIF holds an optional separate ONVIF account for a camera whose
+	// stream sign-in is not accepted for time changes. It is written under the
+	// same credentials_ref, never a second secret store.
+	CameraONVIF map[string]ONVIFCredential
+}
+
+// ONVIFCredential is one optional separate camera time account.
+type ONVIFCredential struct {
+	Username string
+	Password string
 }
 
 // Applier is the write boundary. The production implementation is a stub
@@ -130,13 +140,15 @@ func (StubApplier) Apply(context.Context, ApplyRequest) error {
 }
 
 type cameraForm struct {
-	Name     string
-	Address  string
-	Port     string
-	Path     string
-	MAC      string
-	Username string
-	Password string
+	Name          string
+	Address       string
+	Port          string
+	Path          string
+	MAC           string
+	Username      string
+	Password      string
+	ONVIFUsername string
+	ONVIFPassword string
 }
 
 // pendingCamera is one camera added in this setup and not applied yet. Ref is
@@ -147,6 +159,8 @@ type pendingCamera struct {
 	Ref           string
 	Camera        config.Camera
 	CredentialURL string
+	ONVIFUsername string
+	ONVIFPassword string
 }
 
 // candidateChoice is a discovery result with the owner-facing name the camera
@@ -338,10 +352,16 @@ func (h *handler) submitCamera(w http.ResponseWriter, r *http.Request) {
 		validationErrors[field] = message
 	}
 	credentialURL := ""
+	onvif := ONVIFCredential{}
 	if len(validationErrors) == 0 {
 		var credentialErrors map[string]string
 		credentialURL, credentialErrors = form.credentialURL(camera)
 		for field, message := range credentialErrors {
+			validationErrors[field] = message
+		}
+		var onvifErrors map[string]string
+		onvif, onvifErrors = form.onvifCredential()
+		for field, message := range onvifErrors {
 			validationErrors[field] = message
 		}
 	}
@@ -352,7 +372,7 @@ func (h *handler) submitCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session.addCamera(camera, credentialURL)
+	session.addCamera(camera, credentialURL, onvif)
 	session.resetApplied()
 	http.Redirect(w, r, BasePath+"/wizard/camera", http.StatusSeeOther)
 }
@@ -421,6 +441,7 @@ func (h *handler) submitCameraSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	credentialURL := ""
+	onvif := ONVIFCredential{}
 	if strings.TrimSpace(form.Username) != "" || form.Password != "" {
 		var credentialErrors map[string]string
 		credentialURL, credentialErrors = form.credentialURL(camera)
@@ -436,13 +457,20 @@ func (h *handler) submitCameraSettings(w http.ResponseWriter, r *http.Request) {
 			validationErrors["password"] = "Enter the camera password again because the address or stream changed."
 		}
 	}
+	if len(validationErrors) == 0 {
+		var onvifErrors map[string]string
+		onvif, onvifErrors = form.onvifCredential()
+		for field, message := range onvifErrors {
+			validationErrors[field] = message
+		}
+	}
 
 	if len(validationErrors) != 0 {
 		h.renderCameraSettings(w, r, entry, form, validationErrors, from)
 		return
 	}
 
-	session.updateCamera(entry.Ref, camera, credentialURL)
+	session.updateCamera(entry.Ref, camera, credentialURL, onvif)
 	session.resetApplied()
 	http.Redirect(w, r, cameraSettingsBack(from), http.StatusSeeOther)
 }
@@ -511,13 +539,15 @@ func (h *handler) cameraCandidate(address string, existing *config.Camera) (disc
 
 func cameraFormFromRequest(r *http.Request) cameraForm {
 	return cameraForm{
-		Name:     r.PostFormValue("name"),
-		Address:  r.PostFormValue("address"),
-		Port:     r.PostFormValue("rtsp_port"),
-		Path:     r.PostFormValue("rtsp_path"),
-		MAC:      r.PostFormValue("camera_mac"),
-		Username: r.PostFormValue("username"),
-		Password: r.PostFormValue("password"),
+		Name:          r.PostFormValue("name"),
+		Address:       r.PostFormValue("address"),
+		Port:          r.PostFormValue("rtsp_port"),
+		Path:          r.PostFormValue("rtsp_path"),
+		MAC:           r.PostFormValue("camera_mac"),
+		Username:      r.PostFormValue("username"),
+		Password:      r.PostFormValue("password"),
+		ONVIFUsername: r.PostFormValue("onvif_username"),
+		ONVIFPassword: r.PostFormValue("onvif_password"),
 	}
 }
 
@@ -678,6 +708,11 @@ func (h *handler) runApplyOperation(request ApplyRequest, session *wizardSession
 		// The password alone is not enough, because the token step happens
 		// before review and apply.
 		_ = writeSetupComplete(h.stateRootPath())
+		cameraIDs := make([]string, 0, len(request.Cameras))
+		for _, camera := range request.Cameras {
+			cameraIDs = append(cameraIDs, camera.ID)
+		}
+		h.requestCameraTime(cameraIDs...)
 		h.operations.note("Checking the camera picture")
 		snapshots = h.snapshotResults(ctx, request.Cameras)
 		for index := range snapshots {
@@ -835,6 +870,7 @@ func (h *handler) applyRequestFor(r *http.Request, session *wizardSession, pendi
 		StoragePath:       storage.Path,
 		Cameras:           cameras,
 		CameraCredentials: credentials,
+		CameraONVIF:       onvifCredentials(pending),
 	}
 }
 
@@ -1049,6 +1085,51 @@ func (f cameraForm) credentialURL(camera config.Camera) (string, map[string]stri
 	return cameraCredentialURL(camera.Address, camera.RTSPPortValue(), camera.RTSPPathValue(), username, password), nil
 }
 
+// onvifCredential builds the optional separate ONVIF account. Both fields must
+// be present together and are stored under the camera's existing
+// credentials_ref. Blank means keep any account already stored.
+func (f cameraForm) onvifCredential() (ONVIFCredential, map[string]string) {
+	username := strings.TrimSpace(f.ONVIFUsername)
+	password := f.ONVIFPassword
+	validationErrors := make(map[string]string)
+	switch {
+	case username == "" && password != "":
+		validationErrors["onvif_username"] = "Enter the camera time username that goes with this password."
+	case username != "" && password == "":
+		validationErrors["onvif_password"] = "Enter the camera time password that goes with this username."
+	}
+	if strings.ContainsAny(username, "\r\n") || strings.ContainsAny(password, "\r\n") {
+		validationErrors["onvif_password"] = "The camera time username and password must not contain a line break."
+	}
+	if utf8.RuneCountInString(username) > 128 {
+		validationErrors["onvif_username"] = "Keep the camera time username to 128 characters or fewer."
+	}
+	if utf8.RuneCountInString(password) > 256 {
+		validationErrors["onvif_password"] = "Keep the camera time password to 256 characters or fewer."
+	}
+	if len(validationErrors) != 0 || (username == "" && password == "") {
+		return ONVIFCredential{}, validationErrors
+	}
+	return ONVIFCredential{Username: username, Password: password}, nil
+}
+
+func onvifCredentials(cameras []pendingCamera) map[string]ONVIFCredential {
+	credentials := make(map[string]ONVIFCredential)
+	for _, entry := range cameras {
+		if entry.ONVIFUsername == "" {
+			continue
+		}
+		credentials[entry.Camera.ID] = ONVIFCredential{
+			Username: entry.ONVIFUsername,
+			Password: entry.ONVIFPassword,
+		}
+	}
+	if len(credentials) == 0 {
+		return nil
+	}
+	return credentials
+}
+
 func sameCameraEndpoint(left, right *config.Camera) bool {
 	if left == nil || right == nil {
 		return false
@@ -1137,6 +1218,8 @@ func orderedCameraErrors(validationErrors map[string]string) []fieldError {
 		{field: "mac", label: "Hardware address"},
 		{field: "username", label: "Camera username"},
 		{field: "password", label: "Camera password"},
+		{field: "onvif_username", label: "Camera time username"},
+		{field: "onvif_password", label: "Camera time password"},
 	}
 	result := make([]fieldError, 0, len(validationErrors))
 	for _, entry := range order {
@@ -1233,7 +1316,7 @@ func (s *wizardSession) findCamera(ref string) (pendingCamera, bool) {
 // addCamera assigns the session reference and the saved identity. The identity
 // is assigned once and is never derived from the name, so a rename keeps the
 // sign-in under the same key.
-func (s *wizardSession) addCamera(camera config.Camera, credentialURL string) pendingCamera {
+func (s *wizardSession) addCamera(camera config.Camera, credentialURL string, onvif ONVIFCredential) pendingCamera {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.nextCamera++
@@ -1242,12 +1325,14 @@ func (s *wizardSession) addCamera(camera config.Camera, credentialURL string) pe
 		Ref:           fmt.Sprintf("c%d", s.nextCamera),
 		Camera:        camera,
 		CredentialURL: credentialURL,
+		ONVIFUsername: onvif.Username,
+		ONVIFPassword: onvif.Password,
 	}
 	s.Cameras = append(s.Cameras, entry)
 	return entry
 }
 
-func (s *wizardSession) updateCamera(ref string, camera config.Camera, credentialURL string) bool {
+func (s *wizardSession) updateCamera(ref string, camera config.Camera, credentialURL string, onvif ONVIFCredential) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for index := range s.Cameras {
@@ -1257,6 +1342,10 @@ func (s *wizardSession) updateCamera(ref string, camera config.Camera, credentia
 		camera.ID = s.Cameras[index].Camera.ID
 		s.Cameras[index].Camera = camera
 		s.Cameras[index].CredentialURL = credentialURL
+		if onvif.Username != "" {
+			s.Cameras[index].ONVIFUsername = onvif.Username
+			s.Cameras[index].ONVIFPassword = onvif.Password
+		}
 		return true
 	}
 	return false

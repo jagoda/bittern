@@ -14,6 +14,7 @@ In scope:
 - Schema validation, migrations, and the persisted camera inventory
 - Rendering, validation, atomic apply, health checks, and rollback
 - Camera discovery on `cam0` with dnsmasq lease, ARP, ONVIF WS-Discovery, unauthenticated ONVIF device info and RTSP layers, credential adoption, and DHCP reservations
+- Per-camera clock detection and synchronisation through ONVIF, with NTP preferred and a verified pushed-time fallback
 - Support bundle assembly with redaction
 - Application bundle updates, backups, and reset operations
 
@@ -40,8 +41,10 @@ checks read the live status builder; `--ui-mock` selects mock status states and 
 without `--ui-mock` the applier persists `appliance.yaml` and calls the BIT-011 apply transaction.
 `--ui-mock` keeps the stub. First boot generates a one-time setup token, the owner sets the
 administrator password on the first visit, and later visits use the login page. Camera discovery is
-wired to the wizard; the update CLI and on-demand channel check are present, but there is no reset
-yet. The package boundaries above still describe the intended daemon.
+wired to the wizard. The camera time runner detects NTP, a pushed time, both, or neither per camera,
+prefers NTP, verifies the result, and reports the state without blocking adoption. The update CLI and
+on-demand channel check are present, but there is no reset yet. The package boundaries above still
+describe the intended daemon.
 
 | Path | Role |
 | --- | --- |
@@ -56,6 +59,8 @@ yet. The package boundaries above still describe the intended daemon.
 | `internal/auth/` | Setup token and short code, PBKDF2 password hash, sessions, CSRF, rate limits |
 | `internal/status/` | Status document, injected probes, state aggregation, in-memory render checks |
 | `internal/discovery/` | Layered lease, ARP, ONVIF WS-Discovery, ONVIF device and RTSP candidates on `cam0` |
+| `internal/onvif/` | Bounded SOAP Device service client, endpoint validation, WS-Security UsernameToken digest, and time operations |
+| `internal/cameratime/` | Per-camera time capability detection, NTP-first synchronisation, 15 minute schedule, backoff and cache |
 | `internal/ui/` | First-run wizard, login and setup pages, status pages, embedded templates and assets |
 | `internal/redact/` | Secret redaction shared by status, logging, apply and first boot |
 | `internal/logging/` | Structured JSON logging with redaction on every attribute |

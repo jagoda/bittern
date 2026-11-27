@@ -98,8 +98,11 @@ rather than claiming the clock is right.
 Nothing in the boot path waits for synchronisation: first boot is ordered after local filesystems and
 before `bitternd`, with no ordering against `chrony.service`, and the installer disables
 `chrony-wait.service` and `systemd-time-wait-sync.service`. The appliance boots and serves time to
-cameras on a network with no internet. The camera half, an NTP setting where the camera supports it
-and an ONVIF time write where it does not, is a separate slice and is not built yet.
+cameras on a network with no internet. On the camera side, `bitternd` detects per camera whether it
+accepts the appliance NTP server, a pushed time, both, or neither. It prefers NTP, falls back to the
+pushed time, verifies the result, and reports a per-camera clock state without blocking adoption. A
+camera that refuses time is still adopted and recorded. The endpoint rule, schedule, and unverified
+device behaviour are in [the camera time note](notes/2026-11-27-camera-time-onvif.md).
 
 ## Runtime components
 
@@ -139,8 +142,9 @@ rolled-back transaction stays visible without inventing a new current generation
 data are explicitly unknown until BIT-009 and BIT-010 implement their records. Hardware detection
 adds CPU, memory, and accelerator evidence when the probe succeeds. The `time` section reports the
 appliance clock state, source, offset, last successful update, and zone from read-only `chronyc`
-commands ([ADR 0035](adr/0035-appliance-as-time-authority.md)); the per-camera time state belongs to
-the camera slice. The schema, fields, redaction rules, and API are in [status.md](status.md).
+commands, and each camera carries its own clock state
+([ADR 0035](adr/0035-appliance-as-time-authority.md)). The schema, fields, redaction rules, and API
+are in [status.md](status.md).
 
 ## Configuration flow
 

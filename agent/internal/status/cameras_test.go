@@ -93,3 +93,73 @@ func TestCameraSectionReportsSnapshotAndOfflineState(t *testing.T) {
 		t.Fatalf("overall state = %s, want degraded", document.State)
 	}
 }
+
+func TestCameraTimeSectionForEveryState(t *testing.T) {
+	root := t.TempDir()
+	builder := newTestBuilderAt(t, healthyProbes(t), root)
+	checked := fixedNow
+	offset := int64(-240000)
+	cases := []struct {
+		state  CameraTimeState
+		detail string
+	}{
+		{CameraTimeOK, ""},
+		{CameraTimeNeverSynchronised, ""},
+		{CameraTimeDrifted, ""},
+		{CameraTimeRefused, ""},
+		{CameraTimeUnreachable, ""},
+	}
+	for _, testCase := range cases {
+		t.Run(string(testCase.state), func(t *testing.T) {
+			timeHealth := &CameraTimeHealth{
+				State:              testCase.state,
+				Mechanism:          CameraTimeMechanismPush,
+				Push:               true,
+				Address:            "10.77.0.20",
+				CheckedAt:          &checked,
+				LastSynchronised:   &checked,
+				OffsetMilliseconds: &offset,
+				Detail:             testCase.detail,
+			}
+			if err := SaveCameraHealth(root, "front_door", CameraHealth{
+				Snapshot:  SectionOK,
+				CheckedAt: &checked,
+				Time:      timeHealth,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			document := builder.Build(context.Background())
+			row := document.Sections.Cameras.Items[0]
+			if row.Time.State != testCase.state {
+				t.Fatalf("time state = %s, want %s", row.Time.State, testCase.state)
+			}
+			if row.Time.Detail == "" {
+				t.Fatal("the camera time state has no plain-language detail")
+			}
+			if row.Time.OffsetMilliseconds == nil || *row.Time.OffsetMilliseconds != offset {
+				t.Fatalf("offset = %v", row.Time.OffsetMilliseconds)
+			}
+		})
+	}
+}
+
+func TestUpdateCameraHealthPreservesTheSnapshotResult(t *testing.T) {
+	root := t.TempDir()
+	checked := fixedNow
+	if err := SaveCameraHealth(root, "front_door", CameraHealth{
+		Snapshot:  SectionOK,
+		CheckedAt: &checked,
+		Bytes:     4096,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateCameraHealth(root, "front_door", func(health *CameraHealth) {
+		health.Time = &CameraTimeHealth{State: CameraTimeOK}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	health := LoadCameraHealth(root)["front_door"]
+	if health.Snapshot != SectionOK || health.Bytes != 4096 || health.Time == nil {
+		t.Fatalf("health update lost the snapshot result: %+v", health)
+	}
+}

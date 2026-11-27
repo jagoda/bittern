@@ -48,7 +48,7 @@ func (a AgentApplier) apply(ctx context.Context, request ApplyRequest, progress 
 	// Every camera's sign-in must stay out of an error that reaches a log or a
 	// result page. The transaction already redacts with the values it reads;
 	// this covers the failures that happen before it reads them.
-	return result, redactCameraCredentials(err, credentialValues(request.CameraCredentials))
+	return result, redactCameraCredentials(err, requestCredentialValues(request))
 }
 
 func (a AgentApplier) applySetup(ctx context.Context, request ApplyRequest, progress func(apply.StepProgress)) (apply.Result, error) {
@@ -119,6 +119,12 @@ func (a AgentApplier) applySetup(ctx context.Context, request ApplyRequest, prog
 	if err := ensureCameraSecrets(validated, secretsPath, request.CameraCredentials); err != nil {
 		return apply.Result{}, err
 	}
+	if err := ensureCameraONVIFSecrets(validated, secretsPath, request.CameraONVIF); err != nil {
+		if restoreErr := secrets.restore(); restoreErr != nil {
+			return apply.Result{}, fmt.Errorf("%w; the camera sign-ins were not restored: %v", err, restoreErr)
+		}
+		return apply.Result{}, err
+	}
 	data, err = yaml.Marshal(validated)
 	if err != nil {
 		return apply.Result{}, fmt.Errorf("ui: encode appliance.yaml: %w", err)
@@ -137,7 +143,7 @@ func (a AgentApplier) applySetup(ctx context.Context, request ApplyRequest, prog
 	if applyFn == nil {
 		applyFn = apply.Apply
 	}
-	credentials := credentialValues(request.CameraCredentials)
+	credentials := requestCredentialValues(request)
 	options := apply.Options{
 		Logger: logging.PrintfLogger{Logger: logging.New(os.Stderr, redact.New(credentials...))},
 		// A camera URL belongs in the generated env file and nowhere else, so

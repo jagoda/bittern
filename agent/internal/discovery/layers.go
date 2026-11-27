@@ -203,6 +203,14 @@ func parseDeviceInformation(data []byte) (onvifDeviceBody, string) {
 	}, ""
 }
 
+// AllowedXAddr applies the camera endpoint rule to an ONVIF service address.
+// The host must be the camera's own IPv4 address, the scheme must be HTTP or
+// HTTPS, and user information, fragments, hostnames and other cam0 hosts are
+// refused. The time client reuses this rule before every connection.
+func AllowedXAddr(raw string, allowed netip.Addr) (*url.URL, error) {
+	return allowedXAddr(raw, allowed)
+}
+
 // allowedXAddr accepts only an HTTP(S) ONVIF endpoint whose host is the
 // candidate's own IPv4 address. The endpoint may not carry userinfo or a
 // fragment, and it may not name a hostname or another cam0 host. This keeps

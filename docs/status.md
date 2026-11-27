@@ -56,13 +56,14 @@ does change it, because a configured camera that cannot deliver a picture is an
 appliance fault, not missing evidence.
 
 The camera list is built from `appliance.yaml` and the last health result in
-`<state-root>/camera-health.json`. Adoption, an edit apply, and the explicit
-Test picture action write that file; the status builder only reads it. The
-file holds a section state, the check time, the JPEG size, a non-secret detail,
-and the last-seen time. It never holds a URL or a credential. `stream` is `ok`
-only when the last snapshot succeeded and Frigate is healthy, `snapshot` is the
-last explicit result, and `recording` follows the Frigate section. The UI does
-not call a camera for a list render.
+`<state-root>/camera-health.json`. Adoption, an edit apply, the periodic time
+check, and the explicit Test picture action write that file; the status builder
+only reads it. The file holds a section state, the check time, the JPEG size, a
+non-secret detail, the last-seen time, and the cached camera time result. It
+never holds a URL or a credential. `stream` is `ok` only when the last snapshot
+succeeded and Frigate is healthy, `snapshot` is the last explicit result,
+`recording` follows the Frigate section, and `time` is the last camera clock
+check. The UI does not call a camera for a list render.
 
 ## Document
 
@@ -89,7 +90,7 @@ It is omitted only when the probe fails.
 | `render` | `generation`, `apply_state`, `file_count`, `last_render`, `validation[]` with `name`, `state`, `message` | `generation` is the applied generation from `<state-root>/current` and is null before the first successful apply; `last_render` is null when no successful in-memory render has run |
 | `time` | `state`, `synchronised`, `source`, `stratum`, `offset_milliseconds`, `last_sync`, `zone`, `local_now`, `last_error` | `state` is `ok`, `never-synchronised`, `drifted`, or `unknown`; `source` is null when no upstream source is selected; `last_sync`, `stratum`, and `offset_milliseconds` are null until a first observation; `local_now` is the build time in the configured zone |
 | `frigate` | `configured`, `reachable`, `version`, `camera_count`, `image.state`, `image.digest`, `image.last_error`, `last_error` | `configured` is false and `state` is `unknown` when no camera is enabled; `camera_count` is the number of enabled cameras from `appliance.yaml`, so an unreachable API still reports the configured count; `version` is null until the API answers; `image` is always present and its `digest` is the pinned sha256 value |
-| `cameras` | `items[]` with `id`, `name`, `address`, `mac`, `vendor`, `model`, `enabled`, `stream`, `snapshot`, `recording`, `last_seen`, `detail`, `snapshot_at`, `snapshot_bytes` | The list comes from `appliance.yaml` and the camera health cache, not a live camera call. `snapshot` and `stream` are `unknown` until the wizard or an explicit test has run; `last_seen` is null until a check records it; `recording` follows the Frigate section |
+| `cameras` | `items[]` with `id`, `name`, `address`, `mac`, `vendor`, `model`, `enabled`, `stream`, `snapshot`, `recording`, `time`, `last_seen`, `detail`, `snapshot_at`, `snapshot_bytes` | The list comes from `appliance.yaml` and the camera health cache, not a live camera call. `snapshot` and `stream` are `unknown` until the wizard or an explicit test has run; `last_seen` is null until a check records it; `recording` follows the Frigate section; `time` is the camera clock state below |
 | `storage` | `path`, `present`, `detail_state`, `free_bytes`, `reserve_bytes`, `member_count`, `missing_members[]` | `present` is evidence that a recording drive for the path is attached, not that the directory exists; `detail_state` is `ready`, `not-attached`, `not-mounted`, or `write-test-failed`, and is empty only when the section is `unknown` or the probe cannot read the mount table; `free_bytes` is null unless the path is mounted, so the OS filesystem is never measured as recording storage; `member_count` reports the single media path known to this build, so a configured multi-drive pool is not enumerated until the pool mount work lands |
 | `network` | `lan0` and `cam0`, each with `address`, `carrier`, `last_error` | `address` and `carrier` are null when the interface or sysfs evidence is unavailable |
 | `updates` | `state`, `current_slot`, `current_version`, `current_generation`, `running_generation`, `committed_generation`, `committed_version`, `channel`, `last_check`, `available_version`, `available_generation`, `rollback`, `last_operation`, `current_operation`, `base` | `current_slot` is always null until the OS A/B work claims it; `current_version` and `current_generation` are the running bundle and are null on a kit baseline; `committed_generation` is 0 on a kit baseline; `base` is null until the first update commits; `last_check.result` is `never` before the first check; `current_operation` is absent unless an update or rollback journal is running |
@@ -134,6 +135,30 @@ records. The time section carries the warning and the next action on its own.
 The `time` probe is not one of the apply-time native checks; `nft -c`,
 `dnsmasq --test`, `chronyd -p`, and the Frigate config check remain apply-time
 gates.
+
+### Camera clock
+
+The `time` entry on each camera is the camera half of
+[ADR 0035](adr/0035-appliance-as-time-authority.md). It distinguishes the
+states because the owner action differs:
+
+| State | Meaning | Primary copy | Next step |
+| --- | --- | --- | --- |
+| `ok` | The camera clock agrees with the appliance within two seconds | This camera's clock is set by the appliance. | None. |
+| `never-synchronised` | No successful set or confirmation yet, including a camera just switched to NTP mode | Bittern has not set this camera's clock yet. | None yet; the next check will try. |
+| `drifted` | The camera clock differs from the appliance by more than two seconds | This camera's clock is four minutes behind. Bittern will correct it at the next check. | None if it corrects itself; otherwise check the camera. |
+| `refused` | The camera rejected the account or the time operation | This camera will not let Bittern set its clock. Set the time on the camera itself, or check the camera's sign-in. | Use the camera's own settings. |
+| `unreachable` | The camera did not answer the time request | Bittern cannot reach this camera to check its clock. | Check the camera's power and connection. |
+
+The two second threshold is ADR 0035 section 5: the check reads the camera at
+most every 15 minutes and writes only when the mode is wrong, the UTC differs
+by more than two seconds, or the pushed zone offset changed. It is the same
+threshold used to report `drifted`, so the state and the correction rule cannot
+disagree. The mechanism, the NTP and push capability booleans, the last check
+time, and the last confirmed sync are technical details; the state and its
+detail are the owner copy. The camera time result never changes the overall
+appliance state by itself, because a camera that refuses time still records
+video.
 
 ### Timestamps in the browser
 

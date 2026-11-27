@@ -23,6 +23,7 @@ import (
 
 	"bittern.invalid/agent/internal/apply"
 	"bittern.invalid/agent/internal/auth"
+	"bittern.invalid/agent/internal/cameratime"
 	"bittern.invalid/agent/internal/discovery"
 	"bittern.invalid/agent/internal/logging"
 	"bittern.invalid/agent/internal/redact"
@@ -144,6 +145,15 @@ func run() error {
 		StateRoot:       *stateRoot,
 		BaselineVersion: version,
 	})
+	var cameraTimeRunner *cameratime.Runner
+	if !*uiMock {
+		cameraTimeRunner = cameratime.NewRunner(cameratime.RunnerOptions{
+			ConfigPath:  *configPath,
+			SecretsPath: *uiSecrets,
+			StateRoot:   *stateRoot,
+			Logger:      logger,
+		})
+	}
 	var uiHandler http.Handler
 	var tlsMaterial tlsutil.Material
 	if *uiEnabled {
@@ -194,6 +204,7 @@ func run() error {
 			Applier:                applier,
 			Discovery:              cameraDiscovery,
 			Snapshot:               cameraSnapshot,
+			CameraTime:             cameraTimeRunner,
 			Updates:                updateService,
 			ConfigPath:             *configPath,
 			StateRoot:              *stateRoot,
@@ -229,6 +240,9 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if cameraTimeRunner != nil {
+		go cameraTimeRunner.Run(ctx)
+	}
 
 	startAttributes := []any{
 		"listen", *listen,

@@ -71,6 +71,14 @@ func (h *handler) submitCameraEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	camera, credentialURL, form, validationErrors := h.parseCameraForm(r, existing)
+	onvif := ONVIFCredential{}
+	if len(validationErrors) == 0 {
+		var onvifErrors map[string]string
+		onvif, onvifErrors = form.onvifCredential()
+		for field, message := range onvifErrors {
+			validationErrors[field] = message
+		}
+	}
 	if len(validationErrors) != 0 {
 		h.renderCameraEdit(w, r, existing, form, validationErrors, "")
 		return
@@ -88,9 +96,13 @@ func (h *handler) submitCameraEdit(w http.ResponseWriter, r *http.Request) {
 		SecretsPath:       h.secretsPath(),
 		Cameras:           cameras,
 		CameraCredentials: map[string]string{},
+		CameraONVIF:       map[string]ONVIFCredential{},
 	}
 	if credentialURL != "" {
 		request.CameraCredentials[camera.ID] = credentialURL
+	}
+	if onvif.Username != "" {
+		request.CameraONVIF[camera.ID] = onvif
 	}
 	if h.operations.running() {
 		h.renderCameraEdit(w, r, existing, form, nil, "Bittern is already applying a configuration. Wait for it to finish on the operation page, then save the camera change again. Nothing was saved.")
@@ -100,6 +112,7 @@ func (h *handler) submitCameraEdit(w http.ResponseWriter, r *http.Request) {
 		h.renderCameraEdit(w, r, existing, form, nil, applyFailureMessage(err))
 		return
 	}
+	h.requestCameraTime(camera.ID)
 	h.markCameraSeen(camera.ID)
 	result := h.recordSnapshot(r.Context(), camera)
 	http.Redirect(w, r, h.cameraTestDestination(camera.ID, result, "edited"), http.StatusSeeOther)
@@ -309,25 +322,36 @@ func (h *handler) recordSnapshot(ctx context.Context, camera config.Camera) Snap
 	if !result.Succeeded() {
 		snapshotState = status.SectionFailed
 	}
-	health := status.LoadCameraHealth(h.stateRootPath())[camera.ID]
-	health.Snapshot = snapshotState
-	health.CheckedAt = &now
-	health.Bytes = result.Bytes
-	health.Detail = result.Err
-	if result.Succeeded() {
-		health.LastSeen = &now
-	}
 	// The list stays useful without the cache. A failed cache write must not
-	// turn a successful picture into a visible failure.
-	_ = status.SaveCameraHealth(h.stateRootPath(), camera.ID, health)
+	// turn a successful picture into a visible failure. The update touches only
+	// the snapshot fields so a concurrent time result is not lost.
+	_ = status.UpdateCameraHealth(h.stateRootPath(), camera.ID, func(health *status.CameraHealth) {
+		health.Snapshot = snapshotState
+		health.CheckedAt = &now
+		health.Bytes = result.Bytes
+		health.Detail = result.Err
+		if result.Succeeded() {
+			health.LastSeen = &now
+		}
+	})
 	return result
+}
+
+// requestCameraTime asks the runner to re-detect and synchronise the cameras.
+// It only marks them due and wakes the runner, so a refused camera cannot fail
+// or lengthen the adoption.
+func (h *handler) requestCameraTime(cameraIDs ...string) {
+	if h.cameraTime == nil {
+		return
+	}
+	h.cameraTime.RequestSync(cameraIDs...)
 }
 
 func (h *handler) markCameraSeen(cameraID string) {
 	now := time.Now().UTC()
-	health := status.LoadCameraHealth(h.stateRootPath())[cameraID]
-	health.LastSeen = &now
-	_ = status.SaveCameraHealth(h.stateRootPath(), cameraID, health)
+	_ = status.UpdateCameraHealth(h.stateRootPath(), cameraID, func(health *status.CameraHealth) {
+		health.LastSeen = &now
+	})
 }
 
 func flashMessage(code string) string {

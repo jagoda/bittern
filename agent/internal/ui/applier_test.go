@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"bittern.invalid/agent/internal/apply"
+	"bittern.invalid/agent/internal/cameratime"
 	"bittern.invalid/agent/internal/config"
 )
 
@@ -552,5 +553,64 @@ func TestAgentApplierRejectsMissingCredentialSecretBeforeWritingConfig(t *testin
 	}
 	if !bytes.Equal(secretsBefore, secretsAfter) {
 		t.Fatal("missing credential secret changed secrets.yaml")
+	}
+}
+
+func TestAgentApplierWritesOptionalONVIFAccountUnderTheSameReference(t *testing.T) {
+	configPath := writeApplierFixture(t)
+	secretsPath := filepath.Join(t.TempDir(), "secrets.yaml")
+	applier := AgentApplier{
+		SecretsPath: secretsPath,
+		applyFn: func(*config.Config, apply.Options) (apply.Result, error) {
+			return apply.Result{Status: apply.StatusApplied}, nil
+		},
+	}
+	port := 554
+	rtspPath := "/stream1"
+	err := applier.Apply(context.Background(), ApplyRequest{
+		ConfigPath: configPath,
+		Hostname:   "bittern",
+		Cameras: []config.Camera{{
+			ID:       "camera_1",
+			Name:     "Front door",
+			Address:  "10.77.0.20",
+			RTSPPort: &port,
+			RTSPPath: &rtspPath,
+		}},
+		CameraCredentials: map[string]string{
+			"camera_1": "rtsp://viewer:s3cret@10.77.0.20:554/stream1",
+		},
+		CameraONVIF: map[string]ONVIFCredential{
+			"camera_1": {Username: "admin", Password: "time-secret"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "onvif_username: admin") ||
+		!strings.Contains(string(data), "onvif_password: time-secret") {
+		t.Fatalf("secrets.yaml does not carry the time sign-in: %s", data)
+	}
+	written, validationErrors := config.Load(configPath)
+	if len(validationErrors) != 0 || written == nil || len(written.Cameras) != 1 {
+		t.Fatalf("written config = %+v errors = %v", written, validationErrors)
+	}
+	credentials, err := cameratime.LoadCredentials(written.Cameras[0], secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credentials.Username != "admin" || credentials.Password != "time-secret" {
+		t.Fatalf("credentials = %+v", credentials)
+	}
+	info, err := os.Stat(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("secrets.yaml mode = %o, want 600", info.Mode().Perm())
 	}
 }

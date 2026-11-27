@@ -14,6 +14,7 @@
 package timezone
 
 import (
+	"fmt"
 	"strings"
 	"time"
 	_ "time/tzdata" // fallback IANA database when the OS database is absent
@@ -113,4 +114,64 @@ func IANAName(location *time.Location) string {
 		return Default
 	}
 	return name
+}
+
+// POSIXOffset returns the fixed-offset POSIX time zone string for value in
+// location, for example "CET-1" in winter and "CEST-2" in summer for
+// Europe/Berlin. The string carries no DST rule: the offset in force now is
+// written explicitly, and a transition is handled by the next push. POSIX
+// offsets are the amount added to local time to get UTC, so an east-of-UTC
+// zone carries a negative offset field.
+func POSIXOffset(value time.Time, location *time.Location) string {
+	if location == nil {
+		location = time.UTC
+	}
+	local := value.In(location)
+	abbreviation, offsetSeconds := local.Zone()
+	name := posixName(abbreviation)
+	return name + posixOffset(offsetSeconds)
+}
+
+func posixName(abbreviation string) string {
+	abbreviation = strings.TrimSpace(abbreviation)
+	valid := len(abbreviation) >= 3 && len(abbreviation) <= 6
+	if valid {
+		for _, character := range abbreviation {
+			if character < 'A' || (character > 'Z' && character < 'a') || character > 'z' {
+				valid = false
+				break
+			}
+		}
+	}
+	if valid {
+		return abbreviation
+	}
+	if abbreviation == "" {
+		abbreviation = "UTC"
+	}
+	// The angle-bracket form accepts a numeric or otherwise non-alphabetic
+	// abbreviation. Refuse the delimiters themselves rather than injecting
+	// them into the zone string.
+	abbreviation = strings.NewReplacer("<", "", ">", "").Replace(abbreviation)
+	return "<" + abbreviation + ">"
+}
+
+func posixOffset(offsetSeconds int) string {
+	posix := -offsetSeconds
+	sign := ""
+	if posix < 0 {
+		sign = "-"
+		posix = -posix
+	}
+	hours := posix / 3600
+	minutes := (posix % 3600) / 60
+	seconds := posix % 60
+	switch {
+	case seconds != 0:
+		return fmt.Sprintf("%s%d:%02d:%02d", sign, hours, minutes, seconds)
+	case minutes != 0:
+		return fmt.Sprintf("%s%d:%02d", sign, hours, minutes)
+	default:
+		return fmt.Sprintf("%s%d", sign, hours)
+	}
 }

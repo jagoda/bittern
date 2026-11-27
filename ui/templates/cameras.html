@@ -14,7 +14,7 @@
 <ul class="camera-list">
   {{range .CameraList.Items}}
   {{$picture := index $.Pictures .ID}}
-  <li class="camera-card" data-camera-name="{{.Name}}" data-camera-address="{{.Address}}" data-camera-enabled="{{if .Enabled}}true{{else}}false{{end}}" data-camera-stream-state="{{.Stream}}" data-camera-picture-state="{{.Snapshot}}" data-camera-recording-state="{{.Recording}}">
+  <li class="camera-card" data-camera-name="{{.Name}}" data-camera-address="{{.Address}}" data-camera-enabled="{{if .Enabled}}true{{else}}false{{end}}" data-camera-stream-state="{{.Stream}}" data-camera-picture-state="{{.Snapshot}}" data-camera-recording-state="{{.Recording}}" data-camera-time-state="{{.Time.State}}">
     <div class="camera-head">
       <h2>{{.Name}}</h2>
       <span class="badge{{if not .Enabled}} badge-disabled{{end}}">{{if .Enabled}}Enabled{{else}}Disabled{{end}}</span>
@@ -38,6 +38,8 @@
     {{else}}
     <p class="camera-checks"><span class="state-badge state-unknown">Not checked while disabled</span></p>
     {{end}}
+    <p class="camera-clock"><span class="state-badge state-{{cameraTimeClass .Time.State}}">{{cameraTimeLabel .Time.State}}</span> {{cameraTimePrimaryCopy .Time}}</p>
+    {{if cameraTimeNextAction .Time.State}}<p class="hint camera-time-next"><strong>Next step</strong> {{cameraTimeNextAction .Time.State}}</p>{{end}}
     {{if $picture}}
     <figure class="camera-picture" data-picture>
       {{if $picture.URL}}
@@ -67,6 +69,10 @@
         <dd><span class="state-badge state-{{.Snapshot}}">{{if eq .Snapshot "unknown"}}Picture not tested{{else}}{{cameraSnapshotLabel .Snapshot}}{{end}}</span></dd>
         <dt>Recording</dt>
         <dd><span class="state-badge state-{{.Recording}}">{{if eq .Recording "unknown"}}Recording not checked{{else}}{{cameraRecordingLabel .Recording}}{{end}}</span></dd>
+        <dt>Clock</dt>
+        <dd><span class="state-badge state-{{cameraTimeClass .Time.State}}">{{cameraTimeLabel .Time.State}}</span> via {{cameraTimeMechanismLabel .Time.Mechanism}}</dd>
+        <dt>Clock checked</dt>
+        <dd>{{if .Time.CheckedAt}}{{localTimePtr .Time.CheckedAt $.Zone}}{{else}}Not checked yet{{end}}</dd>
         <dt>Last picture</dt>
         <dd>{{if .SnapshotAt}}{{localTimePtr .SnapshotAt $.Zone}}{{else}}Not tested yet{{end}}</dd>
         <dt>Hardware address</dt>

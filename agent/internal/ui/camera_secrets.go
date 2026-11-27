@@ -391,6 +391,22 @@ func credentialURLValues(cameraURLs map[string]string) []string {
 // RTSP URL and the username and password inside it. The password is registered
 // in its decoded form as well, because a message that echoes the decoded value
 // leaks the same sign-in.
+// requestCredentialValues returns every camera value that must never reach a
+// log line, an error, an operation record, or a status document. It includes
+// the optional separate ONVIF account as well as the RTSP URL.
+func requestCredentialValues(request ApplyRequest) []string {
+	values := credentialValues(request.CameraCredentials)
+	for _, account := range request.CameraONVIF {
+		if username := strings.TrimSpace(account.Username); username != "" {
+			values = append(values, username)
+		}
+		if account.Password != "" {
+			values = append(values, account.Password)
+		}
+	}
+	return values
+}
+
 func credentialValues(cameraURLs map[string]string) []string {
 	values := make([]string, 0, len(cameraURLs)*3)
 	for _, raw := range cameraURLs {
@@ -437,4 +453,118 @@ func redactCameraCredentials(err error, values []string) error {
 		return err
 	}
 	return credentialRedactedError{message: message, cause: err}
+}
+
+// ensureCameraONVIFSecrets stores an optional separate ONVIF account under the
+// camera's existing credentials_ref. It never creates a second secret file and
+// it leaves an existing account alone when the form left both fields blank.
+func ensureCameraONVIFSecrets(cfg *config.Config, secretsPath string, accounts map[string]ONVIFCredential) error {
+	if cfg == nil || len(accounts) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(secretsPath) == "" {
+		return errors.New("ui: secrets.yaml path is empty")
+	}
+	document, err := loadSecretsDocument(secretsPath)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for index := range cfg.Cameras {
+		camera := &cfg.Cameras[index]
+		account, ok := accounts[camera.ID]
+		if !ok || strings.TrimSpace(account.Username) == "" {
+			continue
+		}
+		if camera.CredentialsRef == nil || strings.TrimSpace(*camera.CredentialsRef) == "" {
+			return fmt.Errorf("ui: camera %q has no credentials reference for its time sign-in", camera.ID)
+		}
+		if err := setSecretMembers(document, strings.TrimSpace(*camera.CredentialsRef), map[string]string{
+			"onvif_username": strings.TrimSpace(account.Username),
+			"onvif_password": account.Password,
+		}); err != nil {
+			return fmt.Errorf("ui: camera %q time sign-in at key %q: %w", camera.ID, *camera.CredentialsRef, err)
+		}
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	data, err := yaml.Marshal(document)
+	if err != nil {
+		return fmt.Errorf("ui: encode secrets.yaml: %w", err)
+	}
+	if err := secrets.WriteFileAtomic(secretsPath, data, 0o600); err != nil {
+		return fmt.Errorf("ui: write secrets.yaml: %w", err)
+	}
+	return nil
+}
+
+// setSecretMembers writes named members inside the mapping at key. A scalar at
+// key is converted to a mapping whose rtsp_url member keeps the old value, so
+// the camera keeps one reference and one secret store.
+func setSecretMembers(document *yaml.Node, key string, members map[string]string) error {
+	root, err := secretsMapping(document)
+	if err != nil {
+		return err
+	}
+	segments := strings.Split(key, ".")
+	current := root
+	for index, segment := range segments {
+		last := index == len(segments)-1
+		existing, ok := mappingValue(current, segment)
+		if last {
+			mapping := existing
+			if !ok {
+				mapping = newMappingNode()
+				current.Content = append(current.Content, scalarNode(segment), mapping)
+			}
+			switch {
+			case mapping.Kind == yaml.MappingNode:
+				for name, value := range members {
+					setMappingScalar(mapping, name, value)
+				}
+			case mapping.Kind == yaml.ScalarNode && mapping.Tag != "!!null":
+				// A URL stored as a scalar becomes the rtsp_url member of the
+				// mapping, then the time sign-in members are added beside it.
+				converted := newMappingNode()
+				setMappingScalar(converted, "rtsp_url", mapping.Value)
+				for name, value := range members {
+					setMappingScalar(converted, name, value)
+				}
+				*existing = *converted
+			default:
+				mapping = newMappingNode()
+				for name, value := range members {
+					setMappingScalar(mapping, name, value)
+				}
+				if ok {
+					*existing = *mapping
+				}
+			}
+			return nil
+		}
+		if !ok {
+			child := newMappingNode()
+			current.Content = append(current.Content, scalarNode(segment), child)
+			current = child
+			continue
+		}
+		if existing.Kind != yaml.MappingNode {
+			return fmt.Errorf("the key path crosses an existing value")
+		}
+		current = existing
+	}
+	return nil
+}
+
+func setMappingScalar(mapping *yaml.Node, key, value string) {
+	if existing, ok := mappingValue(mapping, key); ok {
+		existing.Kind = yaml.ScalarNode
+		existing.Tag = "!!str"
+		existing.Value = value
+		existing.Style = 0
+		return
+	}
+	mapping.Content = append(mapping.Content, scalarNode(key), scalarNode(value))
 }

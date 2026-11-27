@@ -676,6 +676,8 @@ func (b *Builder) redactDocument(document *Document) {
 		entry.Vendor = redactor.String(entry.Vendor)
 		entry.Model = redactor.String(entry.Model)
 		entry.Detail = redactor.String(entry.Detail)
+		entry.Time.Detail = redactor.String(entry.Time.Detail)
+		entry.Time.Zone = redactor.String(entry.Time.Zone)
 	}
 	if document.Sections.Frigate.Version != nil {
 		value := redactor.String(*document.Sections.Frigate.Version)

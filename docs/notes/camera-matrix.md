@@ -39,6 +39,9 @@ Related: [ADR 0024](../adr/0024-onvif-discovery-levels.md), [OQ-10](../open-ques
 | Profile | ONVIF profile token or stream profile used, for example main or sub. |
 | RTSP path | Stream path used for adoption, with user information removed. |
 | Snapshot | Whether the Frigate snapshot path works, and any quirk. |
+| Time mechanism | `ntp`, `push`, `both`, `none`, or `not tested`, from the camera time detection. |
+| NTP result | Whether the camera accepted the appliance NTP server and its mode, with the observed result. |
+| Push result | Whether the camera accepted a pushed UTC time and the fixed-offset POSIX zone, with the observed result. |
 | Evidence | Test, fixture, capture, or field run that proves the row. |
 | Quirks | Observed deviation, the fallback that worked, and any follow-up. |
 
@@ -49,9 +52,9 @@ discovery, adoption, and RTSP contract, not a vendor model, so it is test infras
 a matrix row. Add the first hardware row after a field run records the model, firmware, and stream
 path.
 
-| Model | Firmware | Discovery | Auth | Profile | RTSP path | Snapshot | Evidence | Quirks |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| _none yet_ | | | | | | | | |
+| Model | Firmware | Discovery | Auth | Profile | RTSP path | Snapshot | Time mechanism | NTP result | Push result | Evidence | Quirks |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| _none yet_ | | | | | | | | | | | |
 
 ## Field candidates
 
