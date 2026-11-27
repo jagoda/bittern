@@ -388,17 +388,21 @@ The layout cookie is `bittern_live_layout`, a first-party, `HttpOnly`, `Secure`,
 cookie scoped to `/ui/live` with a one-year lifetime. It carries the layout, one camera per pane and
 one quality per pane, and nothing else. Unknown cameras and duplicates are dropped, a stored count
 outside the set clamps down to the largest layout at or below it, and a missing or broken cookie is
-automatic. `POST /ui/live/layout` stores a layout; `POST /ui/live/pane` stores one pane's quality or
-camera. Both are ordinary form submissions, so both work without JavaScript.
+automatic. The server renders all sixteen pane slots; a slot outside the current layout is hidden and
+holds no live connection. A layout choice updates the wall in place, shows and hides slots, keeps the
+players that stay visible, and persists with an inline `POST /ui/live/layout` that returns `204`.
+`POST /ui/live/pane` stores one pane's quality or camera; the browser also applies that pane change
+in place. Both endpoints keep their ordinary form path for the no-JavaScript page.
 
 ### Per-pane quality
 
-Automatic quality is `main` in the one-pane layout and `sub` in every multi-pane layout. The
-selected pane has a three-way control for main, sub and snapshot. Choosing main or sub closes the
-current media connection and opens the same authenticated route with the other profile: the page
-does not reload and the player island is not swapped. A manual choice is stored per pane in the
-cookie and is never overridden by automation. A camera whose `distinct_qualities` is one stream has
-no control and says `One stream` instead.
+Automatic quality is `main` in the one-pane layout and `sub` in every multi-pane layout. A pane's
+own overlay has an explicit labelled stream selector with Main stream, Sub stream and Snapshots. The selected option and the pane's "Current stream: ..." line name the quality that is
+playing. Choosing a live quality closes the current media connection and opens the same authenticated
+route with the other profile: the page does not reload and the player island is not swapped. A manual
+choice is stored per pane in the cookie and is never overridden by automation. A camera whose
+`distinct_qualities` is one stream shows a disabled selector with one option, `One stream`, and the
+reason that main and sub use the same picture.
 
 ### Capacity
 
@@ -416,26 +420,41 @@ a manual choice puts it above the tested capacity.
 
 ### Overlay and full screen
 
-The overlay is the only control surface: the selected pane's name and quality, its quality control,
-its camera picker, the seven-option layout group, the full screen control and the camera state line.
-It is shown on pointer movement, a key press, a tap or focus, and hides after 3000 ms. The hidden
-state is `data-live-overlay="hidden"` with `opacity: 0`, `pointer-events: none`, `visibility: hidden`
-and the `inert` attribute, so a hidden overlay cannot take focus or intercept a click meant for the
-video. Without JavaScript it is visible by default and both controls are real forms.
+Every occupied pane has its own control overlay. It holds that pane's current-stream line, its
+stream selector and its camera chooser; no quality or camera control for a pane sits in the wall
+overlay. The overlay is shown for the pane under the pointer or keyboard focus and hides with the
+wall's 3000 ms idle rule. Its hidden state is `data-live-pane-overlay-state="hidden"` with
+`opacity: 0`, `pointer-events: none`, `visibility: hidden` and the `inert` attribute, so it cannot
+take focus or intercept a click meant for the video. The camera name and a failure sentence are pane
+content outside the control overlay and fade with the same idle state.
 
-Full screen requests `requestFullscreen()` on the wall, so the current layout fills the whole screen
-with no header, toolbar, border or padding and the same one pixel gap. Entering full screen never
-changes the layout, and leaving it keeps the page, the selection and every connection.
+The wall overlay carries only the layout picker, the full screen control and wall-level state and
+hints. The layout picker is a native radio group with one inline SVG per arrangement, including the
+primary-plus-right-and-bottom shapes for six and eight. Each icon is `aria-hidden`; the layout name
+is the accessible label. The selected choice is the checked radio plus a thicker border and stronger
+weight, so the state survives greyscale.
+
+An empty slot is a placeholder with one centered plus icon and `Choose camera`, not a visible form.
+Pressing it opens that pane's camera chooser. It has no player and opens no media session.
+
+Full screen calls `requestFullscreen()` on the wall synchronously in the click handler, so the
+current layout fills the screen with no header, toolbar, border or padding and the same one pixel
+gap. A refusal shows a plain-language notice instead of failing silently. There is no exit button:
+Escape exits, including while a pane overlay has focus, and a swipe down of at least 120 CSS pixels
+exits on touch. Entering full screen shows that hint. A layout change while full screen stays in full
+screen.
 
 ### Keyboard and selection
 
-The wall is one tab stop with a roving tabindex on the selected pane. Arrow keys move by the centre
-points of the rendered areas, Home goes to the first pane and End to the last. Tab reveals the
-overlay and focuses the selected pane's quality control; Shift+Tab reveals it with focus on the last
-control. Focus inside the overlay suspends hiding, and Escape exits full screen or hides the overlay
-and returns focus to the selected pane. The selected pane is shown by the inset focus ring and the
-overlay text, never by a border, and its state changes are announced in a polite live region inside
-that pane only.
+The wall is one tab stop with a roving tabindex on the selected pane; hidden slots are not stops.
+Arrow keys move by the centre points of the rendered visible areas, Home goes to the first visible
+pane and End to the last. A pane's overlay appears when it takes focus. Tab reveals the selected
+pane's overlay and moves into its first control; Shift+Tab reveals it with focus on its last control.
+Tab from the last pane control reaches the wall overlay, and Shift+Tab from the first wall control
+returns to the pane. Focus inside an overlay suspends hiding, and Escape exits full screen or hides
+the overlays and returns focus to the selected pane. The selected pane is shown by the inset focus
+ring and its own overlay, never by a border, and its state changes are announced in a polite live
+region inside that pane only.
 
 ### Player
 

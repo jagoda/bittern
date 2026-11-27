@@ -1,7 +1,7 @@
 # Design system changelog
 
 - Date: 2026-11-27
-- Status: Accepted; v0.22 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
+- Status: Accepted; v0.24 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
   implemented in `ui/static/bittern.css` and the templates; the v0.3 flow layer is binding from v0.6,
   when [ADR 0027](../adr/0027-flow-layer-above-patterns.md) was accepted with amendments P1 and P3.
 - Applies to: every change to a token, a component, a pattern, a flow, or a rule in
@@ -18,6 +18,29 @@ like at vN, and why is it different now".
 Versions are internal to the design documents. Bittern does not publish a package and has no
 second consumer, so there is no SemVer promise, no changeset tooling, and no codemod. A version is
 a date-stamped batch of class changes; the date is how it maps to an app release.
+
+## v0.24: 2026-11-27
+
+- Class: component and pattern implementation, corrected field behaviour
+- What changed: the wall controls act in place. The server renders sixteen pane slots and a layout
+  choice shows and hides them without navigating, so the players that stay visible keep playing. Each
+  occupied pane owns its overlay with the current-stream line, the explicit stream selector and the
+  camera chooser; the wall overlay carries only the layout picker and full screen. The layout picker
+  is a native radio group with one inline SVG per arrangement and a selected state that survives
+  greyscale. An empty pane is a placeholder with no visible form. Full screen is requested directly
+  from the click on the wall, a refusal shows a plain-language notice, the exit button is removed, and
+  Escape or a swipe down of at least 120 pixels leaves full screen, with the gesture named on entry.
+  A one-stream camera shows one selector option and the reason. See
+  [patterns.md](patterns.md#live-view) LV5, LV9, LV12 and LV15 to LV18, and
+  [components.md](components.md#live-player-island).
+- Why: the first real-hardware run found that full screen failed silently, layout choices navigated
+  and stopped the wall, one wall overlay held controls for a pane somewhere else, fourteen empty-pane
+  forms read as a form grid, and the exit button hid the browser's own exit paths.
+- Evidence: [ADR 0038](../adr/0038-live-wall-controls-act-in-place.md) and
+  [the wall controls note](../notes/2026-11-27-wall-controls-redesign.md). The browser check reads the
+  six layouts at four widths in normal and full screen, the shown and hidden pane overlay, the refusal
+  notice, the swipe and Escape exits, the icon picker, the sixteen-pane placeholder case and the
+  stream selector, and passed with 0 failures and 0 warnings.
 
 ## v0.23: 2026-11-27
 

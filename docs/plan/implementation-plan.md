@@ -1684,8 +1684,12 @@ quality and the capacity model; that replacement landed on 2026-11-27 with the g
 per-pane quality control and cookie field, the class priors and the capacity state machine, the
 snapshot interval, full screen of the layout, the overlay and its keyboard model, the inset focus
 ring and the browser cases. Evidence: [the wall implementation
-note](../notes/2026-11-27-nvr-grid-wall.md). The QEMU live phase still asserts the previous page and
-the ONVIF profiles remain BIT-027. PTZ, audio, event review and playback remain out of scope.
+note](../notes/2026-11-27-nvr-grid-wall.md). [ADR 0038](../adr/0038-live-wall-controls-act-in-place.md)
+landed the field-feedback controls on 2026-11-27: in-place layout, per-pane overlays, the icon picker,
+placeholders, the named full-screen exits and the explicit stream selector. Evidence: [the wall
+controls note](../notes/2026-11-27-wall-controls-redesign.md). The QEMU live phase still asserts the
+previous page and the ONVIF profiles remain BIT-027. PTZ, audio, event review and playback remain out
+of scope.
 
 **Goal.** Give the owner a live camera view in the Bittern UI on the authenticated 443 surface,
 following [ADR 0034](../adr/0034-live-view-owned-by-bittern.md) and
@@ -1718,11 +1722,18 @@ and no embedded Frigate UI.
   with one quality value per pane, and server-side resolution at render time. A stored value outside
   the set clamps down and the page says so.
 - The live grid fills the view with no per-pane chrome: a one pixel gap and no border, radius,
-  padding, surface, heading bar, status card or picker between panes. Controls and the camera name
-  live in an overlay inside each pane, and a pane in a failure state keeps its name and one sentence.
-- Per-pane quality: sub by default in every multi-pane layout, main in the single-pane layout, and a
-  main, sub and snapshot control for the selected pane. A manual choice is stored in the layout
-  cookie and wins over automation. The control is absent when the camera has one stream.
+  padding, surface, heading bar, status card or picker between panes. The camera name is pane content;
+  a pane's quality and camera controls live in that pane's own overlay; the wall overlay carries only
+  the layout picker and full screen. A pane in a failure state keeps its name and one sentence.
+- The layout picker is a native radio group with one inline SVG per arrangement and an accessible
+  name. A layout choice applies in place, shows and hides the sixteen slots, keeps the players that
+  stay visible, and persists through an inline POST without navigating. An empty pane is a
+  placeholder with no visible form; pressing it opens its own camera chooser and opens no media
+  session.
+- Per-pane quality: sub by default in every multi-pane layout, main in the single-pane layout, and an
+  explicit selector with Main stream, Sub stream and Snapshots for every occupied pane.
+  The selected option and the current-stream line name what is playing. A manual choice is stored in
+  the layout cookie and wins over automation. A one-stream camera shows one option and the reason.
 - Capacity: class priors of 4, 8 and 16 live panes, the 2 percent and 0.5 percent dropped-frame
   thresholds, the 20 second demotion evidence, the 300 second quiet period and the 60 second
   promotion window from ADR 0037. Demotion and promotion touch automatic panes only, demote the
@@ -1730,14 +1741,15 @@ and no embedded Frigate UI.
   becomes 16.
 - Panes beyond capacity refresh the authenticated snapshot every 15 seconds while visible, stop
   while `document.hidden` is true, and resume with one immediate fetch.
-- Full screen requests full screen on the grid and keeps the current layout, with no header,
-  toolbar, border or padding. The overlay is shown on pointer movement, a key press, a tap or focus,
-  hides after three seconds, is `inert` and click-through when hidden, reveals on Tab with visible
-  focus, and exits on Escape. The layout picker and quality controls work without JavaScript as
-  forms.
-- The pane wall is one tab stop with a roving tabindex, arrow key geometry, Home and End, and a
-  selected pane shown by the inset focus ring and the camera name and quality in the overlay, never
-  by a tile border.
+- Full screen requests full screen directly from the click on the grid and keeps the current layout,
+  with no header, toolbar, border or padding. A pane overlay is shown on pointer movement, a key press,
+  a tap or focus, hides after three seconds, is `inert` and click-through when hidden, and reveals on
+  Tab with visible focus. There is no exit button: Escape, a swipe down of at least 120 pixels on
+  touch, and the browser's own exit leave full screen; the entry hint names the gestures and a refused
+  request shows a plain-language notice. The layout picker and quality controls still work without
+  JavaScript as forms.
+- The visible pane wall is one tab stop with a roving tabindex, arrow key geometry, Home and End,
+  and a selected pane shown by the inset focus ring and its own overlay, never by a tile border.
 - Keep the default data flow local. Do not add STUN, a public relay, or a cloud dependency. Audio
   stays muted and out of scope until OQ-21.
 - Add browser cases with 1920x1080 and 3840x2160 stubbed streams at all four widths, a no-overflow
@@ -1771,12 +1783,14 @@ and no embedded Frigate UI.
   stored layout outside the set clamps down. The live grid fills the view with no per-pane chrome and
   the one pixel gap, and every pane has a name and a selected state without a tile border.
 - Per-pane quality switches main, sub and snapshot at runtime, survives a reload in the cookie, and a
-manual choice is never overridden by capacity. A one-stream camera has no quality control.
+manual choice is never overridden by capacity. The selected option and the current-stream line agree,
+and a one-stream camera shows one option and the reason.
 - Capacity starts at 4, 8 or 16 by class, demotes the least-visible automatic pane after two hot
 windows, never demotes a manual pane, promotes one pane after the quiet window, and does not
 oscillate. Snapshot panes refresh every 15 seconds and stop while the tab is hidden.
-- Full screen contains the current layout with no header or toolbar, the overlay is click-through
-when hidden and revealed by Tab with visible focus, and Escape exits.
+- Full screen contains the current layout with no header or toolbar, a pane overlay is click-through
+when hidden and revealed by Tab with visible focus, and Escape exits. A swipe down of at least 120
+pixels exits on touch, there is no exit button, and a refused request shows a notice.
 - The schema v2 to v3 migration adds no profiles, the renderer writes both keys from profiles when
 they exist and one path when they do not, and the old document, the new document and the one-stream
 camera all render and apply.

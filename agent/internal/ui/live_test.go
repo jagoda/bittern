@@ -15,12 +15,14 @@ func assertPlayersOutsideHTMX(t *testing.T, body string) (int, int) {
 	t.Helper()
 	decoder := xml.NewDecoder(strings.NewReader(body))
 	type frame struct {
-		htmx  bool
-		panel bool
+		htmx     bool
+		panel    bool
+		template bool
 	}
 	var stack []frame
 	htmxDepth := 0
 	panelDepth := 0
+	templateDepth := 0
 	players := 0
 	videos := 0
 	for {
@@ -42,12 +44,19 @@ func assertPlayersOutsideHTMX(t *testing.T, body string) (int, int) {
 				}
 			}
 			isPanel := attributes["id"] == "status-panel" || attributes["id"] == "operation-panel"
-			stack = append(stack, frame{htmx: hasHTMX, panel: isPanel})
+			isTemplate := value.Name.Local == "template"
+			stack = append(stack, frame{htmx: hasHTMX, panel: isPanel, template: isTemplate})
 			if hasHTMX {
 				htmxDepth++
 			}
 			if isPanel {
 				panelDepth++
+			}
+			if isTemplate {
+				templateDepth++
+			}
+			if templateDepth > 0 {
+				continue
 			}
 			if attributes["data-live-player"] == "true" {
 				players++
@@ -75,6 +84,9 @@ func assertPlayersOutsideHTMX(t *testing.T, body string) (int, int) {
 			}
 			if top.panel {
 				panelDepth--
+			}
+			if top.template {
+				templateDepth--
 			}
 		}
 	}
@@ -105,7 +117,7 @@ func TestLivePageKeepsThePlayerOutsideEveryHTMXRegion(t *testing.T) {
 }
 
 func TestLivePageSelectsTheRequestedProfileWithoutReloadJavaScript(t *testing.T) {
-	configPath, secretsPath := writeCameraFixture(t)
+	configPath, secretsPath := writeLiveProfilesFixture(t)
 	server, client := newTestServer(t, Options{
 		ConfigPath:  configPath,
 		SecretsPath: secretsPath,

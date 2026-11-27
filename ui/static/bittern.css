@@ -1412,6 +1412,10 @@ body.live-wall-page main {
   background: var(--color-text);
 }
 
+.live-pane[hidden] {
+  display: none;
+}
+
 .live-pane:focus {
   outline: none;
 }
@@ -1459,9 +1463,10 @@ body.live-wall-page main {
   font: var(--type-meta);
 }
 
-/* The camera name is content: a short scrim the length of the text, in the
-   pane's overlay layer, inset by --space-8, fading with the controls. */
-.live-pane-overlay {
+/* The camera name is content: a short scrim the length of the text, inset by
+   --space-8, fading with the controls. It is not a control surface and does
+   not take a pointer. */
+.live-pane-content {
   position: absolute;
   inset-block-start: var(--space-8);
   inset-inline-start: var(--space-8);
@@ -1492,28 +1497,69 @@ body.live-wall-page main {
   display: none;
 }
 
-.live-wall[data-live-overlay="hidden"] .live-pane-name {
+.live-pane-content {
+  transition: opacity var(--duration-state) var(--ease-standard);
+}
+
+.live-wall[data-live-idle="true"] .live-pane-content {
   opacity: 0;
   visibility: hidden;
 }
 
-.live-wall[data-live-overlay="hidden"] .live-pane[data-live-pane-state="failed"] .live-pane-name {
+.live-wall[data-live-idle="true"] .live-pane[data-live-pane-state="failed"] .live-pane-content {
   opacity: 1;
   visibility: visible;
 }
 
-/* The one control surface: shown on pointer movement, a key press, a tap or
-   focus, hidden after three seconds, inert and click-through while hidden. */
+/* A pane's controls live in an overlay on that pane. The overlay is shown for
+   the pane under the pointer or keyboard focus, fades with the wall's idle
+   rule, and is inert and click-through while hidden. */
+.live-pane-overlay {
+  position: absolute;
+  inset-block-end: var(--space-4);
+  inset-inline: var(--space-4);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-block-size: 50%;
+  overflow: auto;
+  padding: var(--space-8);
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-control);
+  transition: opacity var(--duration-state) var(--ease-standard);
+}
+
+.live-pane-overlay[data-live-pane-overlay-state="hidden"] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.live-pane-current {
+  margin: 0;
+  color: var(--color-text-muted);
+  font: var(--type-meta);
+}
+
+/* The wall controls are the layout picker and full screen. Per-pane controls
+   never live here. The bar is the only wall-level surface and fades with the
+   same idle rule. */
 .live-overlay {
   position: absolute;
-  inset-block-end: var(--space-8);
-  inset-inline: var(--space-8);
-  z-index: 2;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: end;
+  inset-block-start: var(--space-8);
+  inset-inline: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: center;
   gap: var(--space-8);
+  inline-size: fit-content;
+  max-inline-size: calc(100% - var(--space-16));
   max-block-size: calc(100% - var(--space-16));
+  margin-inline: auto;
   overflow: auto;
   padding: var(--space-8);
   background: var(--color-surface);
@@ -1522,40 +1568,24 @@ body.live-wall-page main {
   transition: opacity var(--duration-state) var(--ease-standard);
 }
 
-@media (min-width: 48rem) {
-  .live-overlay {
-    grid-template-columns: minmax(0, 2fr) auto auto;
-  }
-
-  .live-overlay > .live-selected {
-    grid-column: 1;
-  }
-
-  .live-overlay > .live-layout-form {
-    grid-column: 2;
-  }
-
-  .live-overlay > .live-overlay-actions {
-    grid-column: 3;
-    justify-self: end;
-  }
-
-  .live-overlay > .live-hint,
-  .live-overlay > .live-camera-state,
-  .live-overlay > .live-camera-picker {
-    grid-column: 1 / -1;
-  }
-}
-
 .live-wall[data-live-overlay="hidden"] .live-overlay {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }
 
+.live-overlay-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-8);
+}
+
 .live-overlay form,
 .live-overlay nav,
-.live-overlay p {
+.live-overlay p,
+.live-pane-overlay form,
+.live-pane-overlay p {
   margin: 0;
 }
 
@@ -1608,6 +1638,29 @@ body.live-wall-page main {
   inline-size: var(--space-16);
   block-size: var(--space-16);
   margin: 0;
+}
+
+.live-layout-icon {
+  display: inline-flex;
+  inline-size: var(--space-24);
+  block-size: var(--space-24);
+}
+
+.live-layout-icon svg {
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.live-layout-radio:has(input:checked),
+.live-layout-button[aria-pressed="true"] {
+  border-width: calc(var(--border-width) * 2);
+  border-color: var(--color-action);
+  font-weight: var(--font-weight-strong);
+}
+
+.live-layout-radio:has(input:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .live-layout-actions {
@@ -1770,13 +1823,48 @@ body.live-wall-page main {
   gap: var(--space-8);
 }
 
+.live-pane-quality-form,
+.live-pane-camera-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4) var(--space-8);
+}
+
+.live-pane-quality-form .live-field,
+.live-pane-camera-form .live-field {
+  min-inline-size: 0;
+}
+
+.live-pane-quality-form select[name="quality"],
+.live-pane-camera-form select[name="camera"] {
+  max-inline-size: 100%;
+}
+
+.live-fullscreen-hint {
+  inline-size: 100%;
+  text-align: center;
+}
+
+.live-notice {
+  inline-size: 100%;
+  margin: 0;
+  padding: var(--space-8);
+  border: var(--border-width) solid var(--color-notice-text);
+  border-radius: var(--radius-control);
+  background: var(--color-notice-surface);
+  color: var(--color-notice-text);
+  font: var(--type-body);
+}
+
 .live-hint {
   font: var(--type-meta);
   color: var(--color-text-muted);
 }
 
-/* An empty pane is not chrome around a video: it is one choose-camera control
-   in the middle of where the picture would be. */
+/* An empty pane is not a form: it is a distinct pane with one centered
+   placeholder. A pointer or keyboard press opens the pane's camera chooser in
+   that pane's overlay, and no media session exists until a camera is assigned. */
 .live-pane-is-empty {
   display: flex;
   align-items: center;
@@ -1785,19 +1873,18 @@ body.live-wall-page main {
   background: var(--color-unknown-surface);
 }
 
-.live-choose-form {
+.live-placeholder {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: var(--space-4);
-  inline-size: 100%;
-  max-inline-size: var(--measure-control);
-  margin: 0;
+  color: var(--color-text-muted);
+  font: var(--type-meta);
+  text-align: center;
+  pointer-events: none;
 }
 
-.live-choose-form select {
-  max-inline-size: 100%;
-}
-
-.live-choose-form .button {
-  inline-size: 100%;
+.live-placeholder svg {
+  inline-size: var(--space-24);
+  block-size: var(--space-24);
 }

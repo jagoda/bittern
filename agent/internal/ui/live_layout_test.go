@@ -172,8 +172,11 @@ func TestAutoLayoutResolvesFromTheInventory(t *testing.T) {
 		cameras = append(cameras, config.Camera{ID: "camera_" + string(rune('a'+index)), Name: "Camera"})
 	}
 	grid := resolveLiveGrid(liveLayout{}, cameras, "")
-	if grid.Layout != 6 || len(grid.Panes) != 6 {
-		t.Fatalf("auto for five cameras = layout %d with %d panes, want six", grid.Layout, len(grid.Panes))
+	if grid.Layout != 6 || len(grid.Panes) != liveMaxTiles {
+		t.Fatalf("auto for five cameras = layout %d with %d slots, want six visible of sixteen", grid.Layout, len(grid.Panes))
+	}
+	if visible := visiblePaneCount(grid); visible != 6 {
+		t.Fatalf("auto for five cameras has %d visible panes, want six", visible)
 	}
 	if !grid.Panes[5].Empty {
 		t.Fatal("the automatic six-pane layout does not leave the sixth pane empty")
@@ -197,8 +200,8 @@ func TestStoredTwoClampsToOne(t *testing.T) {
 		}
 	}
 	grid := resolveLiveGrid(liveLayout{Stored: true, Layout: 2}, liveLayoutCameras(), "")
-	if grid.Layout != 1 || len(grid.Panes) != 1 {
-		t.Fatalf("stored two rendered layout %d with %d panes, want one", grid.Layout, len(grid.Panes))
+	if grid.Layout != 1 || visiblePaneCount(grid) != 1 {
+		t.Fatalf("stored two rendered layout %d with %d visible panes, want one", grid.Layout, visiblePaneCount(grid))
 	}
 }
 
@@ -343,10 +346,13 @@ func TestLiveGridPageResolvesTheStoredLayout(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("live wall status = %d", response.StatusCode)
 	}
-	if strings.Count(body, "data-live-pane=") != 6 {
-		t.Fatalf("live wall does not render six panes:\n%s", body)
+	if strings.Count(body, "data-live-pane=") != 16 {
+		t.Fatalf("live wall does not render sixteen pane slots:\n%s", body)
 	}
-	if strings.Count(body, "data-live-player=") != 2 {
+	if strings.Count(body, `data-live-visible="true"`) != 6 {
+		t.Fatalf("live wall does not show six panes:\n%s", body)
+	}
+	if strings.Count(body, `id="live-tile-player-`) != 4 {
 		t.Fatalf("live wall does not render two players:\n%s", body)
 	}
 	assertContains(t, body,
@@ -357,8 +363,9 @@ func TestLiveGridPageResolvesTheStoredLayout(t *testing.T) {
 		`data-live-overlay-panel="true"`,
 		`data-live-one-stream="true"`,
 		`data-device-prior="16"`,
-		`One stream. This camera does not report a second stream.`,
+		`One stream. This camera does not report a second stream, so main and sub use the same picture.`,
 		`Choose camera`,
+		`data-live-camera-template="front_door"`,
 	)
 	for _, forbidden := range []string{"rtsp://", "front_door_sub", "127.0.0.1:1984", "10.77.0.20"} {
 		if strings.Contains(body, forbidden) {
@@ -601,14 +608,55 @@ func TestLiveGridKeepsEveryPlayerOutsideEveryHTMXRegion(t *testing.T) {
 	if players != 3 {
 		t.Fatalf("guard saw %d players, want 3", players)
 	}
-	if strings.Count(body, "data-live-player=") != 3 {
-		t.Fatalf("wall has %d players, want 3", strings.Count(body, "data-live-player="))
+	if strings.Count(body, `id="live-tile-player-`) != 6 {
+		t.Fatalf("wall has %d player nodes, want six for three players", strings.Count(body, `id="live-tile-player-`))
 	}
 }
 
 // TestLivePaneOneStreamHidesTheQualityControl proves a camera with one stream
 // says so instead of offering a quality choice that does nothing. The status
 // document's distinct_qualities is the field that decides it.
+func visiblePaneCount(grid liveGrid) int {
+	count := 0
+	for _, pane := range grid.Panes {
+		if pane.Visible {
+			count += 1
+		}
+	}
+	return count
+}
+
+// TestEveryLayoutChoiceHasAnArrangementIcon proves the picker uses one inline
+// SVG per layout, whose rectangle count matches the layout, and keeps an
+// accessible name for every option.
+func TestEveryLayoutChoiceHasAnArrangementIcon(t *testing.T) {
+	grid := resolveLiveGrid(liveLayout{}, liveLayoutCameras(), "")
+	if len(grid.Layouts) != len(liveLayoutCounts)+1 {
+		t.Fatalf("layout choices = %d, want %d", len(grid.Layouts), len(liveLayoutCounts)+1)
+	}
+	for _, choice := range grid.Layouts {
+		if choice.Name == "" {
+			t.Fatalf("layout %q has no accessible name", choice.Value)
+		}
+		if !strings.Contains(string(choice.Icon), "<svg") {
+			t.Fatalf("layout %q has no inline SVG", choice.Value)
+		}
+		want := 4
+		if choice.Value == "1" {
+			want = 1
+		} else if choice.Value != "auto" {
+			count, err := strconv.Atoi(choice.Value)
+			if err != nil {
+				t.Fatalf("layout value %q is not a count", choice.Value)
+			}
+			want = count
+		}
+		if got := strings.Count(string(choice.Icon), "<rect"); got != want {
+			t.Fatalf("layout %q icon has %d rectangles, want %d", choice.Value, got, want)
+		}
+	}
+}
+
 func TestLivePaneOneStreamHidesTheQualityControl(t *testing.T) {
 	configPath, secretsPath := writeLiveProfilesFixture(t)
 	server, client := newTestServer(t, Options{
@@ -634,14 +682,15 @@ func TestLivePaneOneStreamHidesTheQualityControl(t *testing.T) {
 	}
 	defer response.Body.Close()
 	body := readBody(t, response)
-	if strings.Count(body, `data-one-stream="true"`) != 1 {
-		t.Fatalf("wall reports %d one-stream cameras, want 1:\n%s", strings.Count(body, `data-one-stream="true"`), body)
+	oneStreamPane := regexp.MustCompile(`data-live-pane="[0-9]+"[^>]*data-one-stream="true"`)
+	if got := len(oneStreamPane.FindAllString(body, -1)); got != 1 {
+		t.Fatalf("wall reports %d one-stream panes, want 1:\n%s", got, body)
 	}
 	if !strings.Contains(body, `data-camera-id="driveway"`) || !strings.Contains(body, `data-one-stream="true"`) {
 		t.Fatalf("the one-stream camera is not rendered:\n%s", body)
 	}
-	if strings.Count(body, `One stream. This camera does not report a second stream.`) != 1 {
-		t.Fatal("the one-stream sentence is not in the overlay")
+	if strings.Count(body, `One stream. This camera does not report a second stream, so main and sub use the same picture.`) < 1 {
+		t.Fatal("the one-stream reason is not in the pane overlay")
 	}
 }
 
@@ -727,3 +776,141 @@ const liveCameraFixtureBlock = `cameras:
     rtsp_port: 554
     rtsp_path: /stream4
 `
+
+// TestLiveGridRendersSixteenSlotsAndPlaceholders proves the wall renders all
+// sixteen slots, hides the ones outside the layout, and leaves empty slots
+// without a player. A twelve-slot-hidden wall at layout four with two cameras
+// has two visible placeholders and twelve hidden empty slots.
+func TestLiveGridRendersSixteenSlotsAndPlaceholders(t *testing.T) {
+	grid := resolveLiveGrid(liveLayout{Stored: true, Layout: 4, Tiles: []string{"front_door", "driveway"}}, liveLayoutCameras(), "")
+	if len(grid.Panes) != liveMaxTiles {
+		t.Fatalf("pane slots = %d, want %d", len(grid.Panes), liveMaxTiles)
+	}
+	if grid.Layout != 4 || visiblePaneCount(grid) != 4 {
+		t.Fatalf("layout = %d with %d visible panes, want four", grid.Layout, visiblePaneCount(grid))
+	}
+	occupied := 0
+	emptyVisible := 0
+	emptyHidden := 0
+	players := 0
+	for _, pane := range grid.Panes {
+		if pane.Occupied {
+			occupied += 1
+			if pane.Player != nil {
+				players += 1
+			}
+			continue
+		}
+		if pane.Visible {
+			emptyVisible += 1
+		} else {
+			emptyHidden += 1
+		}
+		if pane.Player != nil {
+			t.Fatalf("empty pane %d has a player", pane.Number)
+		}
+	}
+	if occupied != 2 || players != 2 {
+		t.Fatalf("occupied = %d with %d players, want two and two", occupied, players)
+	}
+	if emptyVisible != 2 || emptyHidden != 12 {
+		t.Fatalf("empty panes = %d visible and %d hidden, want two and twelve", emptyVisible, emptyHidden)
+	}
+}
+
+// TestLiveLayoutInlineChangeKeepsHiddenTiles proves an in-place layout change
+// returns no content, does not lose a camera in a now-hidden slot, and keeps
+// that pane's quality.
+func TestLiveLayoutInlineChangeKeepsHiddenTiles(t *testing.T) {
+	configPath, secretsPath := writeLiveCameraFixture(t)
+	server, client := newTestServer(t, Options{
+		ConfigPath:  configPath,
+		SecretsPath: secretsPath,
+		MockPreview: true,
+	})
+	disableRedirects(client)
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/ui/live/layout",
+		strings.NewReader(url.Values{"layout": {"4"}}.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("X-Bittern-Inline", "1")
+	request.AddCookie(&http.Cookie{
+		Name: liveLayoutCookieName,
+		Value: url.Values{
+			"v": {"2"},
+			"p": {"16"},
+			"t": {"front_door", "", "", "", "", "", "", "side_gate"},
+			"q": {"", "", "", "", "", "", "", "main"},
+		}.Encode(),
+	})
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	_ = readBody(t, response)
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("inline layout POST status = %d, want 204", response.StatusCode)
+	}
+	var saved *http.Cookie
+	for _, cookie := range response.Cookies() {
+		if cookie.Name == liveLayoutCookieName {
+			saved = cookie
+		}
+	}
+	if saved == nil {
+		t.Fatal("inline layout POST did not set the layout cookie")
+	}
+	parsed := liveLayoutFromRequest(requestWithCookie(saved))
+	if parsed.Layout != 4 {
+		t.Fatalf("stored layout = %d, want 4", parsed.Layout)
+	}
+	if liveQualityAt(parsed.Tiles, 7) != "side_gate" {
+		t.Fatalf("hidden pane 8 lost its camera: %#v", parsed.Tiles)
+	}
+	if liveQualityAt(parsed.Qualities, 7) != "main" {
+		t.Fatalf("hidden pane 8 lost its quality: %#v", parsed.Qualities)
+	}
+}
+
+// TestLiveGridKeepsPaneControlsInTheirPane checks the rendered wall: each
+// occupied pane has its own overlay and selector, and the wall overlay has no
+// quality or camera control.
+func TestLiveGridKeepsPaneControlsInTheirPane(t *testing.T) {
+	configPath, secretsPath := writeLiveCameraFixture(t)
+	server, client := newTestServer(t, Options{
+		ConfigPath:  configPath,
+		SecretsPath: secretsPath,
+		MockPreview: true,
+	})
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/ui/live", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.AddCookie(&http.Cookie{
+		Name: liveLayoutCookieName,
+		Value: url.Values{
+			"v": {"2"},
+			"p": {"4"},
+			"t": {"front_door", "driveway"},
+		}.Encode(),
+	})
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body := readBody(t, response)
+	if strings.Count(body, `data-live-pane-overlay="true"`) != liveMaxTiles {
+		t.Fatalf("wall has %d pane overlays, want %d", strings.Count(body, `data-live-pane-overlay="true"`), liveMaxTiles)
+	}
+	wallOverlay := body[strings.Index(body, `data-live-overlay-panel="true"`):]
+	if strings.Contains(wallOverlay, `data-live-quality-select`) || strings.Contains(wallOverlay, `data-live-camera-select`) {
+		t.Fatal("the wall overlay contains a pane quality or camera control")
+	}
+	if !strings.Contains(body, `data-live-current-stream="true"`) {
+		t.Fatal("the pane overlay has no current-stream line")
+	}
+}

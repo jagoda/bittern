@@ -709,13 +709,15 @@ Current evidence for the list:
   replace the video element, and do it inside a wall of one, four, six, eight, nine or sixteen panes
   with no per-pane chrome.
 - Anatomy, in order: the stable `[data-live-player]` node with the camera ID, profile and Bittern
-  media base; a media area with the `<video>`, the snapshot image and the idle placeholder; and the
-  overlay sibling inside the pane, which holds the camera name, the state badge and sentence, one
-  retry action, the layout picker, the selected pane's main, sub and snapshot control, the one-stream
-  hint when there is one, the exit control in full screen, the Change camera picker for an empty or
-  replaced pane, and a noscript fallback. The media area is an aspect box that reserves 16:9 before
-  the first frame; the video is contained and letterboxed inside it and never sets the player's size.
-  The player carries no border, radius, padding, surface or heading bar; the pane is the frame.
+  media base; a media area with the `<video>`, the snapshot image and the idle placeholder; the pane
+  content layer that holds the camera name and a failure sentence; and that pane's own overlay, which
+  holds the current-stream line, the explicit stream selector with Main stream, Sub stream and
+  Snapshots, the one-stream reason, the camera chooser, and the polite announce region. An empty pane
+  has no player and no visible form: it is one centered plus icon and "Choose camera", and its
+  overlay opens the camera chooser when the pane is pressed. The media area is an aspect box that
+  reserves 16:9 before the first frame; the video is contained and letterboxed inside it and never
+  sets the player's size. The player carries no border, radius, padding, surface or heading bar; the
+  pane is the frame.
 - Variants: MSE, HLS, snapshot fallback, a capacity snapshot pane on the 15 second interval, a
   no-JavaScript snapshot, and a pane at main, sub or snapshot quality. The sub stream is the
   automatic multi-pane choice and main the single-pane choice.
@@ -727,23 +729,29 @@ Current evidence for the list:
   `--focus-ring`, `--focus-ring-width`, `--radius-control`, `--border-width`, `--space-4`,
   `--space-8`, `--space-12`, `--space-16`, `--touch-target`, `--type-body`, `--type-meta`,
   `--type-label`.
-- Do: render the player once. Keep the video and the overlay as siblings, with the overlay inside the
-  pane and outside the player node. Keep the state sentence and the next action in the overlay. Expose
-  the class prior, the live count and the current capacity as data attributes. Give every pane its
-  own island; the grid owns the prior, the capacity, the selected pane and the one-pane replacement,
-  never a shared player or a shared media source. Size the media box from the space it is given, not
-  from the stream's native dimensions. Enter full screen on the grid from the overlay control, keep
-  the current layout and the one pixel gap, hide page overflow while it is active, and leave through
-  the overlay control or Escape. Hide the overlay after three seconds, make it `inert` and
-  `pointer-events: none` while hidden, and reveal it on Tab with visible focus.
+- Do: render the player once. Keep the video and the pane overlay as siblings, with the overlay inside
+  the pane and outside the player node. Keep the state sentence and the next action in that pane's
+  overlay or content. Expose the class prior, the live count and the current capacity as data
+  attributes. Give every pane its own island; the wall owns the prior, the capacity, the selected
+  pane and the visible set, never a shared player or a shared media source. Size the media box from
+  the space it is given, not from the stream's native dimensions. Apply a layout choice in place,
+  show and hide the sixteen slots, and keep the islands that stay visible. Enter full screen on the
+  grid from the wall control, keep the current layout and the one pixel gap, hide page overflow while
+  it is active, and leave with Escape or a swipe down of at least 120 pixels; show the hint on entry
+  and a plain-language notice when the browser refuses. Hide a pane overlay after three seconds, make
+  it `inert` and `pointer-events: none` while hidden, and reveal it on pointer, focus or Tab with
+  visible focus. Show one selected option and the reason when the camera has one stream.
 - Don't: put the player or video inside an element with `hx-get`, `hx-post`, `hx-target`, `hx-swap`
-  or `hx-trigger`; use `hx-preserve` as the isolation mechanism; put a stream name, RTSP URL,
+  or `hx-trigger`; use `hx-preserve` as the isolation mechanism; put a pane's quality or camera
+  control in the wall overlay; render a form in an empty pane; add an exit-full-screen button; put a
+  stream name, RTSP URL,
   camera address or credential in the DOM; use a spinner with no state sentence; wrap a pane in a
   border, radius, padding, surface or card; add a persistent toolbar in full screen; use a hover-only
   control; or tear down every island to replace or remove one pane.
-- Accessibility: one labelled video per island, a labelled pane group, a polite status region in the
-  overlay, a retry control with a verb, quality and layout controls that work without JavaScript,
-  one tab stop for the pane wall with arrow-key geometry, and the one focus ring drawn inset.
+- Accessibility: one labelled video per island, a labelled pane group, a labelled pane overlay, a
+  polite status region in the overlay, a retry control with a verb, a native icon radio group for the
+  layout with accessible names, a labelled stream selector with the selected option marked, one tab
+  stop for the visible pane wall with arrow-key geometry, and the one focus ring drawn inset.
 - Check: Q5, Q6, Q8 and Q11 in [the professional test](professional-test.md); the template guard
   and runtime `closest()` check; the four-width screenshots; the browser state walk; the layout area,
   quality, capacity, overlay, full-screen, focus and snapshot-interval checks.

@@ -4,7 +4,7 @@
 lets each pane choose main, sub or snapshot, plays only as many live panes as the device sustains,
 and treats full screen as the chosen layout on the whole screen with an overlay for controls.*
 
-- Status: Accepted
+- Status: Accepted; controls, layout change and full-screen exit superseded in part by [0038](./0038-live-wall-controls-act-in-place.md)
 - Date: 2026-11-27
 - Deciders: maintainer
 - Related: [ADR 0005](./0005-dual-nic-isolated-camera-network.md),

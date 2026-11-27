@@ -215,14 +215,17 @@ the snapshot remains visible. The layout picker and the pane camera picker are s
 1. Read the grid or the single camera: each camera name, its live state and the sentence that says
    what is happening.
 2. Watch a stream, or read the snapshot when the stream cannot start.
-3. Choose a layout of one, four, six, eight, nine or sixteen panes, or leave it automatic. Bittern
-   remembers the choice on this device only.
-4. Assign a camera to an empty or replaced pane, or clear a pane.
-5. Select a pane and choose its quality: main, sub or snapshot. A manual choice stays until the owner
-   changes it.
-6. Enter full screen to fit the chosen layout to the whole screen, then leave with the overlay control
-   or Escape without losing the streams or scrolling the page underneath.
-7. Read each pane's camera name and state in its overlay; the name fades with the overlay, and a
+3. Choose a layout of one, four, six, eight, nine or sixteen panes from the icon radio group, or
+   leave it automatic. The wall changes in place and every player that stays visible keeps playing.
+   Bittern remembers the choice on this device only.
+4. Press an empty placeholder, or use that pane's camera chooser, to assign a camera. The pane fills
+   in place; no form stays on an empty pane.
+5. Select a pane and read its stream selector and current-stream line. Choose main, sub or snapshot.
+   A manual choice stays until the owner changes it; a one-stream camera shows one option and why.
+6. Enter full screen to fit the chosen layout to the whole screen. Leave with Escape, or swipe down
+   at least 120 pixels on a touch screen. The wall shows that hint on entry and says so if the browser
+   refuses full screen.
+7. Read each pane's camera name and state in its own overlay; the name fades with the overlay, and a
    failed pane keeps its name and one sentence.
 8. If a stream stalls or drops, read the bounded reconnect attempt and wait, or take the named next
    action.
@@ -243,24 +246,27 @@ disabled, snapshot available and snapshot unavailable.
 | LV2 | The player is a stable node outside every HTMX swap region. A sibling server-owned line may poll; the player never is its target. | The template guard, the runtime `closest()` check, and the browser poll walk. |
 | LV3 | Every connection state has a word, a sentence and, when it cannot recover, a next action. A retry label names the action. | Q5 and Q7; the browser state walk. |
 | LV4 | Recovery is bounded and visible. The page names the attempt and the wait, then falls back to HLS or the snapshot. | Q5; the player state walk and the proxy tests. |
-| LV5 | The profile control names the playing profile. A camera with one configured stream says so rather than offering a false quality choice. | Q9; template read and the profile switch test. |
+| LV5 | The stream control is an explicit selector with the current stream marked in the control and printed in the pane overlay. A camera with one configured stream shows one option and the reason rather than a choice that does nothing. | Q9; the selector, current-stream and one-stream browser checks. |
 | LV6 | The browser receives no upstream URL, camera address, stream name or credential. | Q10; the live template scan and the proxy tests. |
 | LV7 | The class prior and the current capacity are enforced before a connection opens, and the active count is exposed. | Q4 and Q8; the browser capacity checks at 360, 390, 1280 and 1920. |
 | LV8 | Without JavaScript the page still shows the latest snapshot and a named next action. | Q5; the no-JavaScript template path. |
-| LV9 | The layout is data: one of 1, 4, 6, 8, 9 or 16 panes from one area rule over a grid of areas, `auto` resolved from the enabled inventory, a per-pane camera assignment, and a per-device cookie. A new count is a row in the area function, not a template. | Q1; the area, layout, cookie and preset tests; the layout screenshots. |
+| LV9 | The layout is data: one of 1, 4, 6, 8, 9 or 16 panes from one area rule over a grid of areas, `auto` resolved from the enabled inventory, a per-pane camera assignment, and a per-device cookie. The picker is a native radio group with one inline SVG per arrangement, an accessible name, and a selected state that does not rely on colour. A new count is a row in the area function, not a template. | Q1 and Q6; the area, layout, cookie, icon and preset tests; the layout screenshots. |
 | LV10 | A class prior of 4, 8 or 16 live panes and a dropped-frame signal decide how many panes play. Demotion takes the least-visible automatic pane after two 10 second windows above 2 percent, promotion returns one pane after 300 seconds quiet and 60 seconds below 0.5 percent, a manual quality is never touched, and the proxy enforces a hard 16. The page says when it is above the tested capacity. | Q5; the capacity, hysteresis, manual-choice and proxy-limit tests. |
 | LV11 | Each pane is its own player island. One failing camera names itself in its own pane while the others keep playing, and replacing one pane replaces only that island. | Q5 and Q11; the failure and assignment checks; the template guard. |
-| LV12 | A pane plays sub by default in a multi-pane layout and main in the single-pane layout, and its main, sub and snapshot control switches at runtime without a reload. Full screen keeps the layout and the pane choices instead of switching one pane to main. | Q11 to Q16; the quality and full-screen checks. |
+| LV12 | A pane plays sub by default in a multi-pane layout and main in the single-pane layout, and its selector switches main, sub and snapshot at runtime without a reload. A layout choice and a camera assignment act in place, keep the players that stay visible, and never navigate. Full screen keeps the layout and the pane choices. | Q11 to Q16; the quality, in-place, layout and full-screen checks. |
 | LV13 | A poll during playback leaves every player, every open control and the chosen layout alone. | Q6; the grid poll check and the player isolation guard. |
 | LV14 | The media box sizes from the space it is given on both axes. It is never the stream's native size, never wider than its container and never taller than the available height. The picture is contained and letterboxed, never cropped. An aspect box reserves the space before the first frame, so metadata cannot move the layout. The grid fills the view without page scrolling; the phone shows one pane in the available area without horizontal scrolling. | Q4; the 1920x1080 and 3840x2160 browser cases at four widths, the reserved-box check and the QEMU live phase. |
-| LV15 | Full screen contains the current layout, with no header, toolbar, border or padding. The layout, the pane names and the quality choices are unchanged; the one pixel gap remains. | Q6 and Q8; the full-screen checks for six and eight at four widths. |
-| LV16 | Controls in full screen are overlays: shown on pointer movement, a key press, a tap or focus, hidden after three seconds. A hidden overlay is inert and click-through. Tab reveals it with visible focus, Escape exits full screen, and the no-JavaScript overlay is visible by default. | Q6 and Q8; the overlay click-through, Tab and Escape checks; the no-JavaScript template path. |
-| LV17 | The pane wall is one tab stop with a roving tabindex and arrow-key geometry. The selected pane is the focused pane, shown by the inset focus ring and the camera name and quality in the overlay, never by a border. Every pane has a camera name. | Q6 and Q9; the keyboard pass and the selected-pane check. |
+| LV15 | Full screen contains the current layout, with no header, toolbar, border or padding. The layout, the pane names and the quality choices are unchanged; the one pixel gap remains. It is requested directly from the click on the wall; a refusal shows a plain-language notice. It leaves by Escape, a swipe down of at least 120 pixels on touch, or the browser's own exit, and there is no exit button. Escape still exits while a pane overlay has focus. | Q6 and Q8; the full-screen, refusal, hint and gesture checks for six and eight at four widths. |
+| LV16 | A pane's quality, camera and pane controls live in that pane's own overlay, shown for the pane under the pointer or keyboard focus and hidden after three seconds. A hidden pane overlay is inert and click-through. The wall overlay carries only the layout picker and full screen. Tab reveals the pane overlay with visible focus, Escape exits full screen, and the no-JavaScript path keeps real forms. | Q6 and Q8; the pane-overlay click-through, Tab and Escape checks; the no-JavaScript template path. |
+| LV17 | The pane wall is one tab stop with a roving tabindex and arrow-key geometry over visible panes only. The selected pane is the focused pane, shown by the inset focus ring and its own overlay, never by a border. Every occupied pane has a camera name; a failed pane keeps it. | Q6 and Q9; the keyboard pass and the selected-pane check. |
+| LV18 | An empty pane is a distinct placeholder with one centered plus icon and "Choose camera", not a visible form. The whole pane opens its own camera chooser, it holds no player and opens no media session, and fourteen placeholders at sixteen panes read as empty slots. | Q2 and Q4; the placeholder, no-session and sixteen-pane screenshots. |
 
 Slice 1a implements LV1 to LV8. Slice 1b implemented the 1/2/4/9 presets.
 [ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md) replaced LV9, LV10, LV12, LV14
 and LV15 and added LV16 and LV17; [BIT-023](../plan/implementation-plan.md#bit-023-live-view) landed
-the replacement on 2026-11-27, and the browser cases named in each rule are in
+the replacement on 2026-11-27. [ADR 0038](../adr/0038-live-wall-controls-act-in-place.md) replaces
+the control model in LV5, LV9 and LV12, the full-screen exit in LV15, the overlay split in LV16 and
+the visible-pane keyboard rule in LV17, and adds LV18. The browser cases named in each rule are in
 `tests/browser/live.mjs`.
 
 ## Managed-device list and detail

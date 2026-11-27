@@ -39,6 +39,7 @@ type liveSelection struct {
 	Disabled    bool
 	ElementID   string
 	TileIndex   int
+	PaneNumber  int
 	InGrid      bool
 }
 
@@ -213,24 +214,33 @@ func (h *handler) renderLive(w http.ResponseWriter, r *http.Request, cameras []c
 		TileIndex:   -1,
 	}
 	pane := livePane{
-		Number:       1,
-		Area:         "p1",
-		TitleID:      "live-camera-title",
-		PaneID:       "live-pane-1",
-		Occupied:     true,
-		Label:        selected.Name,
-		CameraID:     selected.ID,
-		CameraName:   selected.Name,
-		Quality:      profile,
-		QualityLabel: liveQualityLabel(profile),
-		Manual:       profile,
-		OneStream:    oneStream,
-		Player:       selection,
-		FullURL:      BasePath + "/live/" + url.PathEscape(selected.ID),
+		Number:          1,
+		Area:            "p1",
+		TitleID:         "live-camera-title",
+		PaneID:          "live-pane-1",
+		Visible:         true,
+		Occupied:        true,
+		Label:           selected.Name,
+		CameraID:        selected.ID,
+		CameraName:      selected.Name,
+		Quality:         profile,
+		QualityLabel:    liveQualityLabel(profile),
+		CurrentStream:   "Current stream: " + liveQualityLabel(profile) + ".",
+		Manual:          profile,
+		OneStream:       oneStream,
+		OneStreamReason: "One stream. This camera does not report a second stream, so main and sub use the same picture.",
+		Player:          selection,
+		FullURL:         BasePath + "/live/" + url.PathEscape(selected.ID),
+		Qualities:       liveQualityOptions(profile),
+		ProfileChoices:  profiles,
+		ProfileHint:     selection.ProfileHint,
+		CameraLinks:     links,
 	}
 	grid := liveGrid{
 		Layout:         1,
 		LayoutLabel:    liveLayoutLabels[1],
+		LayoutValue:    "1",
+		AutoLayout:     1,
 		Panes:          []livePane{pane},
 		Selected:       pane,
 		PaneURL:        BasePath + "/live/pane",

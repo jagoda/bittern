@@ -80,10 +80,11 @@ need an ADR. When in doubt, write a short one.
 | 0031 | [Update channel on GitHub Releases](./0031-update-channel-on-github-releases.md) | Accepted; tag-as-publish-signal decision superseded in part by 0033 | 2026-11-22 | GitHub Releases channel; immutable drafts; beta only; payload digest decided. |
 | 0032 | [Continuous integration and build pipeline](./0032-continuous-integration-and-build-pipeline.md) | Accepted | 2026-11-22 | CI phase one checks and bundle artifact; tag publish later. |
 | 0033 | [Dispatch-driven release trigger](./0033-dispatch-driven-release-trigger.md) | Accepted | 2026-11-22 | Manual dispatch triggers release; tag after build; tag push fallback. |
-| 0034 | [Live view owned by Bittern](./0034-live-view-owned-by-bittern.md) | Accepted; grid, stream-quality and full-screen clauses superseded in part by [0037](./0037-nvr-grid-per-pane-quality-and-full-screen.md) | 2026-11-26 | Bittern live view uses go2rtc MSE/HLS and Frigate snapshots on 443. |
+| 0034 | [Live view owned by Bittern](./0034-live-view-owned-by-bittern.md) | Accepted; grid, stream-quality and full-screen clauses superseded in part by [0037](./0037-nvr-grid-per-pane-quality-and-full-screen.md); layout-change clauses by 0038 | 2026-11-26 | Bittern live view uses go2rtc MSE/HLS and Frigate snapshots on 443. |
 | 0035 | [The appliance is the time authority for the camera network](./0035-appliance-as-time-authority.md) | Accepted | 2026-11-26 | Appliance is the camera-network time authority; NTP preferred, ONVIF push fallback. |
 | 0036 | [Update bundles deliver subsystem changes through the fixed helper](./0036-update-bundles-deliver-subsystem-changes.md) | Accepted | 2026-11-26 | Bundle declares units and migrations; helper applies them with snapshot rollback. |
-| 0037 | [The NVR grid, per-pane stream quality, and full screen](./0037-nvr-grid-per-pane-quality-and-full-screen.md) | Accepted | 2026-11-27 | Six layouts, no pane chrome, per-pane quality, capacity demotion, layout full screen. |
+| 0037 | [The NVR grid, per-pane stream quality, and full screen](./0037-nvr-grid-per-pane-quality-and-full-screen.md) | Accepted; controls, layout change and full-screen exit superseded in part by 0038 | 2026-11-27 | Six layouts, no pane chrome, per-pane quality, capacity demotion, layout full screen. |
+| 0038 | [Live wall controls act in place, per pane](./0038-live-wall-controls-act-in-place.md) | Accepted | 2026-11-27 | In-place layout, per-pane overlays, icon picker, placeholders, named exits, stream selector. |
 
 ## Related documents
 

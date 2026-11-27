@@ -336,18 +336,21 @@ fits the available width and height and the picture is contained, not shown at i
 1280 by 800 and at 1920 by 1080, the document has no horizontal or vertical overflow: the video,
 heading, status and controls all stay inside the viewport.
 
-Select Full screen. Expected: the player fills the screen, the video is contained with no cropping
-or overflow, the page underneath does not scroll, and the status, profile and exit controls stay
-reachable. Leave full screen with the control, enter again and leave with Escape, then enter again
-and leave with Back. Each exit returns to the same tile in the same grid state.
+Select Full screen. Expected: the current layout fills the screen with no header or toolbar, the
+video is contained with no cropping or overflow, the page underneath does not scroll, the layout
+picker and full screen control stay reachable in the wall overlay, and the selected pane's stream
+selector and camera chooser open on that pane. The entry hint names Escape and a swipe down of at
+least 120 pixels on a touch device. Leave with Escape; enter again and leave with the swipe on touch.
+There is no exit button. Each exit returns to the same wall, selection and player state.
 
 Repeat with the 4K camera if one is available. The stream size must not change the geometry: a 4K
 stream fits the same box as a 1080p stream, and the page does not grow to the native resolution.
 
 A failure looks like a picture that runs past the card or viewport, a vertical or horizontal
 scrollbar on the grid or in full screen, a video that is cropped instead of contained, controls or
-status pushed off screen, Escape or Back leaving the page locked or scrolled, or a 4K stream that
-sizes the page differently from a 1080p stream. A browser without the Fullscreen API hides or
+status pushed off screen, a full-screen request that fails with no visible sentence, Escape or the
+swipe leaving the page locked or scrolled, or a 4K stream that sizes the page differently from a
+1080p stream. A browser without the Fullscreen API hides or
 rejects the control; record that and use Open full width for the geometry check.
 
 ### 9. Full-width shell on status and live

@@ -93,10 +93,13 @@ decoded, then captures and measures that state as `cameras-picture-taken-<width>
 ## Live wall checks
 
 `tests/browser/live.mjs` runs after the route walk on its own daemon with a fixed four-camera
-inventory. Two cameras report distinct main and sub profiles, so the per-pane quality control has a
-real choice; the other two report one stream and must say so. The checks stub `WebSocket`,
-`MediaSource`, the media element and `getVideoPlaybackQuality()`, so every player state and a
-synthetic frame-drop sequence can be walked without a camera or go2rtc.
+inventory. Two cameras report distinct main and sub profiles, so the per-pane stream selector has a
+real choice; the other two report one stream and must show one option and the reason. The wall checks
+also read the layout icons, a layout, quality and camera change in place, the full-screen hint,
+refusal, Escape and swipe exits, the sixteen-pane placeholder wall with two cameras, and the shown and
+hidden pane overlay. The checks stub `WebSocket`, `MediaSource`, the media element and
+`getVideoPlaybackQuality()`, so every player state and a synthetic frame-drop sequence can be walked
+without a camera or go2rtc.
 
 The eight player-state checks walk connecting, playing, stalled, reconnecting, offline, unsupported,
 session ended and switching on the single-camera route, and the playing case swaps the camera-state

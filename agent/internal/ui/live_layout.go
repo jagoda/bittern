@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -51,16 +52,6 @@ var liveLayoutLabels = map[int]string{
 	8:  "Eight panes",
 	9:  "Nine panes",
 	16: "Sixteen panes",
-}
-
-var liveLayoutShortLabels = map[int]string{
-	0:  "Auto",
-	1:  "1",
-	4:  "4",
-	6:  "6",
-	8:  "8",
-	9:  "9",
-	16: "16",
 }
 
 // livePaneArea is one pane's rectangle in a layout's cell grid.
@@ -151,11 +142,13 @@ type liveLayout struct {
 	Qualities []string
 }
 
-// liveLayoutChoice is one option in the layout picker.
+// liveLayoutChoice is one option in the layout picker. Icon is static,
+// repository-authored SVG that depicts the pane arrangement; Name is the
+// accessible name and is never dropped.
 type liveLayoutChoice struct {
 	Value   string
-	Label   string
 	Name    string
+	Icon    template.HTML
 	Current bool
 }
 
@@ -173,30 +166,42 @@ type liveQualityOption struct {
 	Current bool
 }
 
-// livePane is one resolved pane: a player island and its overlay layer, or the
-// choose-camera control of an empty pane.
+// livePane is one resolved pane slot: a player island and its own overlay, or
+// the placeholder of an empty pane. All sixteen slots are rendered so a layout
+// change can show and hide panes in place without losing the players that stay.
 type livePane struct {
-	Number       int
-	Area         string
-	TitleID      string
-	PaneID       string
-	Occupied     bool
-	Empty        bool
-	Label        string
-	CameraID     string
-	CameraName   string
-	Quality      string
-	QualityLabel string
-	Manual       string
-	Automatic    bool
+	Number        int
+	Area          string
+	TitleID       string
+	PaneID        string
+	Visible       bool
+	Occupied      bool
+	Empty         bool
+	Label         string
+	CameraID      string
+	CameraName    string
+	Quality       string
+	QualityLabel  string
+	CurrentStream string
+	Manual        string
+	Automatic     bool
 	// OneStream is true when the camera renders both quality names to the same
-	// stream, so the quality control is absent and the pane says so instead.
-	OneStream bool
-	Player    *liveSelection
-	ChooseURL string
-	CSRF      string
-	Cameras   []liveCameraOption
-	FullURL   string
+	// stream, so the selector shows one stream and the pane says why.
+	OneStream       bool
+	OneStreamReason string
+	Player          *liveSelection
+	ChooseURL       string
+	CSRF            string
+	Cameras         []liveCameraOption
+	Qualities       []liveQualityOption
+	// ProfileChoices and ProfileHint keep the single-camera route's shareable
+	// main/sub link control, now inside the pane's own overlay.
+	ProfileChoices []liveProfileChoice
+	ProfileHint    string
+	// CameraLinks is the single-camera route's camera picker, also inside the
+	// pane's own overlay.
+	CameraLinks []liveCameraLink
+	FullURL     string
 }
 
 // liveGrid is the resolved wall: the concrete pane list plus the controls that
@@ -214,11 +219,20 @@ type liveGrid struct {
 	Prior int
 	// NotInWall counts enabled cameras beyond the largest layout.
 	NotInWall int
-	// Selected is the pane whose quality the overlay controls on first paint.
+	// AutoLayout is what the automatic choice resolves to now. The picker can
+	// apply it in place without a render.
+	AutoLayout int
+	// LayoutValue is the stored choice: "auto" or one of the counts.
+	LayoutValue string
+	// CameraTemplates is one hidden player island per enabled camera. The
+	// browser clones one when a camera that is not currently on the wall is
+	// assigned to a pane, so the assignment does not reload the page.
+	CameraTemplates []liveSelection
+	// Selected is the pane the keyboard model starts on.
 	Selected livePane
-	// Qualities is the three-way control for the selected pane.
-	Qualities []liveQualityOption
-	// CameraChoices is the selected pane's camera picker.
+	// Qualities and CameraChoices mirror the selected pane for tests and the
+	// single-camera route; each pane carries its own copies in the template.
+	Qualities     []liveQualityOption
 	CameraChoices []liveCameraOption
 	// ProfileChoices is the single-camera route's link-based profile control.
 	ProfileChoices []liveProfileChoice
@@ -384,7 +398,9 @@ func writeLiveLayout(w http.ResponseWriter, layout liveLayout) {
 
 // resolveLiveGrid validates the stored layout against the current inventory,
 // resolves the automatic layout from it, drops unknown and duplicate cameras,
-// and returns the concrete pane list. Pane order is reading order.
+// and returns all sixteen pane slots. Pane order is reading order; a slot
+// beyond the current layout is rendered hidden so a layout change can reveal it
+// without rebuilding the wall.
 func resolveLiveGrid(layout liveLayout, cameras []config.Camera, csrf string) liveGrid {
 	byID := make(map[string]config.Camera, len(cameras))
 	for _, camera := range cameras {
@@ -395,9 +411,10 @@ func resolveLiveGrid(layout liveLayout, cameras []config.Camera, csrf string) li
 	if automatic {
 		count = liveAutoLayout(len(cameras))
 	}
-	assigned := make([]string, count)
-	seen := make(map[string]bool, count)
-	for index := 0; index < count; index++ {
+	autoLayout := liveAutoLayout(len(cameras))
+	assigned := make([]string, liveMaxTiles)
+	seen := make(map[string]bool, liveMaxTiles)
+	for index := 0; index < liveMaxTiles; index++ {
 		if index >= len(layout.Tiles) {
 			continue
 		}
@@ -412,7 +429,7 @@ func resolveLiveGrid(layout liveLayout, cameras []config.Camera, csrf string) li
 		seen[id] = true
 	}
 	// A brand new device has no stored assignment at all; the automatic layout
-	// fills the panes in configuration order and leaves the rest empty.
+	// fills the visible panes in configuration order and leaves the rest empty.
 	if automatic && len(layout.Tiles) == 0 {
 		for index := 0; index < count && index < len(cameras); index++ {
 			assigned[index] = cameras[index].ID
@@ -421,39 +438,45 @@ func resolveLiveGrid(layout liveLayout, cameras []config.Camera, csrf string) li
 	layouts := make([]liveLayoutChoice, 0, len(liveLayoutCounts)+1)
 	layouts = append(layouts, liveLayoutChoice{
 		Value:   "auto",
-		Label:   liveLayoutShortLabels[0],
 		Name:    liveLayoutLabels[0],
+		Icon:    liveLayoutIcon("auto"),
 		Current: automatic,
 	})
 	for _, allowed := range liveLayoutCounts {
 		layouts = append(layouts, liveLayoutChoice{
 			Value:   strconv.Itoa(allowed),
-			Label:   liveLayoutShortLabels[allowed],
 			Name:    liveLayoutLabels[allowed],
+			Icon:    liveLayoutIcon(strconv.Itoa(allowed)),
 			Current: !automatic && count == allowed,
 		})
 	}
-	effectiveLayout := count
+	layoutValue := strconv.Itoa(count)
+	if automatic {
+		layoutValue = "auto"
+	}
 	grid := liveGrid{
-		Layout:      effectiveLayout,
-		LayoutLabel: liveLayoutLabels[effectiveLayout],
+		Layout:      count,
+		LayoutLabel: liveLayoutLabels[count],
+		LayoutValue: layoutValue,
+		AutoLayout:  autoLayout,
 		Layouts:     layouts,
 		LayoutURL:   BasePath + "/live/layout",
 		PaneURL:     BasePath + "/live/pane",
 		CSRF:        csrf,
 		Prior:       liveMaxTiles,
-		Panes:       make([]livePane, 0, count),
+		Panes:       make([]livePane, 0, liveMaxTiles),
 	}
 	if len(cameras) > liveMaxTiles {
 		grid.NotInWall = len(cameras) - liveMaxTiles
 	}
-	quality := liveAutomaticQuality(effectiveLayout)
-	for index := 0; index < count; index++ {
+	quality := liveAutomaticQuality(count)
+	for index := 0; index < liveMaxTiles; index++ {
 		pane := livePane{
 			Number:    index + 1,
 			Area:      fmt.Sprintf("p%d", index+1),
 			TitleID:   fmt.Sprintf("live-pane-title-%d", index+1),
 			PaneID:    fmt.Sprintf("live-pane-%d", index+1),
+			Visible:   index < count,
 			ChooseURL: grid.PaneURL,
 			CSRF:      csrf,
 			Cameras:   livePaneCameraOptions(cameras, assigned, index),
@@ -474,24 +497,69 @@ func resolveLiveGrid(layout liveLayout, cameras []config.Camera, csrf string) li
 				pane.Quality = stored
 			}
 			pane.OneStream = len(render.DistinctLiveQualities(camera)) < 2
+			if pane.OneStream {
+				pane.OneStreamReason = "One stream. This camera does not report a second stream, so main and sub use the same picture."
+			}
 			pane.FullURL = BasePath + "/live/" + url.PathEscape(camera.ID)
-			pane.Player = livePanePlayer(camera, index, effectiveLayout, pane.Quality, pane.Automatic, pane.OneStream)
+			pane.Player = livePanePlayer(camera, index, count, pane.Quality, pane.Automatic, pane.OneStream)
 		} else {
 			pane.Empty = true
 			pane.Label = fmt.Sprintf("Empty pane %d", index+1)
 			pane.Quality = liveQualitySnapshot
 		}
-		if pane.Occupied {
-			pane.QualityLabel = liveQualityLabel(pane.Quality)
-		}
+		pane.QualityLabel = liveQualityLabel(pane.Quality)
+		pane.CurrentStream = liveCurrentStream(pane)
+		pane.Qualities = liveQualityOptions(pane.Quality)
 		grid.Panes = append(grid.Panes, pane)
 	}
-	if len(grid.Panes) != 0 {
+	for index := range grid.Panes {
+		if grid.Panes[index].Visible && grid.Panes[index].Occupied {
+			grid.Selected = grid.Panes[index]
+			break
+		}
+	}
+	if grid.Selected.Number == 0 {
 		grid.Selected = grid.Panes[0]
 	}
-	grid.Qualities = liveQualityOptions(grid.Selected.Quality)
-	grid.CameraChoices = liveCameraChoices(cameras, grid.Selected.CameraID)
+	grid.Qualities = grid.Selected.Qualities
+	grid.CameraChoices = grid.Selected.Cameras
+	for _, camera := range cameras {
+		grid.CameraTemplates = append(grid.CameraTemplates, *liveCameraTemplate(camera, count))
+	}
 	return grid
+}
+
+// liveCurrentStream is the pane's current-stream indicator. It names what is
+// playing in the same words as the selected option in the selector.
+func liveCurrentStream(pane livePane) string {
+	if !pane.Occupied {
+		return "No camera assigned."
+	}
+	if pane.OneStream {
+		return "One stream. This camera does not report a second stream, so main and sub use the same picture."
+	}
+	return "Current stream: " + liveQualityLabel(pane.Quality) + "."
+}
+
+// liveLayoutIcon returns the static SVG that depicts a layout's pane
+// arrangement. The picker shows the shape instead of a number; the accessible
+// name comes from the label text beside it.
+func liveLayoutIcon(value string) template.HTML {
+	icon, ok := liveLayoutIcons[value]
+	if !ok {
+		return ""
+	}
+	return template.HTML(`<svg class="live-layout-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">` + icon + `</svg>`)
+}
+
+var liveLayoutIcons = map[string]string{
+	"auto": `<rect x="3" y="3" width="7" height="7" rx="0.5"/><rect x="14" y="3" width="7" height="7" rx="0.5"/><rect x="3" y="14" width="7" height="7" rx="0.5"/><rect x="14" y="14" width="7" height="7" rx="0.5" stroke-dasharray="2 2"/>`,
+	"1":    `<rect x="3" y="3" width="18" height="18" rx="0.5"/>`,
+	"4":    `<rect x="3" y="3" width="8.5" height="8.5" rx="0.5"/><rect x="12.5" y="3" width="8.5" height="8.5" rx="0.5"/><rect x="3" y="12.5" width="8.5" height="8.5" rx="0.5"/><rect x="12.5" y="12.5" width="8.5" height="8.5" rx="0.5"/>`,
+	"6":    `<rect x="3" y="3" width="11.5" height="11.5" rx="0.5"/><rect x="16" y="3" width="5" height="5" rx="0.5"/><rect x="16" y="9.5" width="5" height="5" rx="0.5"/><rect x="3" y="16" width="5" height="5" rx="0.5"/><rect x="9.5" y="16" width="5" height="5" rx="0.5"/><rect x="16" y="16" width="5" height="5" rx="0.5"/>`,
+	"8":    `<rect x="3" y="3" width="13.25" height="13.25" rx="0.5"/><rect x="17.25" y="3" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="7.75" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="12.5" width="3.75" height="3.75" rx="0.5"/><rect x="3" y="17.25" width="3.75" height="3.75" rx="0.5"/><rect x="7.75" y="17.25" width="3.75" height="3.75" rx="0.5"/><rect x="12.5" y="17.25" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="17.25" width="3.75" height="3.75" rx="0.5"/>`,
+	"9":    `<rect x="3" y="3" width="5" height="5" rx="0.5"/><rect x="9.5" y="3" width="5" height="5" rx="0.5"/><rect x="16" y="3" width="5" height="5" rx="0.5"/><rect x="3" y="9.5" width="5" height="5" rx="0.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="0.5"/><rect x="16" y="9.5" width="5" height="5" rx="0.5"/><rect x="3" y="16" width="5" height="5" rx="0.5"/><rect x="9.5" y="16" width="5" height="5" rx="0.5"/><rect x="16" y="16" width="5" height="5" rx="0.5"/>`,
+	"16":   `<rect x="3" y="3" width="3.75" height="3.75" rx="0.5"/><rect x="7.75" y="3" width="3.75" height="3.75" rx="0.5"/><rect x="12.5" y="3" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="3" width="3.75" height="3.75" rx="0.5"/><rect x="3" y="7.75" width="3.75" height="3.75" rx="0.5"/><rect x="7.75" y="7.75" width="3.75" height="3.75" rx="0.5"/><rect x="12.5" y="7.75" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="7.75" width="3.75" height="3.75" rx="0.5"/><rect x="3" y="12.5" width="3.75" height="3.75" rx="0.5"/><rect x="7.75" y="12.5" width="3.75" height="3.75" rx="0.5"/><rect x="12.5" y="12.5" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="12.5" width="3.75" height="3.75" rx="0.5"/><rect x="3" y="17.25" width="3.75" height="3.75" rx="0.5"/><rect x="7.75" y="17.25" width="3.75" height="3.75" rx="0.5"/><rect x="12.5" y="17.25" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="17.25" width="3.75" height="3.75" rx="0.5"/>`,
 }
 
 // liveQualityLabel is the owner-facing quality name in the overlay.
@@ -528,12 +596,13 @@ func liveQualityAt(qualities []string, index int) string {
 	return qualities[index]
 }
 
-// liveQualityOptions is the three-way quality control: main, sub and snapshot.
+// liveQualityOptions is the explicit stream selector: main stream, sub stream
+// and snapshots. The selected option is the quality that is playing.
 func liveQualityOptions(current string) []liveQualityOption {
 	return []liveQualityOption{
-		{Value: liveQualityMain, Label: "Main", Current: current == liveQualityMain},
-		{Value: liveQualitySub, Label: "Sub", Current: current == liveQualitySub},
-		{Value: liveQualitySnapshot, Label: "Snapshot", Current: current == liveQualitySnapshot},
+		{Value: liveQualityMain, Label: "Main stream", Current: current == liveQualityMain},
+		{Value: liveQualitySub, Label: "Sub stream", Current: current == liveQualitySub},
+		{Value: liveQualitySnapshot, Label: "Snapshots", Current: current == liveQualitySnapshot},
 	}
 }
 
@@ -561,6 +630,13 @@ func livePaneCameraOptions(cameras []config.Camera, assigned []string, index int
 
 // livePanePlayer is one pane's player island. The profile is the quality the
 // pane asks the proxy for; main and sub resolve to the camera's own streams.
+func liveCameraTemplate(camera config.Camera, layout int) *liveSelection {
+	quality := liveAutomaticQuality(layout)
+	selection := livePanePlayer(camera, 0, layout, quality, true, len(render.DistinctLiveQualities(camera)) < 2)
+	selection.ElementID = "live-camera-template-" + camera.ID
+	return selection
+}
+
 func livePanePlayer(camera config.Camera, index, layout int, quality string, automatic, oneStream bool) *liveSelection {
 	profile := liveSnapshotProfile(layout, quality)
 	manual := ""
@@ -582,6 +658,7 @@ func livePanePlayer(camera config.Camera, index, layout int, quality string, aut
 		LoginURL:    BasePath + "/login?next=" + url.QueryEscape(BasePath+"/live"),
 		ElementID:   fmt.Sprintf("live-tile-player-%d", index+1),
 		TileIndex:   index,
+		PaneNumber:  index + 1,
 		InGrid:      true,
 	}
 }
@@ -620,6 +697,12 @@ func (h *handler) setLiveLayout(w http.ResponseWriter, r *http.Request) {
 		Qualities: resolved.tileQualities(),
 	}
 	writeLiveLayout(w, next)
+	if r.Header.Get("X-Bittern-Inline") == "1" {
+		// The wall changes the layout and its visible panes in place, so the
+		// players that stay keep running (ADR 0038).
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	http.Redirect(w, r, BasePath+"/live", http.StatusSeeOther)
 }
 
@@ -640,7 +723,7 @@ func (h *handler) setLivePane(w http.ResponseWriter, r *http.Request) {
 	stored := liveLayoutFromRequest(r)
 	resolved := resolveLiveGrid(stored, cameras, "")
 	index, err := strconv.Atoi(strings.TrimSpace(r.PostFormValue("pane")))
-	if err != nil || index < 1 || index > len(resolved.Panes) {
+	if err != nil || index < 1 || index > resolved.Layout {
 		h.renderLiveFormError(w, r, "That pane is not on the live page",
 			"The pane number was not one of the panes Bittern shows. Nothing was changed.",
 			"Open the live page and choose a pane again.")
