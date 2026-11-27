@@ -64,7 +64,7 @@ Check: Q3 in [the professional test](professional-test.md), the mapping table be
   --color-action-hover: #084a3c;
   --color-on-action: var(--neutral-0);
   --color-link: #0b4f8a;
-  --color-focus: #0b5d4b;
+  --color-focus: #1a7a5f;
   --color-ok-text: #14532d;
   --color-ok-surface: #e7f4ec;
   --color-degraded-text: #7a4b00;
@@ -77,6 +77,9 @@ Check: Q3 in [the professional test](professional-test.md), the mapping table be
   --color-disabled-surface: var(--neutral-100);
   --color-notice-text: #0b4f8a;
   --color-notice-surface: #e8f0f8;
+  /* A short scrim behind a camera name over video. */
+  --color-scrim: rgb(28 27 24 / 0.72);
+  --color-on-scrim: #ffffff;
 
   /* Type. */
   --font-family-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -161,7 +164,7 @@ overall status badge.
 | `--color-action-hover` | `#084a3c` | Primary button hover and active background |
 | `--color-on-action` | `#ffffff` | Text and icon on a filled action |
 | `--color-link` | `#0b4f8a` | Inline and navigation links |
-| `--color-focus` | `#0b5d4b` | The one focus ring |
+| `--color-focus` | `#1a7a5f` | The one focus ring, at or above 3:1 on the page, a surface and a dark pane |
 | `--color-ok-text` | `#14532d` | Ok text and border |
 | `--color-ok-surface` | `#e7f4ec` | Ok badge and notice tint |
 | `--color-degraded-text` | `#7a4b00` | Degraded text and border |
@@ -174,6 +177,8 @@ overall status badge.
 | `--color-disabled-surface` | `#ece9e1` | Disabled control surface |
 | `--color-notice-text` | `#0b4f8a` | Informational notice text |
 | `--color-notice-surface` | `#e8f0f8` | Informational notice tint |
+| `--color-scrim` | `rgb(28 27 24 / 0.72)` | Camera name scrim over video |
+| `--color-on-scrim` | `#ffffff` | Camera name text over the scrim |
 
 ### Contrast floors
 
@@ -191,8 +196,9 @@ control that explains itself still has to be readable.
 | `--color-link` on `--color-surface` | 8.40:1 | 4.5:1 | Navigation and links in a card |
 | `--color-on-action` on `--color-action` | 7.83:1 | 4.5:1 | Primary button |
 | `--color-on-action` on `--color-action-hover` | 10.22:1 | 4.5:1 | Primary button hover and active |
-| `--color-focus` on `--color-page` | 7.18:1 | 3:1 | Focus ring |
-| `--color-focus` on `--color-surface` | 7.83:1 | 3:1 | Focus ring |
+| `--color-focus` on `--color-page` | 4.82:1 | 3:1 | Focus ring |
+| `--color-focus` on `--color-surface` | 5.26:1 | 3:1 | Focus ring |
+| `--color-focus` on `--color-text` | 3.27:1 | 3:1 | Inset focus ring over a dark video pane |
 | `--color-border-control` on `--color-surface` | 3.64:1 | 3:1 | Input and button boundary |
 | `--color-border-control` on `--color-page` | 3.33:1 | 3:1 | Boundary against the page |
 | `--color-ok-text` on `--color-ok-surface` | 8.05:1 | 4.5:1 | Ok badge |
@@ -202,6 +208,7 @@ control that explains itself still has to be readable.
 | `--color-unknown-text` on `--color-unknown-surface` | 8.94:1 | 4.5:1 | Unknown badge |
 | `--color-disabled-text` on `--color-disabled-surface` | 6.25:1 | 4.5:1 | Product floor, WCAG exempt |
 | `--color-notice-text` on `--color-notice-surface` | 7.30:1 | 4.5:1 | Informational notice |
+| `--color-on-scrim` on `--color-scrim` over `--neutral-0` | 6.77:1 | 4.5:1 | Camera name over the lightest video frame |
 | `--color-border-subtle` on `--color-surface` | 1.72:1 | none | Decorative only, never the sole boundary of a control |
 
 `--color-border-subtle` is deliberately below 3:1. It may separate two regions that are already

@@ -19,6 +19,27 @@ Versions are internal to the design documents. Bittern does not publish a packag
 second consumer, so there is no SemVer promise, no changeset tooling, and no codemod. A version is
 a date-stamped batch of class changes; the date is how it maps to an app release.
 
+## v0.23: 2026-11-27
+
+- Class: token value, component and pattern implementation
+- What changed: the v0.22 wall is implemented. The live template is one wall of panes with no
+  per-pane chrome, one `Choose camera` control in an empty pane on the JavaScript path, and a short
+  name scrim in each pane. The overlay is a single control surface inside the wall: the selected
+  pane's name and quality, its main, sub and snapshot choice, the camera picker, the seven-option
+  layout group, the full screen control and the camera state line. Two tokens are added for the name
+  scrim (`--color-scrim`, `--color-on-scrim`), and `--color-focus` moves from `#0b5d4b` to `#1a7a5f`
+  because the inset ring sits on video and the deeper green was 2.20:1 on the dark pane. The new
+  value is 4.82:1 on the page, 5.26:1 on a surface and 3.27:1 on the pane.
+- Why: the wall is now the shipped live view, so the pattern and component text describes code
+  rather than a target. The focus ring is the one treatment the selected pane has, and it has to be
+  visible on a camera picture; ADR 0037 fixes the answer as a token change, not a second treatment.
+- Evidence: [ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md),
+  [patterns.md](patterns.md#live-view) LV9, LV10 and LV12 to LV17,
+  [components.md](components.md#live-player-island), and
+  [the wall implementation note](../notes/2026-11-27-nvr-grid-wall.md). The browser check reads the
+  six layouts at four widths in normal and full screen and the hidden, shown and focused overlay
+  states.
+
 ## v0.22: 2026-11-27
 
 - Class: pattern and component

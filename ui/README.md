@@ -7,9 +7,10 @@ status and health, update controls, logs, support bundle download, and reset. It
 over a local API and never writes rendered system files itself; mutations go through the agent apply
 transaction. Live view follows [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md), with the
 wall, per-pane quality and full-screen rules in
-[ADR 0037](../docs/adr/0037-nvr-grid-per-pane-quality-and-full-screen.md); the single-camera view and
-the first grid slice are implemented, and the ADR 0037 wall, overlay and capacity model are not. The
-Frigate UI is not a product surface.
+[ADR 0037](../docs/adr/0037-nvr-grid-per-pane-quality-and-full-screen.md). The six-pane layouts, the
+per-pane quality control, the capacity model, the overlay and full screen are implemented; the
+number of live panes is decided by the device class and its own dropped-frame counter. The Frigate UI
+is not a product surface.
 
 The product serves the UI over TLS on `0.0.0.0:443` with a self-signed certificate generated at
 first boot. The wizard and every page show its SHA-256 fingerprint; the browser warning is explained
@@ -125,7 +126,7 @@ The BIT-020 column is the route's responsive flag. Regenerate the table from `ag
 | GET | `/ui/live` | `live` | Yes | Yes |
 | GET | `/ui/live/{camera}` | `live` | Yes | Yes |
 | POST | `/ui/live/layout` | - | Yes | No |
-| POST | `/ui/live/tile` | - | Yes | No |
+| POST | `/ui/live/pane` | - | Yes | No |
 | GET | `/ui/live/{camera}/status` | `live-status` | Yes | No |
 | GET | `/ui/live/media/{camera}/{profile}/{kind...}` | - | Yes | No |
 | GET | `/ui/status` | `status` | Yes | Yes |
@@ -333,12 +334,14 @@ Related: [UI skeleton note](../docs/notes/2026-11-14-ui-skeleton.md),
 
 ## Live view
 
-Live view follows [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md). Slice 1a implements
-`/ui/live` and `/ui/live/{camera}` as a single-camera view: the page reads the enabled cameras from
-`appliance.yaml`, shows a simple picker when more than one exists, and keeps the player in a stable
-node outside every HTMX swap region. A sibling line polls the camera's configuration state every 15
-seconds. The player is never inside that poll, because a swap would destroy playback, fullscreen and
-focus ([UX-14](../docs/principles.md#ux-14-live-updates-must-not-disturb-state-the-user-owns)).
+Live view follows [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md) for the media path and
+the authentication boundary, and [ADR 0037](../docs/adr/0037-nvr-grid-per-pane-quality-and-full-screen.md)
+for the wall. `/ui/live` is the wall; `/ui/live/{camera}` is the same wall with one pane fixed to that
+camera and a link-based main and sub choice. The page reads the enabled cameras from
+`appliance.yaml`, and every player is a stable node outside every HTMX swap region. One camera state
+line for the selected pane polls every 15 seconds; the player is never inside that poll, because a
+swap would destroy playback, fullscreen and focus
+([UX-14](../docs/principles.md#ux-14-live-updates-must-not-disturb-state-the-user-owns)).
 
 The browser never receives an upstream URL, host, port, go2rtc stream name or camera address. It
 asks for one of Bittern's own media routes:
@@ -361,44 +364,91 @@ following. It drops the browser cookie and authorization header before the upstr
 Every media request passes the administrator session. A navigation without a session gets the login
 page with a bounded return path; a fragment gets `HX-Redirect` to its parent page and media gets
 `401` with no login HTML. A WebSocket revalidates the session every 30 seconds and closes when it
-ends. The proxy keeps the hard nine-connection ceiling per session.
+ends. The proxy keeps a hard sixteen-connection ceiling per session.
 
-`/ui/live` is the grid. A layout is a preset of one, two, four or nine tiles plus a camera for each
-tile; the server resolves it at render time from `bittern_live_layout`, a first-party, `HttpOnly`,
-`Secure`, `SameSite=Strict` cookie scoped to `/ui/live` with a one-year lifetime. The cookie holds
-the preset and camera IDs only. Unknown or duplicate cameras are dropped, more than nine tiles is
-clamped to nine, and a missing or broken cookie falls back to automatic without an error. Automatic
-shows one tile per enabled camera. Changing the preset or assigning a camera is an ordinary form
-POST; with JavaScript a tile assignment replaces only that tile's island.
+### The wall
 
-The page measures the viewport and applies the ADR 0034 ceiling: one active camera below 44rem,
-four from 44rem to below 80rem, nine at 80rem and above. A saved layout above the ceiling starts
-only the allowed tiles, leaves the rest as compact rows with their own actions, and explains the
-limit in one sentence. The proxy keeps its own hard maximum of nine concurrent media sessions per
-session, counted from held WebSockets and recently active HLS session ids; the browser cannot raise
-it.
+The layout set is 1, 4, 6, 8, 9 and 16 panes. `agent/internal/ui/live_layout.go` is the only place
+the geometry is decided: `liveAreasForCount` returns a square cell grid and one rectangle per pane,
+and `templateAreas` renders the CSS `grid-template-areas` value. For 6 and 8 the side is half the
+pane count, the primary is the first side-1 rows and columns, the next side-1 panes are the rest of
+the last column, and the last side panes are the bottom row. The stylesheet holds the six matching
+blocks because the CSP forbids an inline style; `TestStylesheetMatchesTheAreaFunction` fails if the
+two drift. `auto` is not a layout: it resolves to the smallest layout that holds every enabled
+camera, capped at 16.
 
-Every tile is a separate player island outside every HTMX swap region. A tile's sibling
-camera-state line polls every 15 seconds and touches nothing else. The grid controller owns the
-ceiling, the full-width selection and the one-tile replacement. Full width switches that tile to
-`main`; leaving it switches back to `sub`. A failing camera keeps its own state sentence while the
-others play.
+The wall fills the view from below the header to the bottom of the viewport on both axes, with no
+page scroll. Panes touch except for the one pixel `--border-width` gap, and a pane has no border,
+radius, padding, surface or card. The video and the snapshot are contained and letterboxed; the
+picture is never cropped. An empty pane shows one `Choose camera` control on the JavaScript path,
+and the select and submit form without JavaScript. A pane in a failure state keeps its camera name
+and one sentence.
 
-`ui/static/live-player.js` owns each island's video element, MSE `SourceBuffer` and WebSocket. Its
-states are connecting, playing, switching, stalled, reconnecting, idle (not started on this
-screen), offline, unsupported and session ended. Recovery is bounded to three retries with visible
-1, 2 and 4 second waits, then HLS where the browser supports it, then the snapshot with a retry
-action. The current camera model has one RTSP path, so `main` and `sub` resolve to the same path and
-the single-camera page says so. The profile control is a normal link without JavaScript and a
-runtime switch with it.
+The layout cookie is `bittern_live_layout`, a first-party, `HttpOnly`, `Secure`, `SameSite=Strict`
+cookie scoped to `/ui/live` with a one-year lifetime. It carries the layout, one camera per pane and
+one quality per pane, and nothing else. Unknown cameras and duplicates are dropped, a stored count
+outside the set clamps down to the largest layout at or below it, and a missing or broken cookie is
+automatic. `POST /ui/live/layout` stores a layout; `POST /ui/live/pane` stores one pane's quality or
+camera. Both are ordinary form submissions, so both work without JavaScript.
 
-The media area is an aspect box, not the video element's intrinsic size. It reserves 16:9 before
-the first frame, and the video is contained inside it with `object-fit: contain`. The desktop grid
-sizes its rows to the viewport, so nine tiles fit without page scrolling even at 1280 by 800. On a
-phone the active tile fills the available area and the remaining tiles scroll inside the grid, not
-the document. Each player also has a browser full-screen control. Full screen requests the player
-root, keeps the media contained, hides document overflow, and exits through the control, Escape or
-Back; the grid and the other streams keep their state.
+### Per-pane quality
+
+Automatic quality is `main` in the one-pane layout and `sub` in every multi-pane layout. The
+selected pane has a three-way control for main, sub and snapshot. Choosing main or sub closes the
+current media connection and opens the same authenticated route with the other profile: the page
+does not reload and the player island is not swapped. A manual choice is stored per pane in the
+cookie and is never overridden by automation. A camera whose `distinct_qualities` is one stream has
+no control and says `One stream` instead.
+
+### Capacity
+
+Capacity is the number of automatic panes allowed to hold a live media connection. The class prior
+is 4 below 44rem, 8 from 44rem to below 80rem, and 16 at 80rem and above, and the proxy maximum is
+16. The browser's own `getVideoPlaybackQuality()` counters are read every two seconds and the last
+six samples cover ten seconds. A pane is hot above 2 percent dropped in the current and the previous
+window. `ui/static/live-capacity.js` is the one state machine: a hot automatic main pane steps down
+to sub before any demotion, one automatic pane is demoted per twenty-second window in
+least-visible order, never a manual pane, promotion needs 300 seconds since the last demotion and a
+60-second quiet window below 0.5 percent, and each direction moves one pane per interval. Panes
+beyond capacity show the snapshot and refresh it every 15 seconds while the tab is visible. The wall
+exposes `data-device-prior`, `data-live-count` and `data-live-capacity`, and says in the overlay when
+a manual choice puts it above the tested capacity.
+
+### Overlay and full screen
+
+The overlay is the only control surface: the selected pane's name and quality, its quality control,
+its camera picker, the seven-option layout group, the full screen control and the camera state line.
+It is shown on pointer movement, a key press, a tap or focus, and hides after 3000 ms. The hidden
+state is `data-live-overlay="hidden"` with `opacity: 0`, `pointer-events: none`, `visibility: hidden`
+and the `inert` attribute, so a hidden overlay cannot take focus or intercept a click meant for the
+video. Without JavaScript it is visible by default and both controls are real forms.
+
+Full screen requests `requestFullscreen()` on the wall, so the current layout fills the whole screen
+with no header, toolbar, border or padding and the same one pixel gap. Entering full screen never
+changes the layout, and leaving it keeps the page, the selection and every connection.
+
+### Keyboard and selection
+
+The wall is one tab stop with a roving tabindex on the selected pane. Arrow keys move by the centre
+points of the rendered areas, Home goes to the first pane and End to the last. Tab reveals the
+overlay and focuses the selected pane's quality control; Shift+Tab reveals it with focus on the last
+control. Focus inside the overlay suspends hiding, and Escape exits full screen or hides the overlay
+and returns focus to the selected pane. The selected pane is shown by the inset focus ring and the
+overlay text, never by a border, and its state changes are announced in a polite live region inside
+that pane only.
+
+### Player
+
+`ui/static/live-player.js` owns the wall and one island per pane. A player's states are connecting,
+playing, switching, stalled, reconnecting, snapshot, offline, unsupported and session ended.
+Recovery is bounded to three retries with visible 1, 2 and 4 second waits, then HLS where the
+browser supports it, then the snapshot with a retry action. The player refuses to mount inside an
+HTMX swap region at runtime, and a template guard test checks the same rule.
+
+The media box is the pane, not the video element's intrinsic size, so metadata cannot move the
+layout and the picture is contained inside it. The current camera model has one RTSP path, so `main`
+and `sub` resolve to the same path and the page says one stream until BIT-027 collects real ONVIF
+profiles.
 
 ## Boundaries
 

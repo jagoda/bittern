@@ -7,9 +7,10 @@ import (
 
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/livestream"
+	"bittern.invalid/agent/internal/render"
 )
 
-// liveCameraLink is one entry in the camera picker.
+// liveCameraLink is one entry in the single-camera picker.
 type liveCameraLink struct {
 	ID       string
 	Name     string
@@ -25,6 +26,10 @@ type liveSelection struct {
 	Name        string
 	Profile     string
 	ProfileName string
+	Quality     string
+	Manual      string
+	Automatic   bool
+	OneStream   bool
 	Profiles    []liveProfileChoice
 	StatusURL   string
 	SnapshotURL string
@@ -48,7 +53,6 @@ type liveProfileChoice struct {
 type liveView struct {
 	Cameras     []liveCameraLink
 	Selected    *liveSelection
-	Single      *liveTile
 	Grid        *liveGrid
 	Profile     string
 	ProfileName string
@@ -56,9 +60,9 @@ type liveView struct {
 	NoCameras   bool
 }
 
-// showLive renders the grid from the per-device layout cookie. The server
-// resolves the assignment; the browser only remembers the preset and the
-// cameras (ADR 0034 sections 4 and 5).
+// showLive renders the wall from the per-device layout cookie. The server
+// resolves the panes; the browser measures the viewport and owns the capacity
+// (ADR 0037 sections 1, 3 and 4).
 func (h *handler) showLive(w http.ResponseWriter, r *http.Request) {
 	cameras, ok := h.liveCameras(w, r)
 	if !ok {
@@ -73,10 +77,11 @@ func (h *handler) showLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	grid := resolveLiveGrid(liveLayoutFromRequest(r), cameras, liveCSRF(r))
+	grid.Preview = h.preview
 	h.render(w, r, http.StatusOK, "live", pageData{
 		Title:     "Live",
 		Preview:   h.preview,
-		BodyClass: "live-grid-page",
+		BodyClass: "live-wall-page",
 		Live:      liveView{Grid: &grid},
 	})
 }
@@ -142,6 +147,10 @@ func (h *handler) liveCameras(w http.ResponseWriter, r *http.Request) ([]config.
 	return cameras, true
 }
 
+// renderLive is the single-camera view: one pane of the wall, with the camera
+// fixed by the route and the profile chosen by the page's own link control.
+// ADR 0034 section 5 keeps this route; ADR 0037 gives it the wall's pane and
+// overlay.
 func (h *handler) renderLive(w http.ResponseWriter, r *http.Request, cameras []config.Camera, id string) {
 	profile := strings.TrimSpace(r.URL.Query().Get("profile"))
 	if !livestream.ValidProfile(profile) {
@@ -185,11 +194,15 @@ func (h *handler) renderLive(w http.ResponseWriter, r *http.Request, cameras []c
 			Selected: choice == profile,
 		})
 	}
+	oneStream := len(render.DistinctLiveQualities(selected)) < 2
 	selection := &liveSelection{
 		ID:          selected.ID,
 		Name:        selected.Name,
 		Profile:     profile,
 		ProfileName: livestream.ProfileLabel(profile),
+		Quality:     profile,
+		Automatic:   false,
+		OneStream:   oneStream,
 		Profiles:    profiles,
 		StatusURL:   BasePath + "/live/" + url.PathEscape(selected.ID) + "/status",
 		SnapshotURL: BasePath + "/live/media/" + url.PathEscape(selected.ID) + "/" + url.PathEscape(profile) + "/snapshot.jpg",
@@ -199,21 +212,46 @@ func (h *handler) renderLive(w http.ResponseWriter, r *http.Request, cameras []c
 		ElementID:   "live-player",
 		TileIndex:   -1,
 	}
-	// The single-camera page renders the same island component as a grid tile.
-	single := &liveTile{
-		Index:    -1,
-		TitleID:  "live-camera-title",
-		Occupied: true,
-		Player:   selection,
-		FullURL:  BasePath + "/live/" + url.PathEscape(selected.ID),
+	pane := livePane{
+		Number:       1,
+		Area:         "p1",
+		TitleID:      "live-camera-title",
+		PaneID:       "live-pane-1",
+		Occupied:     true,
+		Label:        selected.Name,
+		CameraID:     selected.ID,
+		CameraName:   selected.Name,
+		Quality:      profile,
+		QualityLabel: liveQualityLabel(profile),
+		Manual:       profile,
+		OneStream:    oneStream,
+		Player:       selection,
+		FullURL:      BasePath + "/live/" + url.PathEscape(selected.ID),
+	}
+	grid := liveGrid{
+		Layout:         1,
+		LayoutLabel:    liveLayoutLabels[1],
+		Panes:          []livePane{pane},
+		Selected:       pane,
+		PaneURL:        BasePath + "/live/pane",
+		CSRF:           liveCSRF(r),
+		Prior:          liveMaxTiles,
+		Single:         true,
+		Cameras:        links,
+		Qualities:      liveQualityOptions(profile),
+		ProfileChoices: profiles,
+		ProfileHint:    selection.ProfileHint,
+		NextURL:        BasePath + "/live/" + url.PathEscape(selected.ID),
+		Preview:        h.preview,
 	}
 	h.render(w, r, http.StatusOK, "live", pageData{
-		Title:   "Live",
-		Preview: h.preview,
+		Title:     "Live",
+		Preview:   h.preview,
+		BodyClass: "live-wall-page",
 		Live: liveView{
 			Cameras:     links,
 			Selected:    selection,
-			Single:      single,
+			Grid:        &grid,
 			Profile:     profile,
 			ProfileName: selection.ProfileName,
 			StatusURL:   selection.StatusURL,

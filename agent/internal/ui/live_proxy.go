@@ -22,7 +22,7 @@ import (
 
 const (
 	defaultGo2RTCURL   = "http://127.0.0.1:1984"
-	liveMaxConnections = 9
+	liveMaxConnections = 16
 	liveDialTimeout    = 5 * time.Second
 	liveHeaderTimeout  = 10 * time.Second
 	liveRecheckEvery   = 30 * time.Second

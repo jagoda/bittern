@@ -1680,8 +1680,12 @@ live view slice 1a note](../notes/2026-11-26-live-view-slice-1a.md), [the live v
 note](../notes/2026-11-26-live-view-slice-1b.md) and [the live view sizing
 note](../notes/2026-11-26-live-view-sizing.md). [ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md)
 replaces the 1/2/4/9 presets, the tile chrome and the 1/4/9 ceiling with the six layouts, per-pane
-quality and the capacity model; that work is not started. PTZ, audio, event review and playback
-remain out of scope.
+quality and the capacity model; that replacement landed on 2026-11-27 with the geometry function, the
+per-pane quality control and cookie field, the class priors and the capacity state machine, the
+snapshot interval, full screen of the layout, the overlay and its keyboard model, the inset focus
+ring and the browser cases. Evidence: [the wall implementation
+note](../notes/2026-11-27-nvr-grid-wall.md). The QEMU live phase still asserts the previous page and
+the ONVIF profiles remain BIT-027. PTZ, audio, event review and playback remain out of scope.
 
 **Goal.** Give the owner a live camera view in the Bittern UI on the authenticated 443 surface,
 following [ADR 0034](../adr/0034-live-view-owned-by-bittern.md) and

@@ -90,27 +90,34 @@ decoded, then captures and measures that state as `cameras-picture-taken-<width>
 `-expanded` capture still applies.
 
 
-## Live player checks
+## Live wall checks
 
 `tests/browser/live.mjs` runs after the route walk on its own daemon with a fixed four-camera
-inventory. It stubs `WebSocket`, `MediaSource` and the media element so every player state can be
-walked without a camera or go2rtc: connecting, playing, stalled, reconnecting, offline, unsupported,
-session ended and switching. It also checks the 1/4/9 viewport ceiling at 360, 390, 1280 and 1920,
-and in the playing state it swaps the sibling camera-state fragment and asserts the player, video
-element and state survive. Every case asserts the player and video are outside an `hx-*` ancestor.
+inventory. Two cameras report distinct main and sub profiles, so the per-pane quality control has a
+real choice; the other two report one stream and must say so. The checks stub `WebSocket`,
+`MediaSource`, the media element and `getVideoPlaybackQuality()`, so every player state and a
+synthetic frame-drop sequence can be walked without a camera or go2rtc.
 
-Six grid checks follow the state walk: switching all three presets, assigning a camera to an empty
-tile while the other tile keeps playing, a status poll with an open picker and four running players,
-one camera failing while three keep playing, full width to main and back to sub with the other
-players alive, and a phone clamping a four-tile layout to one live tile with the ceiling sentence.
-The full-width check writes `build/ui-screenshots/live-full-width-1280x800.png`.
+The eight player-state checks walk connecting, playing, stalled, reconnecting, offline, unsupported,
+session ended and switching on the single-camera route, and the playing case swaps the camera-state
+fragment and asserts the player node, its state and its video survive. Every case asserts the player
+and video are outside an `hx-*` ancestor.
 
-The media stub reports a realistic intrinsic size. Eight large-stream checks run 1920x1080 and
-3840x2160 at all four widths, assert the document has no horizontal or vertical overflow on the grid
-and in browser full screen, and write `live-large-<resolution>-<width>.png` and
-`live-full-screen-<resolution>-<width>.png`. One reserved-box check measures the media and video
-box before and after metadata arrives and requires both to stay the same size. Full screen is
-entered with the player control and left once with Escape and once with Back.
+The wall checks are:
+
+| Check | What it proves | Artefacts |
+| --- | --- | --- |
+| Class prior | `data-device-prior` is 4 below 44rem, 8 from 44rem, and 16 at 80rem and above, and the capacity starts at the prior | Four widths plus 900px |
+| Six layouts at four widths | The server pane count, the panes fill the wall, no page or container overflow, and the pane rectangles are adjacent within the one pixel gap with no overlap, measured in normal and full screen | `live-wall-<layout>-<width>.png` and `live-wall-<layout>-full-<width>.png`, 48 images |
+| Overlay | Hidden and inert on boot, `pointer-events: none` and click-through, revealed by pointer movement, a key press, a tap and focus, hidden after three seconds, focus suspending the hide, Tab to the quality control and Shift+Tab to the last control | `live-wall-overlay-360x800.png`, `live-wall-overlay-1280x800.png`, `live-wall-overlay-hidden-1280x800.png` |
+| No JavaScript | The overlay is visible, the layout picker is seven submit buttons with one pressed, and the pane control is a real form | none |
+| Manual quality | A manual main choice survives a demotion-pressure sequence, a camera status poll and a layout change | none |
+| Capacity hysteresis | The shipped model from a synthetic sequence: two windows of evidence before the first demotion, one pane per twenty seconds, a deterministic result, promotion only after 300 quiet seconds plus the 60 second window, no action in the 0.5 to 2 percent dead band, and manual panes never demoted | none |
+| Snapshot panes | A manual snapshot pane opens no media session and its picture refreshes after fifteen seconds | `live-wall-snapshot-1280x800.png` |
+| Keyboard | One pane tab stop, arrow keys by geometry, Home and End, Escape leaves full screen and hides the overlay | none |
+
+Eight large-stream checks then run 1920x1080 and 3840x2160 at all four widths and assert the pane
+geometry is unchanged when metadata arrives.
 
 `tests/browser/routing.mjs` runs the three device states at all four widths on fresh daemons: an
 uninitialized device with cameras, an initialized device with no camera, and an initialized device
@@ -141,8 +148,8 @@ The manifest has 38 screens from 20 routes, so each run checks 152 route-width s
 disclosure. The `landing` field on the wizard, live and status entries records which device state
 treats that screen as its default; the routing checks above use the same three states. Fifteen status variants cover the five overall states and the update card: factory
 baseline with an offered update, up to date, update available, installing, failed, rolled back,
-offline, rate limited, and a failed check. The `live-nine-tiles` variant sets the saved layout
-cookie and reloads, so the nine-tile grid and its empty-tile pickers appear at every width. The
+offline, rate limited, and a failed check. The `live` `nine-tiles` variant sets the saved layout
+cookie and reloads, so the nine-pane wall and its empty-pane controls appear at every width. The
 `live-refresh` variant opens Technical details, focuses
 its summary, marks a table scroll region, and waits for two real update-card polls. It then aborts
 the fragment request, asserts the disclosure, focus, scroll, and card content are unchanged, and

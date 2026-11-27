@@ -82,8 +82,54 @@ tls: {}
 `;
 
 // The live view checks get their own daemon with the same fixed four-camera
-// inventory, so the grid checks do not depend on the route walk's auth state.
-export const LIVE_APPLIANCE_YAML = APPLIANCE_YAML;
+// inventory, so the wall checks do not depend on the route walk's auth state.
+// Two cameras report distinct main and sub profiles so the per-pane quality
+// control has a real choice to make; the other two report one stream and must
+// say so. The stored profiles survive the version 1 to version 3 migration,
+// which is exactly the degradation path ADR 0037 describes.
+export const LIVE_APPLIANCE_YAML = APPLIANCE_YAML
+  .replace(
+    `  - id: front_door
+    name: Front door
+    address: 10.77.0.20
+    rtsp_port: 554
+    rtsp_path: /stream1
+`,
+    `  - id: front_door
+    name: Front door
+    address: 10.77.0.20
+    rtsp_port: 554
+    rtsp_path: /stream1
+    profiles:
+      main:
+        profile_token: Profile_1
+        rtsp_path: /stream1
+      sub:
+        profile_token: Profile_2
+        rtsp_path: /stream1_sub
+`,
+  )
+  .replace(
+    `  - id: driveway
+    name: Driveway
+    address: 10.77.0.21
+    rtsp_port: 554
+    rtsp_path: /stream2
+`,
+    `  - id: driveway
+    name: Driveway
+    address: 10.77.0.21
+    rtsp_port: 554
+    rtsp_path: /stream2
+    profiles:
+      main:
+        profile_token: Profile_1
+        rtsp_path: /stream2
+      sub:
+        profile_token: Profile_2
+        rtsp_path: /stream2_sub
+`,
+  );
 export const CAMERA_APPLIANCE_YAML = APPLIANCE_YAML;
 export const NO_CAMERA_APPLIANCE_YAML = APPLIANCE_YAML.replace(
   /cameras:\n(?:  - .*\n(?:    .*\n)*)+/,

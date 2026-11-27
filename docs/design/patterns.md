@@ -257,9 +257,11 @@ disabled, snapshot available and snapshot unavailable.
 | LV16 | Controls in full screen are overlays: shown on pointer movement, a key press, a tap or focus, hidden after three seconds. A hidden overlay is inert and click-through. Tab reveals it with visible focus, Escape exits full screen, and the no-JavaScript overlay is visible by default. | Q6 and Q8; the overlay click-through, Tab and Escape checks; the no-JavaScript template path. |
 | LV17 | The pane wall is one tab stop with a roving tabindex and arrow-key geometry. The selected pane is the focused pane, shown by the inset focus ring and the camera name and quality in the overlay, never by a border. Every pane has a camera name. | Q6 and Q9; the keyboard pass and the selected-pane check. |
 
-Slice 1a implements LV1 to LV8. Slice 1b implements LV9 to LV13. [ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md)
-replaces LV9, LV10, LV12, LV14 and LV15 and adds LV16 and LV17; BIT-023 implements the replacement
-and the rules are the review target until it lands.
+Slice 1a implements LV1 to LV8. Slice 1b implemented the 1/2/4/9 presets.
+[ADR 0037](../adr/0037-nvr-grid-per-pane-quality-and-full-screen.md) replaced LV9, LV10, LV12, LV14
+and LV15 and added LV16 and LV17; [BIT-023](../plan/implementation-plan.md#bit-023-live-view) landed
+the replacement on 2026-11-27, and the browser cases named in each rule are in
+`tests/browser/live.mjs`.
 
 ## Managed-device list and detail
 

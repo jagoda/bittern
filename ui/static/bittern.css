@@ -19,7 +19,7 @@
   --color-action-hover: #084a3c;
   --color-on-action: var(--neutral-0);
   --color-link: #0b4f8a;
-  --color-focus: #0b5d4b;
+  --color-focus: #1a7a5f;
   --color-ok-text: #14532d;
   --color-ok-surface: #e7f4ec;
   --color-degraded-text: #7a4b00;
@@ -32,6 +32,10 @@
   --color-disabled-surface: var(--neutral-100);
   --color-notice-text: #0b4f8a;
   --color-notice-surface: #e8f0f8;
+  /* A short scrim behind a camera name over video. The name is content, so it
+     is legible on any frame without becoming a bar or a card. */
+  --color-scrim: rgb(28 27 24 / 0.72);
+  --color-on-scrim: #ffffff;
 
   /* Type. */
   --font-family-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -1293,12 +1297,442 @@ button:disabled {
   align-items: baseline;
 }
 
-.live-camera-picker {
-  margin-block: var(--space-24);
+/* Live wall (ADR 0037). The server resolves the pane count and the camera
+   assignment; the wall fills the view, the panes touch except for the one pixel
+   gap, and the six layouts are the only place the geometry is written here.
+   The pane order is reading order, and the area names p1 to pN come from the
+   same order. tests/checks and the Go test keep this block and the area
+   function in step. */
+body.live-wall-page {
+  block-size: 100dvh;
+  min-block-size: 0;
+  overflow: hidden;
 }
 
-.live-camera-picker h2 {
-  margin-block-start: 0;
+body.live-wall-page .site-header {
+  flex: none;
+}
+
+body.live-wall-page .site-footer {
+  display: none;
+}
+
+body.live-wall-page main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-block-size: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.live-wall {
+  position: relative;
+  flex: 1 1 auto;
+  display: grid;
+  gap: var(--border-width);
+  min-block-size: 0;
+  overflow: hidden;
+  background: var(--color-page);
+  grid-template-columns: repeat(var(--live-columns), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--live-rows), minmax(0, 1fr));
+}
+
+.live-wall[data-layout="1"] {
+  --live-columns: 1;
+  --live-rows: 1;
+  grid-template-areas: "p1";
+}
+
+.live-wall[data-layout="4"] {
+  --live-columns: 2;
+  --live-rows: 2;
+  grid-template-areas: "p1 p2" "p3 p4";
+}
+
+.live-wall[data-layout="6"] {
+  --live-columns: 3;
+  --live-rows: 3;
+  grid-template-areas: "p1 p1 p2" "p1 p1 p3" "p4 p5 p6";
+}
+
+.live-wall[data-layout="8"] {
+  --live-columns: 4;
+  --live-rows: 4;
+  grid-template-areas: "p1 p1 p1 p2" "p1 p1 p1 p3" "p1 p1 p1 p4" "p5 p6 p7 p8";
+}
+
+.live-wall[data-layout="9"] {
+  --live-columns: 3;
+  --live-rows: 3;
+  grid-template-areas: "p1 p2 p3" "p4 p5 p6" "p7 p8 p9";
+}
+
+.live-wall[data-layout="16"] {
+  --live-columns: 4;
+  --live-rows: 4;
+  grid-template-areas: "p1 p2 p3 p4" "p5 p6 p7 p8" "p9 p10 p11 p12" "p13 p14 p15 p16";
+}
+
+.live-pane.p1 { grid-area: p1; }
+.live-pane.p2 { grid-area: p2; }
+.live-pane.p3 { grid-area: p3; }
+.live-pane.p4 { grid-area: p4; }
+.live-pane.p5 { grid-area: p5; }
+.live-pane.p6 { grid-area: p6; }
+.live-pane.p7 { grid-area: p7; }
+.live-pane.p8 { grid-area: p8; }
+.live-pane.p9 { grid-area: p9; }
+.live-pane.p10 { grid-area: p10; }
+.live-pane.p11 { grid-area: p11; }
+.live-pane.p12 { grid-area: p12; }
+.live-pane.p13 { grid-area: p13; }
+.live-pane.p14 { grid-area: p14; }
+.live-pane.p15 { grid-area: p15; }
+.live-pane.p16 { grid-area: p16; }
+
+/* Full screen is the same wall on the whole screen: no header, toolbar,
+   border, padding or page scroll (ADR 0037 section 6). */
+.live-wall:fullscreen {
+  inline-size: 100vw;
+  block-size: 100vh;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--color-page);
+}
+
+/* A pane is the frame: no border, radius, padding, surface or card. The focus
+   ring is drawn inset so it never reads as a tile border. */
+.live-pane {
+  position: relative;
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: hidden;
+  background: var(--color-text);
+}
+
+.live-pane:focus {
+  outline: none;
+}
+
+.live-pane:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-ring-width));
+}
+
+.live-player {
+  position: absolute;
+  inset: 0;
+}
+
+.live-media {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--color-text);
+}
+
+.live-video,
+.live-snapshot {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
+}
+
+.live-video[hidden],
+.live-snapshot[hidden],
+.live-pane [hidden],
+.live-overlay [hidden] {
+  display: none;
+}
+
+.live-noscript {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline: 0;
+  margin: 0;
+  padding: var(--space-8);
+  background: var(--color-scrim);
+  color: var(--color-on-scrim);
+  font: var(--type-meta);
+}
+
+/* The camera name is content: a short scrim the length of the text, in the
+   pane's overlay layer, inset by --space-8, fading with the controls. */
+.live-pane-overlay {
+  position: absolute;
+  inset-block-start: var(--space-8);
+  inset-inline-start: var(--space-8);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+  max-inline-size: calc(100% - var(--space-16));
+  pointer-events: none;
+}
+
+.live-pane-name,
+.live-pane-note {
+  margin: 0;
+  max-inline-size: 100%;
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius-control);
+  background: var(--color-scrim);
+  color: var(--color-on-scrim);
+  font: var(--type-meta);
+  overflow-wrap: anywhere;
+  transition: opacity var(--duration-state) var(--ease-standard);
+}
+
+.live-pane-name[hidden],
+.live-pane-note[hidden] {
+  display: none;
+}
+
+.live-wall[data-live-overlay="hidden"] .live-pane-name {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.live-wall[data-live-overlay="hidden"] .live-pane[data-live-pane-state="failed"] .live-pane-name {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* The one control surface: shown on pointer movement, a key press, a tap or
+   focus, hidden after three seconds, inert and click-through while hidden. */
+.live-overlay {
+  position: absolute;
+  inset-block-end: var(--space-8);
+  inset-inline: var(--space-8);
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: var(--space-8);
+  max-block-size: calc(100% - var(--space-16));
+  overflow: auto;
+  padding: var(--space-8);
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-surface);
+  transition: opacity var(--duration-state) var(--ease-standard);
+}
+
+@media (min-width: 48rem) {
+  .live-overlay {
+    grid-template-columns: minmax(0, 2fr) auto auto;
+  }
+
+  .live-overlay > .live-selected {
+    grid-column: 1;
+  }
+
+  .live-overlay > .live-layout-form {
+    grid-column: 2;
+  }
+
+  .live-overlay > .live-overlay-actions {
+    grid-column: 3;
+    justify-self: end;
+  }
+
+  .live-overlay > .live-hint,
+  .live-overlay > .live-camera-state,
+  .live-overlay > .live-camera-picker {
+    grid-column: 1 / -1;
+  }
+}
+
+.live-wall[data-live-overlay="hidden"] .live-overlay {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.live-overlay form,
+.live-overlay nav,
+.live-overlay p {
+  margin: 0;
+}
+
+.live-overlay-legend {
+  margin-block-end: var(--space-4);
+  color: var(--color-text-muted);
+  font: var(--type-meta);
+}
+
+.live-layout-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.live-layout-radios legend {
+  float: left;
+  inline-size: 100%;
+  margin-block-end: var(--space-4);
+  color: var(--color-text-muted);
+  font: var(--type-meta);
+}
+
+.live-layout-radio,
+.live-quality-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-block-size: var(--touch-target);
+  min-inline-size: var(--touch-target);
+  padding-inline: var(--space-8);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: var(--type-label);
+}
+
+.live-layout-radio:has(input:checked),
+.live-quality-choice:has(input:checked) {
+  border-width: calc(var(--border-width) * 2);
+  border-color: var(--color-action);
+}
+
+.live-layout-radios input,
+.live-quality-choice input {
+  inline-size: var(--space-16);
+  block-size: var(--space-16);
+  margin: 0;
+}
+
+.live-layout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.live-layout-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: var(--touch-target);
+  min-block-size: var(--touch-target);
+  padding-inline: var(--space-8);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: var(--type-label);
+}
+
+.live-layout-button[aria-pressed="true"] {
+  border-width: calc(var(--border-width) * 2);
+  border-color: var(--color-action);
+}
+
+.live-selected {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4) var(--space-8);
+  min-inline-size: 0;
+}
+
+.live-selected-line {
+  margin-block-end: var(--space-4);
+  inline-size: 100%;
+  font: var(--type-body);
+}
+
+.live-selected-quality {
+  color: var(--color-text-muted);
+  font: var(--type-meta);
+}
+
+.live-pane-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-8);
+}
+
+.live-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  font: var(--type-meta);
+}
+
+.live-field select,
+.live-choose-form select {
+  min-block-size: var(--touch-target);
+  max-inline-size: var(--measure-control);
+  padding: var(--space-4) var(--space-8);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: var(--type-body);
+}
+
+.live-field select:focus-visible,
+.live-choose-form select:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.live-quality-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-8);
+}
+
+.live-quality {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.live-quality legend {
+  float: left;
+  inline-size: 100%;
+  margin-block-end: var(--space-4);
+  color: var(--color-text-muted);
+  font: var(--type-meta);
+}
+
+.live-profiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.live-profiles a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: var(--touch-target);
+  min-inline-size: var(--touch-target);
+  padding-inline: var(--space-12);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.live-profiles a[aria-current="true"] {
+  border: calc(var(--border-width) * 2) solid var(--color-action);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: var(--font-weight-strong);
 }
 
 .live-camera-picker ul {
@@ -1326,500 +1760,44 @@ button:disabled {
   font-weight: var(--font-weight-strong);
 }
 
-.live-view {
-  margin-block: var(--space-24);
-}
-
-.live-heading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-8);
-}
-
-.live-heading h2 {
-  margin-block: 0;
-}
-
-.live-player {
-  margin-block-start: var(--space-16);
-  border: var(--border-width) solid var(--color-border-subtle);
-  border-radius: var(--radius-surface);
-  padding: var(--space-16);
-  background: var(--color-surface);
-}
-
-.live-media {
-  position: relative;
-  overflow: hidden;
-  aspect-ratio: 16 / 9;
-  max-block-size: 100%;
-  border: var(--border-width) solid var(--color-border-subtle);
-  border-radius: var(--radius-surface);
-  background: var(--color-text);
-}
-
-.live-video {
-  display: block;
-  inline-size: 100%;
-  block-size: 100%;
-  background: var(--color-text);
-  object-fit: contain;
-}
-
-.live-snapshot {
-  display: block;
-  inline-size: 100%;
-  block-size: 100%;
-  object-fit: contain;
-}
-
-.live-video[hidden],
-.live-snapshot[hidden],
-.live-status [data-player-retry][hidden] {
-  display: none;
-}
-
-.live-noscript {
-  margin: 0;
-  padding: var(--space-16);
-  background: var(--color-surface);
-  font: var(--type-body);
-}
-
-.live-status {
-  margin-block-start: var(--space-16);
-}
-
-.live-status-line {
-  margin-block: 0 var(--space-4);
-}
-
-.live-status-detail {
-  color: var(--color-text-muted);
-  font: var(--type-body);
-}
-
-.live-status [data-player-retry] {
-  margin-block: var(--space-8) 0;
-}
-
-.live-status p:has([data-player-retry][hidden]) {
-  display: none;
-}
-
-.live-controls {
-  margin-block-start: var(--space-16);
-  padding-block-start: var(--space-12);
-  border-block-start: var(--border-width) solid var(--color-border-subtle);
-}
-
-.live-profiles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-8);
-  margin-block-end: var(--space-8);
-}
-
-.live-profiles a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-block-size: var(--touch-target);
-  min-inline-size: var(--touch-target);
-  padding-inline: var(--space-12);
-  border: var(--border-width) solid var(--color-border-control);
-  border-radius: var(--radius-control);
-  background: var(--color-surface);
-}
-
-.live-profiles a[aria-current="true"] {
-  border: calc(var(--border-width) * 2) solid var(--color-action);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-weight: var(--font-weight-strong);
-}
-
 .live-camera-state {
-  margin-block-start: var(--space-8);
   color: var(--color-text-muted);
 }
 
-.live-camera-state p {
-  margin-block: 0;
-}
-
-/* Live grid. The server resolves the tile list; this layer chooses the columns
-   for the viewport and the full-width state (ADR 0034 sections 4 and 7). */
-.live-layout {
-  margin-block: var(--space-24) 0;
-}
-
-.live-preset-actions {
+.live-overlay-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-8);
 }
 
-.live-presets button[aria-pressed="true"] {
-  border-width: calc(var(--border-width) * 2);
-  font-weight: var(--font-weight-strong);
-}
-
-.live-ceiling-note {
-  margin-block: var(--space-16) 0;
-  padding: var(--space-12) var(--space-16);
-  border: var(--border-width) solid var(--color-border-subtle);
-  border-radius: var(--radius-surface);
-  background: var(--color-notice-surface);
-  color: var(--color-notice-text);
-  font: var(--type-body);
-}
-
-.live-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--space-16);
-  margin-block: var(--space-24);
-  padding: 0;
-  list-style: none;
-}
-
-@media (min-width: 44rem) {
-  .live-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (min-width: 80rem) {
-  .live-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-body.live-grid-page {
-  block-size: 100dvh;
-  min-block-size: 0;
-  overflow: hidden;
-}
-
-body.live-grid-page .site-header {
-  flex: none;
-}
-
-body.live-grid-page .site-footer {
-  display: none;
-}
-
-body.live-grid-page main {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-block-size: 0;
-  padding-block: var(--space-16);
-  overflow: hidden;
-}
-
-body.live-grid-page main > h1,
-body.live-grid-page .lede,
-body.live-grid-page .preview-notice,
-body.live-grid-page .live-layout,
-body.live-grid-page .live-ceiling-note {
-  flex: none;
-}
-
-body.live-grid-page .live-grid {
-  flex: 1 1 auto;
-  min-block-size: 0;
-  margin-block: var(--space-16) 0;
-  grid-auto-rows: minmax(0, 1fr);
-  overflow: hidden;
-}
-
-body.live-grid-page .live-tile {
-  min-block-size: 0;
-  overflow: hidden;
-  container-type: size;
-}
-
-body.live-grid-page .live-tile .live-camera-state {
-  display: none;
-}
-
-body.live-grid-page .live-tile .live-player {
-  display: flex;
-  flex-direction: column;
-  block-size: 100%;
-  min-block-size: 0;
-  overflow: hidden;
-}
-
-body.live-grid-page .live-tile .live-media {
-  flex: 1 1 auto;
-  min-block-size: 0;
-  inline-size: 100%;
-  aspect-ratio: auto;
-}
-
-body.live-grid-page .live-tile .live-heading,
-body.live-grid-page .live-tile .live-status,
-body.live-grid-page .live-tile-controls {
-  flex: none;
-}
-
-@media (max-width: 44rem) {
-  body.live-grid-page .live-grid {
-    grid-auto-rows: 100%;
-    overflow-y: auto;
-  }
-}
-
-.live-grid[data-live-full="true"] {
-  grid-template-columns: 1fr;
-}
-
-.live-grid[data-live-full="true"] .live-tile:not([data-tile-full="true"]) {
-  display: none;
-}
-
-/* In full width the way back sits above the video, so it stays in reach even
-   when the stream is taller than the viewport. */
-.live-grid[data-live-full="true"] [data-tile-full="true"] .live-player {
-  display: flex;
-  flex-direction: column;
-}
-
-.live-grid[data-live-full="true"] [data-tile-full="true"] .live-heading {
-  order: 0;
-}
-
-.live-grid[data-live-full="true"] [data-tile-full="true"] .live-controls {
-  order: 1;
-  margin-block-start: var(--space-8);
-  padding-block-start: 0;
-  border-block-start: 0;
-}
-
-.live-grid[data-live-full="true"] [data-tile-full="true"] .live-media {
-  order: 2;
-  margin-block-start: var(--space-12);
-}
-
-.live-grid[data-live-full="true"] [data-tile-full="true"] .live-status {
-  order: 3;
-}
-
-.live-player:fullscreen {
-  inline-size: 100vw;
-  block-size: 100vh;
-  margin: 0;
-  padding: var(--space-16);
-  border: 0;
-  border-radius: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--color-page);
-}
-
-.live-player:fullscreen .live-heading,
-.live-player:fullscreen .live-controls,
-.live-player:fullscreen .live-status {
-  flex: none;
-}
-
-.live-player:fullscreen .live-heading {
-  display: flex;
-}
-
-.live-player:fullscreen .live-status-detail {
-  display: block;
-}
-
-.live-player:fullscreen .live-tile-picker {
-  flex-basis: 100%;
-}
-
-.live-player:fullscreen .live-media {
-  flex: 1 1 auto;
-  min-block-size: 0;
-  inline-size: 100%;
-  aspect-ratio: auto;
-  margin-block-start: var(--space-12);
-}
-
-.live-player:fullscreen .live-video,
-.live-player:fullscreen .live-snapshot {
-  inline-size: 100%;
-  block-size: 100%;
-}
-
-body.live-fullscreen-active {
-  overflow: hidden;
-}
-
-.live-tile {
-  min-inline-size: 0;
-}
-
-.live-tile .live-player {
-  margin-block-start: 0;
-  padding: var(--space-12);
-}
-
-.live-tile .live-heading {
-  align-items: flex-start;
-}
-
-.live-tile .live-heading h2 {
-  font: var(--type-section);
-}
-
-.live-tile .live-status {
-  margin-block-start: var(--space-12);
-}
-
-.live-tile .live-status-detail {
-  margin-block: var(--space-4) 0;
+.live-hint {
   font: var(--type-meta);
+  color: var(--color-text-muted);
 }
 
-/* A tile the device cannot start is a row with its controls, not a media
-   surface. The page-level note explains the limit (ADR 0034 section 4). */
-.live-tile .live-player[data-player-state="idle"] .live-media {
-  display: none;
-}
-
-.live-tile .live-player[data-player-state="idle"] .live-status {
-  margin-block-start: var(--space-4);
-}
-
-.live-tile-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--space-8);
-  margin-block-start: var(--space-12);
-  padding-block-start: var(--space-12);
-  border-block-start: var(--border-width) solid var(--color-border-subtle);
-}
-
-.live-tile-controls [hidden],
-.live-idle-placeholder[hidden] {
-  display: none;
-}
-
-.live-tile-picker {
-  flex-basis: 100%;
-}
-
-.live-tile-picker > summary {
-  min-block-size: var(--touch-target);
-}
-
-.live-tile-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-8);
-  margin-block: var(--space-8) 0;
-}
-
-.live-tile-form label {
-  font: var(--type-label);
-}
-
-.live-tile-form select {
-  min-block-size: var(--touch-target);
-  max-inline-size: var(--measure-control);
-  padding: var(--space-8) var(--space-12);
-  border: var(--border-width) solid var(--color-border-control);
-  border-radius: var(--radius-control);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font: var(--type-body);
-}
-
-.live-tile-form select:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-.live-tile-empty {
-  border: var(--border-width) dashed var(--color-border-control);
-  border-radius: var(--radius-surface);
-  padding: var(--space-16);
-  background: var(--color-surface);
-}
-
-.live-tile-empty h2 {
-  margin-block-start: 0;
-  font: var(--type-section);
-}
-
-.live-idle-placeholder {
+/* An empty pane is not chrome around a video: it is one choose-camera control
+   in the middle of where the picture would be. */
+.live-pane-is-empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  aspect-ratio: 16 / 9;
-  margin: 0;
-  padding: var(--space-16);
+  padding: var(--space-4);
   background: var(--color-unknown-surface);
-  color: var(--color-unknown-text);
-  font: var(--type-body);
 }
 
-@container (max-height: 300px) {
-  .live-tile .live-heading {
-    display: none;
-  }
-
-  .live-tile .live-status-detail {
-    display: none;
-  }
+.live-choose-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  inline-size: 100%;
+  max-inline-size: var(--measure-control);
+  margin: 0;
 }
 
-@container (max-height: 280px) {
-  .live-tile .live-player {
-    padding: var(--space-8);
-  }
+.live-choose-form select {
+  max-inline-size: 100%;
+}
 
-  .live-tile .live-status {
-    margin-block-start: var(--space-4);
-  }
-
-  .live-tile-controls {
-    margin-block-start: var(--space-4);
-    padding-block-start: var(--space-4);
-  }
-
-  .live-tile-controls .button {
-    padding-inline: var(--space-8);
-  }
-
-  .live-tile-picker {
-    flex-basis: auto;
-  }
-
-  .live-tile-empty {
-    block-size: 100%;
-    overflow: hidden;
-    padding: var(--space-8);
-  }
-
-  .live-tile-empty h2 {
-    font: var(--type-group);
-  }
-
-  .live-tile-empty > p {
-    display: none;
-  }
-
-  .live-tile-empty .live-tile-form {
-    margin-block-start: 0;
-  }
-
-  .live-tile-empty .live-tile-form select {
-    max-inline-size: calc(var(--measure-control) / 4);
-  }
+.live-choose-form .button {
+  inline-size: 100%;
 }

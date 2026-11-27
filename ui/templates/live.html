@@ -2,130 +2,138 @@
 <p class="meta" data-live-camera-state="{{if .Live.Selected.Disabled}}disabled{{else}}enabled{{end}}">{{if .Live.Selected.Disabled}}This camera is disabled in Bittern.{{else}}This camera is enabled in Bittern's configuration.{{end}}</p>
 {{end}}
 
-{{define "live-tile-form"}}
-{{if .AllAssigned}}
-<p class="hint">Every camera is in the grid already. Clear another tile before you move one here.</p>
-{{else}}
-<form method="post" action="{{.AssignURL}}" class="live-tile-form" data-live-tile-form="true">
-  <input type="hidden" name="csrf_token" value="{{.CSRF}}" />
-  <input type="hidden" name="tile" value="{{.Index}}" />
-  <label for="live-tile-camera-{{.Index}}">Camera</label>
-  <select id="live-tile-camera-{{.Index}}" name="camera">
-    {{if .Occupied}}<option value="">No camera</option>{{end}}
-    {{range .Cameras}}<option value="{{.ID}}"{{if .Selected}} selected="selected"{{end}}>{{.Name}}</option>{{end}}
-  </select>
-  <button type="submit" class="button secondary">Show in this tile</button>
-</form>
-{{end}}
-{{end}}
-
 {{define "live-island"}}
 {{with .Player}}
-<div id="{{.ElementID}}" class="live-player" data-live-player="true" data-tile-index="{{.TileIndex}}" data-camera-id="{{.ID}}" data-camera-name="{{.Name}}" data-profile="{{.Profile}}" data-profile-name="{{.ProfileName}}" data-media-base="{{.MediaBase}}" data-snapshot-url="{{.SnapshotURL}}" data-login-url="{{.LoginURL}}">
-  <div class="live-heading">
-    <h2 id="{{$.TitleID}}" tabindex="-1">{{.Name}}</h2>
-    <span class="state-badge state-unknown" data-player-state-label="true">Connecting</span>
-  </div>
+<div id="{{.ElementID}}" class="live-player" data-live-player="true" data-pane="{{$.Number}}" data-camera-id="{{.ID}}" data-camera-name="{{.Name}}" data-quality="{{.Quality}}" data-manual-quality="{{.Manual}}" data-profile="{{.Profile}}" data-profile-name="{{.ProfileName}}" data-one-stream="{{if .OneStream}}true{{else}}false{{end}}" data-media-base="{{.MediaBase}}" data-snapshot-url="{{.SnapshotURL}}" data-status-url="{{.StatusURL}}" data-login-url="{{.LoginURL}}">
   <div class="live-media">
     <video id="{{.ElementID}}-video" class="live-video" muted="muted" playsinline="playsinline" preload="none" aria-label="Live video from {{.Name}}"></video>
     <img class="live-snapshot" data-player-snapshot="true" alt="Latest picture from {{.Name}}" hidden="hidden" />
-    <p class="live-idle-placeholder" data-player-idle="true" hidden="hidden">Not started on this screen.</p>
     <noscript>
       <img class="live-snapshot" src="{{.SnapshotURL}}" alt="Latest picture from {{.Name}}" />
       <p class="live-noscript">Live video needs JavaScript. This is the latest picture from the camera. <a href="/ui/cameras">Open cameras</a>.</p>
     </noscript>
   </div>
-  <div class="live-status" data-player-status="true" role="status" aria-live="polite">
-    <p class="live-status-line"><span class="state-badge state-unknown" data-player-badge="true">Connecting</span> <strong data-player-title="true">Connecting to {{.Name}}</strong></p>
-    <p class="live-status-detail" data-player-detail="true">Bittern is opening the live stream.</p>
-    <p><button type="button" class="button secondary" data-player-retry="true" hidden="hidden">Try again</button></p>
-  </div>
-  {{if .InGrid}}
-  <div class="live-controls live-tile-controls">
-    <button type="button" class="button secondary" data-live-fullscreen="true" hidden="hidden">Full screen</button>
-    <button type="button" class="button secondary" data-live-expand="true" hidden="hidden">Open full width</button>
-    <button type="button" class="button secondary" data-live-collapse="true" hidden="hidden">Back to grid</button>
-    <noscript><a class="button secondary" href="{{$.FullURL}}">Open full width</a></noscript>
-    <details class="live-tile-picker">
-      <summary>Change camera</summary>
-      {{template "live-tile-form" $}}
-    </details>
-  </div>
-  {{else}}
-  <div class="live-controls">
-    <button type="button" class="button secondary" data-live-fullscreen="true" hidden="hidden">Full screen</button>
-    <div class="live-profiles" role="group" aria-label="Stream profile">
-      {{range .Profiles}}<a href="{{.URL}}" data-profile-link="{{.Name}}"{{if .Selected}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}
-    </div>
-    <p class="hint">{{.ProfileHint}}</p>
-  </div>
-  {{end}}
 </div>
 {{end}}
 {{end}}
 
-{{define "live-tile"}}
-{{if .Empty}}
-<div class="live-tile-empty">
-  <h2 id="{{.TitleID}}" tabindex="-1">Empty tile</h2>
-  <p>No camera is assigned to this tile.</p>
-  {{template "live-tile-form" .}}
+{{define "live-pane"}}
+{{if .Occupied}}
+<div class="live-pane {{.Area}}" id="{{.PaneID}}" data-live-pane="{{.Number}}" data-live-tile="{{.Number}}" data-camera-id="{{.CameraID}}" data-quality="{{.Quality}}" data-manual-quality="{{.Manual}}" role="group" aria-label="{{.CameraName}}" tabindex="{{if eq .Number 1}}0{{else}}-1{{end}}">
+  {{template "live-island" .}}
+  <div class="live-pane-overlay" data-live-pane-overlay="true">
+    <p class="live-pane-name" data-live-pane-name="true">{{.CameraName}}</p>
+    <p class="live-pane-note" data-player-note="true" hidden="hidden"></p>
+    <p class="visually-hidden" role="status" aria-live="polite" data-player-announce="true"></p>
+  </div>
 </div>
 {{else}}
-{{template "live-island" .}}
-<div id="live-tile-state-{{.Index}}" class="live-camera-state" hx-get="{{.Player.StatusURL}}" hx-trigger="every 15s" hx-target="this" hx-swap="innerHTML">
-  <p class="meta" data-live-camera-state="enabled">This camera is enabled in Bittern's configuration.</p>
+<div class="live-pane {{.Area}} live-pane-is-empty" id="{{.PaneID}}" data-live-pane="{{.Number}}" data-live-tile="{{.Number}}" data-quality="snapshot" role="group" aria-label="Empty pane {{.Number}}" tabindex="{{if eq .Number 1}}0{{else}}-1{{end}}">
+  <form method="post" action="{{.ChooseURL}}" class="live-choose-form" data-live-choose-form="true">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}" />
+    <input type="hidden" name="pane" value="{{.Number}}" />
+    <input type="hidden" name="action" value="camera" />
+    <input type="hidden" name="next" value="/ui/live" />
+    <label class="visually-hidden" for="live-choose-{{.Number}}">Camera for pane {{.Number}}</label>
+    <select id="live-choose-{{.Number}}" name="camera" data-live-choose-select="true">
+      <option value="">No camera</option>
+      {{range .Cameras}}<option value="{{.ID}}"{{if .Selected}} selected="selected"{{end}}>{{.Name}}</option>{{end}}
+    </select>
+    <button type="submit" class="button" data-live-choose-button="true">Choose camera</button>
+  </form>
 </div>
 {{end}}
+{{end}}
+
+{{define "live-overlay"}}
+<div class="live-overlay" data-live-overlay-panel="true" role="group" aria-label="Live controls">
+  {{if .Preview}}<p class="live-hint" role="status"><strong>Preview build:</strong> sample data only, no system files are written.</p>{{end}}
+  <div class="live-selected" data-live-selected="true">
+    <p class="live-selected-line"><span data-live-selected-name="true">{{.Selected.Label}}</span> <span class="live-selected-quality" data-live-selected-quality="true">{{.Selected.QualityLabel}}</span></p>
+    {{if .ProfileChoices}}
+    <div class="live-profiles" role="group" aria-label="Stream profile">
+      {{range .ProfileChoices}}<a href="{{.URL}}" data-profile-link="{{.Name}}"{{if .Selected}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}
+    </div>
+    {{if .ProfileHint}}<p class="live-hint">{{.ProfileHint}}</p>{{end}}
+    {{else}}
+    <form method="post" action="{{.PaneURL}}" class="live-pane-form" data-live-pane-form="true">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}" />
+      {{if .NextURL}}<input type="hidden" name="next" value="{{.NextURL}}" />{{end}}
+      <label class="live-field" data-live-pane-picker="true">
+        <span>Pane</span>
+        <select name="pane">{{range .Panes}}<option value="{{.Number}}"{{if eq .Number 1}} selected="selected"{{end}}>{{.Number}}</option>{{end}}</select>
+      </label>
+      <div class="live-quality-group" data-live-quality-group="true">
+        <fieldset class="live-quality" data-live-quality="true"{{if .Selected.OneStream}} hidden="hidden"{{end}}>
+          <legend>Quality</legend>
+          {{range .Qualities}}<label class="live-quality-choice" for="live-quality-{{.Value}}"><input id="live-quality-{{.Value}}" type="radio" name="quality" value="{{.Value}}"{{if .Current}} checked="checked"{{end}} />{{.Label}}</label>{{end}}
+        </fieldset>
+        <p class="live-hint" data-live-one-stream="true"{{if not .Selected.OneStream}} hidden="hidden"{{end}}>{{if .Selected.OneStream}}One stream. This camera does not report a second stream.{{else}}One stream{{end}}</p>
+      </div>
+      <button type="submit" name="action" value="quality" class="button secondary" data-live-quality-submit="true">Set quality</button>
+      <label class="live-field" data-live-camera-picker="true">
+        <span>Camera in pane <span data-live-selected-number="true">1</span></span>
+        <select name="camera">
+          <option value="">No camera</option>
+          {{range .CameraChoices}}<option value="{{.ID}}"{{if .Selected}} selected="selected"{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      <button type="submit" name="action" value="camera" class="button secondary">Show in this pane</button>
+    </form>
+    {{end}}
+  </div>
+  {{if .Layouts}}
+  <form method="post" action="{{.LayoutURL}}" class="live-layout-form" data-live-layout-form="true">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}" />
+    <fieldset class="live-layout-radios" data-live-layout-radios="true" hidden="hidden">
+      <legend>Layout</legend>
+      {{range .Layouts}}<label class="live-layout-radio" for="live-layout-{{.Value}}"><input id="live-layout-{{.Value}}" type="radio" name="layout" value="{{.Value}}"{{if .Current}} checked="checked"{{end}} /><span aria-hidden="true">{{.Label}}</span><span class="visually-hidden">{{.Name}}</span></label>{{end}}
+    </fieldset>
+    <div class="live-layout-buttons" data-live-layout-buttons="true">
+      <p class="live-overlay-legend" id="live-layout-legend">Layout</p>
+      <div class="live-layout-actions" role="group" aria-labelledby="live-layout-legend">
+        {{range .Layouts}}<button type="submit" name="layout" value="{{.Value}}" class="live-layout-button" aria-pressed="{{if .Current}}true{{else}}false{{end}}"><span aria-hidden="true">{{.Label}}</span><span class="visually-hidden">{{.Name}}</span></button>{{end}}
+      </div>
+    </div>
+  </form>
+  {{end}}
+  {{if .Cameras}}
+  <nav class="live-camera-picker" aria-label="Choose a camera">
+    <p class="live-overlay-legend">Camera</p>
+    <ul>
+      {{range .Cameras}}<li><a href="{{.URL}}"{{if .Selected}} aria-current="true"{{end}}>{{.Name}}</a></li>{{end}}
+    </ul>
+  </nav>
+  {{end}}
+  <div class="live-camera-state" data-live-camera-state-region="true"{{if .Selected.Occupied}} hx-get="{{.Selected.Player.StatusURL}}" hx-trigger="every 15s" hx-target="this" hx-swap="innerHTML"{{end}}>
+    {{if .Selected.Occupied}}<p class="meta" data-live-camera-state="enabled">This camera is enabled in Bittern's configuration.</p>{{end}}
+  </div>
+  <p class="live-hint live-capacity-note" data-live-capacity-note="true" hidden="hidden"></p>
+  {{if .NotInWall}}<p class="live-hint">{{.NotInWall}} enabled cameras are not in the wall. This wall shows sixteen at a time.</p>{{end}}
+  <div class="live-overlay-actions">
+    <button type="button" class="button secondary" data-live-fullscreen="true">Full screen</button>
+    <button type="button" class="button secondary" data-live-exit="true" hidden="hidden">Exit full screen</button>
+  </div>
+  <p class="visually-hidden" role="status" aria-live="polite" data-live-announce="true"></p>
+</div>
 {{end}}
 
 {{define "live"}}{{template "head" .}}
-<h1>Live</h1>
-<p class="lede">Watch your cameras live. Video stays on your appliance and is available only after you sign in.</p>
-{{template "preview-notice" .}}
+<h1 class="visually-hidden">Live</h1>
 {{if .Live.NoCameras}}
 <section class="card">
   <h2>No cameras to watch</h2>
   <p>Bittern has no camera in its configuration. Add a camera and it appears here.</p>
   <div class="form-actions"><a class="button" href="/ui/wizard/camera">Add camera</a></div>
 </section>
-{{else if .Live.Grid}}
-{{with .Live.Grid}}
-<section class="live-layout" aria-label="Layout">
-  <details class="disclosure live-layout-disclosure">
-    <summary id="live-layout">Layout: {{.PresetLabel}}</summary>
-    <form method="post" action="{{.LayoutURL}}" class="live-presets">
-      <input type="hidden" name="csrf_token" value="{{.CSRF}}" />
-      <div class="live-preset-actions" role="group" aria-label="Cameras in the grid">
-        {{range .Presets}}<button type="submit" name="preset" value="{{.Value}}" class="button secondary" data-live-preset="{{.Value}}" aria-pressed="{{if .Current}}true{{else}}false{{end}}">{{.Label}}</button>{{end}}
-      </div>
-    </form>
-    <p class="hint">This screen plays as many cameras as it can at once. Bittern remembers the layout on this device only.</p>
-  </details>
-</section>
-<p class="live-ceiling-note" data-live-ceiling-note="true" hidden="hidden"></p>
-<ul class="live-grid" data-live-grid="true" data-live-count="{{len .Tiles}}" aria-label="Live cameras">
-  {{range .Tiles}}<li class="live-tile" data-live-tile="{{.Index}}">{{template "live-tile" .}}</li>{{end}}
-</ul>
-{{end}}
-<script src="/ui/static/live-player.js" defer="defer"></script>
 {{else}}
-{{with .Live.Selected}}
-{{if gt (len $.Live.Cameras) 1}}
-<nav class="live-camera-picker" aria-label="Choose a camera">
-  <h2>Cameras</h2>
-  <ul>
-    {{range $.Live.Cameras}}<li><a href="{{.URL}}"{{if .Selected}} aria-current="true"{{end}}>{{.Name}}</a></li>{{end}}
-  </ul>
-</nav>
-{{end}}
-<section class="live-view" aria-labelledby="live-camera-title">
-  {{template "live-island" $.Live.Single}}
-  <div id="live-camera-state" class="live-camera-state" hx-get="{{.StatusURL}}" hx-trigger="every 15s" hx-target="this" hx-swap="innerHTML">
-    {{template "live-status" $}}
-  </div>
-</section>
-{{end}}
+{{with .Live.Grid}}
+<div class="live-wall" data-live-grid="true" data-layout="{{.Layout}}" data-device-prior="{{.Prior}}" data-live-count="0" data-live-capacity="{{.Prior}}" data-live-overlay="shown" role="group" aria-label="Live cameras">
+  {{range .Panes}}{{template "live-pane" .}}{{end}}
+  {{template "live-overlay" .}}
+</div>
+<script src="/ui/static/live-capacity.js" defer="defer"></script>
 <script src="/ui/static/live-player.js" defer="defer"></script>
+{{end}}
 {{end}}
 {{template "foot" .}}{{end}}

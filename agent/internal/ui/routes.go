@@ -193,8 +193,8 @@ var uiRoutes = []route{
 		Auth: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).setLiveLayout),
 	},
 	{
-		Name: "live-tile", Method: http.MethodPost, Pattern: "/ui/live/tile",
-		Auth: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).setLiveTile),
+		Name: "live-pane", Method: http.MethodPost, Pattern: "/ui/live/pane",
+		Auth: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).setLivePane),
 	},
 	{
 		Name: "live-status", Method: http.MethodGet, Pattern: "/ui/live/{camera}/status",

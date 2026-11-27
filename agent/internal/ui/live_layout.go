@@ -10,78 +10,228 @@ import (
 	"bittern.invalid/agent/internal/auth"
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/livestream"
+	"bittern.invalid/agent/internal/render"
 )
 
-// The live layout is data (ADR 0034 section 4). A preset is a tile count and
-// the tiles are camera IDs; the server resolves both against the current camera
-// inventory at render time. Adding a preset later changes livePresetCounts and
-// nothing in the template.
+// The live layout is data (ADR 0037 sections 1 and 3). The set of layouts is
+// liveLayoutCounts; the panes of a layout come from liveAreasForCount, one
+// function over a square cell grid. The stored choice is one per device: the
+// layout, one camera per pane and one quality per pane. Nothing here holds an
+// address, credential, stream name or owner name.
 const (
 	liveLayoutCookieName   = "bittern_live_layout"
 	liveLayoutCookieMaxAge = 365 * 24 * 60 * 60
-	// liveMaxTiles is the hard ceiling. The proxy enforces the same number of
-	// concurrent media sessions independently of this page.
-	liveMaxTiles = 9
+	// liveMaxTiles is the hard ceiling, and 16 is the largest legal layout. The
+	// proxy enforces the same number of concurrent media sessions.
+	liveMaxTiles = 16
 )
 
-// livePresetCounts is the ordered set of presets ADR 0034 decides.
-var livePresetCounts = []int{1, 2, 4, 9}
+// The per-pane quality values. The empty value is automatic, which resolves to
+// main in the one-pane layout and sub in every other layout.
+const (
+	liveQualityAutomatic = ""
+	liveQualityMain      = "main"
+	liveQualitySub       = "sub"
+	liveQualitySnapshot  = "snapshot"
+)
 
-var livePresetLabels = map[int]string{
-	0: "Automatic",
-	1: "One camera",
-	2: "Two cameras",
-	4: "Four cameras",
-	9: "Nine cameras",
+// liveLayoutCounts is the ordered set ADR 0037 decides. A new count is a row in
+// this list and in liveAreasForCount, not a new template.
+var liveLayoutCounts = []int{1, 4, 6, 8, 9, 16}
+
+// liveSquareSides maps the layouts whose panes are single cells of a square
+// grid to that grid's side.
+var liveSquareSides = map[int]int{1: 1, 4: 2, 9: 3, 16: 4}
+
+var liveLayoutLabels = map[int]string{
+	0:  "Automatic",
+	1:  "One pane",
+	4:  "Four panes",
+	6:  "Six panes",
+	8:  "Eight panes",
+	9:  "Nine panes",
+	16: "Sixteen panes",
 }
 
-// liveLayout is the stored, per-device choice. Preset 0 means automatic. Tiles
-// holds camera IDs only; it never holds an address, credential or stream name.
+var liveLayoutShortLabels = map[int]string{
+	0:  "Auto",
+	1:  "1",
+	4:  "4",
+	6:  "6",
+	8:  "8",
+	9:  "9",
+	16: "16",
+}
+
+// livePaneArea is one pane's rectangle in a layout's cell grid.
+type livePaneArea struct {
+	Row     int
+	Col     int
+	RowSpan int
+	ColSpan int
+}
+
+// liveAreas is one layout: a square cell grid and one rectangle per pane.
+type liveAreas struct {
+	Rows  int
+	Cols  int
+	Panes []livePaneArea
+}
+
+// liveAreasForCount is the only place a layout's geometry is decided. For 1, 4,
+// 9 and 16 every pane is one cell of a square grid. For 6 and 8 the side is
+// half the pane count: the primary is the first side-1 rows and columns, the
+// next side-1 panes are the rest of the last column, and the last side panes are
+// the bottom row, which gives 1 + (side-1) + side = 2*side panes.
+func liveAreasForCount(count int) (liveAreas, bool) {
+	if side, ok := liveSquareSides[count]; ok {
+		areas := liveAreas{Rows: side, Cols: side, Panes: make([]livePaneArea, 0, count)}
+		for index := 0; index < count; index++ {
+			areas.Panes = append(areas.Panes, livePaneArea{
+				Row:     index / side,
+				Col:     index % side,
+				RowSpan: 1,
+				ColSpan: 1,
+			})
+		}
+		return areas, true
+	}
+	if count == 6 || count == 8 {
+		side := count / 2
+		areas := liveAreas{Rows: side, Cols: side, Panes: make([]livePaneArea, 0, count)}
+		areas.Panes = append(areas.Panes, livePaneArea{
+			Row:     0,
+			Col:     0,
+			RowSpan: side - 1,
+			ColSpan: side - 1,
+		})
+		for row := 0; row < side-1; row++ {
+			areas.Panes = append(areas.Panes, livePaneArea{Row: row, Col: side - 1, RowSpan: 1, ColSpan: 1})
+		}
+		for col := 0; col < side; col++ {
+			areas.Panes = append(areas.Panes, livePaneArea{Row: side - 1, Col: col, RowSpan: 1, ColSpan: 1})
+		}
+		return areas, true
+	}
+	return liveAreas{}, false
+}
+
+// templateAreas renders the CSS grid-template-areas value for the layout. Pane
+// names are p1 to pN in reading order, which is also the server's pane order.
+func (areas liveAreas) templateAreas() string {
+	if areas.Rows == 0 || areas.Cols == 0 {
+		return ""
+	}
+	cells := make([][]string, areas.Rows)
+	for row := range cells {
+		cells[row] = make([]string, areas.Cols)
+	}
+	for index, pane := range areas.Panes {
+		name := fmt.Sprintf("p%d", index+1)
+		for row := pane.Row; row < pane.Row+pane.RowSpan; row++ {
+			for col := pane.Col; col < pane.Col+pane.ColSpan; col++ {
+				cells[row][col] = name
+			}
+		}
+	}
+	rows := make([]string, 0, areas.Rows)
+	for _, row := range cells {
+		rows = append(rows, `"`+strings.Join(row, " ")+`"`)
+	}
+	return strings.Join(rows, " ")
+}
+
+// liveLayout is the stored, per-device choice. Layout 0 means automatic. Tiles
+// holds camera IDs only and Qualities is parallel to it; the empty quality is
+// automatic.
 type liveLayout struct {
-	Stored bool
-	Preset int
-	Tiles  []string
+	Stored    bool
+	Layout    int
+	Tiles     []string
+	Qualities []string
 }
 
-// livePresetChoice is one button in the preset picker.
-type livePresetChoice struct {
+// liveLayoutChoice is one option in the layout picker.
+type liveLayoutChoice struct {
 	Value   string
 	Label   string
+	Name    string
 	Current bool
 }
 
-// liveCameraOption is one row in a tile's camera picker.
+// liveCameraOption is one row in a pane's camera picker.
 type liveCameraOption struct {
 	ID       string
 	Name     string
 	Selected bool
 }
 
-// liveTile is one resolved grid tile. An occupied tile carries a player island;
-// an empty tile carries only the camera picker.
-type liveTile struct {
-	Index       int
-	TitleID     string
-	Occupied    bool
-	Player      *liveSelection
-	Empty       bool
-	CSRF        string
-	AssignURL   string
-	Cameras     []liveCameraOption
-	AllAssigned bool
-	FullURL     string
+// liveQualityOption is one choice in the selected pane's quality control.
+type liveQualityOption struct {
+	Value   string
+	Label   string
+	Current bool
 }
 
-// liveGrid is the resolved page layout: the concrete tile list plus the
-// controls that change it.
+// livePane is one resolved pane: a player island and its overlay layer, or the
+// choose-camera control of an empty pane.
+type livePane struct {
+	Number       int
+	Area         string
+	TitleID      string
+	PaneID       string
+	Occupied     bool
+	Empty        bool
+	Label        string
+	CameraID     string
+	CameraName   string
+	Quality      string
+	QualityLabel string
+	Manual       string
+	Automatic    bool
+	// OneStream is true when the camera renders both quality names to the same
+	// stream, so the quality control is absent and the pane says so instead.
+	OneStream bool
+	Player    *liveSelection
+	ChooseURL string
+	CSRF      string
+	Cameras   []liveCameraOption
+	FullURL   string
+}
+
+// liveGrid is the resolved wall: the concrete pane list plus the controls that
+// change it.
 type liveGrid struct {
-	Preset      int
-	PresetLabel string
-	Presets     []livePresetChoice
-	Tiles       []liveTile
+	Layout      int
+	LayoutLabel string
+	Layouts     []liveLayoutChoice
+	Panes       []livePane
 	LayoutURL   string
-	AssignURL   string
+	PaneURL     string
 	CSRF        string
+	// Prior is the server's default class prior. The browser measures the
+	// viewport on boot and replaces it before any pane opens a connection.
+	Prior int
+	// NotInWall counts enabled cameras beyond the largest layout.
+	NotInWall int
+	// Selected is the pane whose quality the overlay controls on first paint.
+	Selected livePane
+	// Qualities is the three-way control for the selected pane.
+	Qualities []liveQualityOption
+	// CameraChoices is the selected pane's camera picker.
+	CameraChoices []liveCameraOption
+	// ProfileChoices is the single-camera route's link-based profile control.
+	ProfileChoices []liveProfileChoice
+	ProfileHint    string
+	// NextURL is where the pane form returns after a no-JavaScript submit.
+	NextURL string
+	// Preview is true in a preview build; the notice moves into the overlay.
+	Preview bool
+	// Cameras is the single-camera route's camera picker.
+	Cameras []liveCameraLink
+	// Single marks the single-camera route, which keeps its link-based profile
+	// choice and offers the other cameras as links.
+	Single bool
 }
 
 // liveLayoutFromRequest parses the first-party per-device cookie. A missing or
@@ -100,21 +250,28 @@ func liveLayoutFromRequest(r *http.Request) liveLayout {
 		return layout
 	}
 	layout.Stored = true
-	layout.Preset = livePresetFromValue(values.Get("p"))
+	layout.Layout = liveLayoutFromValue(values.Get("p"))
 	tiles := values["t"]
 	if len(tiles) > liveMaxTiles {
 		tiles = tiles[:liveMaxTiles]
 	}
+	qualities := values["q"]
 	layout.Tiles = make([]string, 0, len(tiles))
-	for _, id := range tiles {
+	layout.Qualities = make([]string, 0, len(tiles))
+	for index, id := range tiles {
 		layout.Tiles = append(layout.Tiles, strings.TrimSpace(id))
+		quality := ""
+		if index < len(qualities) {
+			quality = liveQualityFromValue(qualities[index])
+		}
+		layout.Qualities = append(layout.Qualities, quality)
 	}
 	return layout
 }
 
-// livePresetFromValue clamps any stored count to the largest allowed preset at
-// or below it. A stored 16 becomes nine; an unreadable value becomes automatic.
-func livePresetFromValue(value string) int {
+// liveLayoutFromValue clamps any stored count to the largest legal layout at or
+// below it. An unreadable value becomes automatic.
+func liveLayoutFromValue(value string) int {
 	value = strings.TrimSpace(value)
 	if value == "" || strings.EqualFold(value, "auto") {
 		return 0
@@ -123,40 +280,92 @@ func livePresetFromValue(value string) int {
 	if err != nil {
 		return 0
 	}
-	return livePresetCount(count)
+	return liveLayoutCount(count)
 }
 
-// livePresetCount clamps any count to the largest allowed preset at or below
-// it, and returns 0 for the automatic layout.
-func livePresetCount(count int) int {
+// liveLayoutCount clamps any count to the largest legal layout at or below it,
+// and returns 0 for the automatic layout: 2 and 3 become 1, 5 becomes 4, 7
+// becomes 6, and 10 to 15 become 9.
+func liveLayoutCount(count int) int {
 	if count < 1 {
 		return 0
 	}
-	preset := 0
-	for _, allowed := range livePresetCounts {
+	layout := 0
+	for _, allowed := range liveLayoutCounts {
 		if allowed <= count {
-			preset = allowed
+			layout = allowed
 		}
 	}
-	return preset
+	return layout
 }
 
-// cookieValue encodes only the preset and the camera IDs. url.Values keeps the
-// value inside the cookie-octet alphabet and preserves tile order.
+// liveAutoLayout is the smallest layout that holds every enabled camera, capped
+// at the largest layout.
+func liveAutoLayout(cameraCount int) int {
+	for _, count := range liveLayoutCounts {
+		if cameraCount <= count {
+			return count
+		}
+	}
+	return liveMaxTiles
+}
+
+// liveAutomaticQuality is the quality of a pane the owner has not chosen: main
+// in the one-pane layout and sub in every multi-pane layout. Main in a wall is
+// nine times the pixel rate of sub, which is why the wall defaults to sub.
+func liveAutomaticQuality(layout int) string {
+	if layout == 1 {
+		return livestream.ProfileMain
+	}
+	return livestream.ProfileSub
+}
+
+// liveQualityFromValue returns a stored quality, or the automatic marker.
+func liveQualityFromValue(value string) string {
+	switch strings.TrimSpace(value) {
+	case liveQualityMain:
+		return liveQualityMain
+	case liveQualitySub:
+		return liveQualitySub
+	case liveQualitySnapshot:
+		return liveQualitySnapshot
+	default:
+		return liveQualityAutomatic
+	}
+}
+
+// liveSnapshotProfile is the profile the snapshot route is asked for. The proxy
+// serves the same latest picture for both names; the automatic quality keeps the
+// URL aligned with what the pane would play.
+func liveSnapshotProfile(layout int, quality string) string {
+	if quality == liveQualityMain || quality == liveQualitySub {
+		return quality
+	}
+	return liveAutomaticQuality(layout)
+}
+
+// cookieValue encodes the layout, the camera IDs and the quality per pane.
+// url.Values keeps the value inside the cookie-octet alphabet and preserves
+// pane order for each repeated key.
 func (layout liveLayout) cookieValue() string {
 	values := url.Values{}
-	values.Set("v", "1")
-	if layout.Preset == 0 {
+	values.Set("v", "2")
+	if layout.Layout == 0 {
 		values.Set("p", "auto")
 	} else {
-		values.Set("p", strconv.Itoa(layout.Preset))
+		values.Set("p", strconv.Itoa(layout.Layout))
 	}
 	tiles := layout.Tiles
 	if len(tiles) > liveMaxTiles {
 		tiles = tiles[:liveMaxTiles]
 	}
-	for _, id := range tiles {
+	for index, id := range tiles {
 		values.Add("t", id)
+		quality := ""
+		if index < len(layout.Qualities) {
+			quality = liveQualityFromValue(layout.Qualities[index])
+		}
+		values.Add("q", quality)
 	}
 	return values.Encode()
 }
@@ -174,23 +383,17 @@ func writeLiveLayout(w http.ResponseWriter, layout liveLayout) {
 }
 
 // resolveLiveGrid validates the stored layout against the current inventory,
-// drops unknown and duplicate cameras, caps the list at nine and returns the
-// concrete tile list. The automatic preset shows one tile per enabled camera.
+// resolves the automatic layout from it, drops unknown and duplicate cameras,
+// and returns the concrete pane list. Pane order is reading order.
 func resolveLiveGrid(layout liveLayout, cameras []config.Camera, csrf string) liveGrid {
 	byID := make(map[string]config.Camera, len(cameras))
 	for _, camera := range cameras {
 		byID[camera.ID] = camera
 	}
-	preset := livePresetCount(layout.Preset)
-	count := preset
-	if count == 0 {
-		count = len(cameras)
-		if count > liveMaxTiles {
-			count = liveMaxTiles
-		}
-	}
-	if count > liveMaxTiles {
-		count = liveMaxTiles
+	automatic := liveLayoutCount(layout.Layout) == 0
+	count := liveLayoutCount(layout.Layout)
+	if automatic {
+		count = liveAutoLayout(len(cameras))
 	}
 	assigned := make([]string, count)
 	seen := make(map[string]bool, count)
@@ -209,77 +412,132 @@ func resolveLiveGrid(layout liveLayout, cameras []config.Camera, csrf string) li
 		seen[id] = true
 	}
 	// A brand new device has no stored assignment at all; the automatic layout
-	// fills the tiles in configuration order.
-	if preset == 0 && len(layout.Tiles) == 0 {
-		for index := 0; index < count; index++ {
-			if index < len(cameras) {
-				assigned[index] = cameras[index].ID
-			}
+	// fills the panes in configuration order and leaves the rest empty.
+	if automatic && len(layout.Tiles) == 0 {
+		for index := 0; index < count && index < len(cameras); index++ {
+			assigned[index] = cameras[index].ID
 		}
 	}
-	presets := make([]livePresetChoice, 0, len(livePresetCounts)+1)
-	presets = append(presets, livePresetChoice{
+	layouts := make([]liveLayoutChoice, 0, len(liveLayoutCounts)+1)
+	layouts = append(layouts, liveLayoutChoice{
 		Value:   "auto",
-		Label:   livePresetLabels[0],
-		Current: preset == 0,
+		Label:   liveLayoutShortLabels[0],
+		Name:    liveLayoutLabels[0],
+		Current: automatic,
 	})
-	for _, allowed := range livePresetCounts {
-		presets = append(presets, livePresetChoice{
+	for _, allowed := range liveLayoutCounts {
+		layouts = append(layouts, liveLayoutChoice{
 			Value:   strconv.Itoa(allowed),
-			Label:   livePresetLabels[allowed],
-			Current: preset == allowed,
+			Label:   liveLayoutShortLabels[allowed],
+			Name:    liveLayoutLabels[allowed],
+			Current: !automatic && count == allowed,
 		})
 	}
+	effectiveLayout := count
 	grid := liveGrid{
-		Preset:      preset,
-		PresetLabel: livePresetLabels[preset],
-		Presets:     presets,
+		Layout:      effectiveLayout,
+		LayoutLabel: liveLayoutLabels[effectiveLayout],
+		Layouts:     layouts,
 		LayoutURL:   BasePath + "/live/layout",
-		AssignURL:   BasePath + "/live/tile",
+		PaneURL:     BasePath + "/live/pane",
 		CSRF:        csrf,
-		Tiles:       make([]liveTile, 0, count),
+		Prior:       liveMaxTiles,
+		Panes:       make([]livePane, 0, count),
 	}
+	if len(cameras) > liveMaxTiles {
+		grid.NotInWall = len(cameras) - liveMaxTiles
+	}
+	quality := liveAutomaticQuality(effectiveLayout)
 	for index := 0; index < count; index++ {
-		tile := liveTile{
-			Index:     index,
-			TitleID:   fmt.Sprintf("live-tile-title-%d", index),
-			AssignURL: grid.AssignURL,
+		pane := livePane{
+			Number:    index + 1,
+			Area:      fmt.Sprintf("p%d", index+1),
+			TitleID:   fmt.Sprintf("live-pane-title-%d", index+1),
+			PaneID:    fmt.Sprintf("live-pane-%d", index+1),
+			ChooseURL: grid.PaneURL,
 			CSRF:      csrf,
-			Cameras:   liveTileCameraOptions(cameras, assigned, index),
+			Cameras:   livePaneCameraOptions(cameras, assigned, index),
+			Quality:   quality,
+			Automatic: true,
 		}
-		if id := assigned[index]; id != "" {
+		id := assigned[index]
+		if id != "" {
 			camera := byID[id]
-			tile.Occupied = true
-			tile.FullURL = BasePath + "/live/" + url.PathEscape(camera.ID)
-			tile.Player = liveGridPlayer(camera, index)
+			pane.Label = camera.Name
+			stored := liveQualityFromValue(liveQualityAt(layout.Qualities, index))
+			pane.Occupied = true
+			pane.CameraID = camera.ID
+			pane.CameraName = camera.Name
+			pane.Manual = stored
+			pane.Automatic = stored == liveQualityAutomatic
+			if stored != liveQualityAutomatic {
+				pane.Quality = stored
+			}
+			pane.OneStream = len(render.DistinctLiveQualities(camera)) < 2
+			pane.FullURL = BasePath + "/live/" + url.PathEscape(camera.ID)
+			pane.Player = livePanePlayer(camera, index, effectiveLayout, pane.Quality, pane.Automatic, pane.OneStream)
 		} else {
-			tile.Empty = true
-			tile.AllAssigned = liveCamerasAllAssigned(cameras, assigned, index)
+			pane.Empty = true
+			pane.Label = fmt.Sprintf("Empty pane %d", index+1)
+			pane.Quality = liveQualitySnapshot
 		}
-		grid.Tiles = append(grid.Tiles, tile)
+		if pane.Occupied {
+			pane.QualityLabel = liveQualityLabel(pane.Quality)
+		}
+		grid.Panes = append(grid.Panes, pane)
 	}
+	if len(grid.Panes) != 0 {
+		grid.Selected = grid.Panes[0]
+	}
+	grid.Qualities = liveQualityOptions(grid.Selected.Quality)
+	grid.CameraChoices = liveCameraChoices(cameras, grid.Selected.CameraID)
 	return grid
 }
 
-// liveCamerasAllAssigned reports whether every enabled camera already sits in
-// another tile, so an empty tile can say so instead of showing an empty picker.
-func liveCamerasAllAssigned(cameras []config.Camera, assigned []string, index int) bool {
-	for _, camera := range cameras {
-		used := false
-		for position, id := range assigned {
-			if position != index && id == camera.ID {
-				used = true
-				break
-			}
-		}
-		if !used {
-			return false
-		}
+// liveQualityLabel is the owner-facing quality name in the overlay.
+func liveQualityLabel(quality string) string {
+	switch quality {
+	case liveQualityMain:
+		return "Main stream"
+	case liveQualitySub:
+		return "Sub stream"
+	case liveQualitySnapshot:
+		return "Snapshots"
+	default:
+		return "Automatic"
 	}
-	return len(cameras) > 0
 }
 
-func liveTileCameraOptions(cameras []config.Camera, assigned []string, index int) []liveCameraOption {
+// liveCameraChoices lists every enabled camera for the selected pane's picker.
+func liveCameraChoices(cameras []config.Camera, selected string) []liveCameraOption {
+	options := make([]liveCameraOption, 0, len(cameras))
+	for _, camera := range cameras {
+		options = append(options, liveCameraOption{
+			ID:       camera.ID,
+			Name:     camera.Name,
+			Selected: camera.ID == selected,
+		})
+	}
+	return options
+}
+
+func liveQualityAt(qualities []string, index int) string {
+	if index < 0 || index >= len(qualities) {
+		return ""
+	}
+	return qualities[index]
+}
+
+// liveQualityOptions is the three-way quality control: main, sub and snapshot.
+func liveQualityOptions(current string) []liveQualityOption {
+	return []liveQualityOption{
+		{Value: liveQualityMain, Label: "Main", Current: current == liveQualityMain},
+		{Value: liveQualitySub, Label: "Sub", Current: current == liveQualitySub},
+		{Value: liveQualitySnapshot, Label: "Snapshot", Current: current == liveQualitySnapshot},
+	}
+}
+
+func livePaneCameraOptions(cameras []config.Camera, assigned []string, index int) []liveCameraOption {
 	options := make([]liveCameraOption, 0, len(cameras))
 	for _, camera := range cameras {
 		used := false
@@ -301,20 +559,28 @@ func liveTileCameraOptions(cameras []config.Camera, assigned []string, index int
 	return options
 }
 
-// liveGridPlayer is one grid tile's player island. Grid tiles play the sub
-// profile; the full-width view switches the same island to main.
-func liveGridPlayer(camera config.Camera, index int) *liveSelection {
-	profile := livestream.ProfileSub
+// livePanePlayer is one pane's player island. The profile is the quality the
+// pane asks the proxy for; main and sub resolve to the camera's own streams.
+func livePanePlayer(camera config.Camera, index, layout int, quality string, automatic, oneStream bool) *liveSelection {
+	profile := liveSnapshotProfile(layout, quality)
+	manual := ""
+	if !automatic {
+		manual = quality
+	}
 	return &liveSelection{
 		ID:          camera.ID,
 		Name:        camera.Name,
 		Profile:     profile,
 		ProfileName: livestream.ProfileLabel(profile),
+		Quality:     quality,
+		Manual:      manual,
+		Automatic:   automatic,
+		OneStream:   oneStream,
 		StatusURL:   BasePath + "/live/" + url.PathEscape(camera.ID) + "/status",
 		SnapshotURL: BasePath + "/live/media/" + url.PathEscape(camera.ID) + "/" + profile + "/snapshot.jpg",
 		MediaBase:   BasePath + "/live/media/" + url.PathEscape(camera.ID) + "/" + profile,
 		LoginURL:    BasePath + "/login?next=" + url.QueryEscape(BasePath+"/live"),
-		ElementID:   fmt.Sprintf("live-tile-player-%d", index),
+		ElementID:   fmt.Sprintf("live-tile-player-%d", index+1),
 		TileIndex:   index,
 		InGrid:      true,
 	}
@@ -327,90 +593,138 @@ func liveCSRF(r *http.Request) string {
 	return ""
 }
 
-// setLiveLayout changes the preset and keeps the resolved camera assignment, so
-// switching from automatic to nine and back never loses a camera.
+// setLiveLayout changes the layout and keeps the resolved camera assignment and
+// the per-pane quality, so switching from automatic to sixteen and back never
+// loses a pane's camera or its manual quality.
 func (h *handler) setLiveLayout(w http.ResponseWriter, r *http.Request) {
 	cameras, ok := h.liveCameras(w, r)
 	if !ok {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		h.render(w, r, http.StatusBadRequest, "error", pageData{
-			Title:    "The layout could not be read",
-			Message:  "The layout change did not reach the appliance. Nothing was changed.",
-			NextStep: "Open the live page and choose a layout again.",
-			BackURL:  BasePath + "/live",
-		})
+		h.renderLiveFormError(w, r, "The layout could not be read",
+			"The layout change did not reach the appliance. Nothing was changed.",
+			"Open the live page and choose a layout again.")
 		return
 	}
 	stored := liveLayoutFromRequest(r)
-	preset := livePresetFromValue(r.PostFormValue("preset"))
+	layout := liveLayoutFromValue(r.PostFormValue("layout"))
+	if layout == 0 && strings.TrimSpace(r.PostFormValue("layout")) == "" {
+		layout = liveLayoutFromValue(r.PostFormValue("preset"))
+	}
 	resolved := resolveLiveGrid(stored, cameras, "")
-	writeLiveLayout(w, liveLayout{
-		Stored: true,
-		Preset: preset,
-		Tiles:  trimLiveTiles(resolved.tileIDs()),
-	})
-	http.Redirect(w, r, BasePath+"/live#live-layout", http.StatusSeeOther)
+	next := liveLayout{
+		Stored:    true,
+		Layout:    layout,
+		Tiles:     trimLiveTiles(resolved.tileIDs()),
+		Qualities: resolved.tileQualities(),
+	}
+	writeLiveLayout(w, next)
+	http.Redirect(w, r, BasePath+"/live", http.StatusSeeOther)
 }
 
-// setLiveTile assigns one camera to one tile. Without JavaScript it is an
-// ordinary POST and redirect; with JavaScript the page asks for just that tile
-// and replaces only its own island.
-func (h *handler) setLiveTile(w http.ResponseWriter, r *http.Request) {
+// setLivePane changes one pane: its quality or its camera. Without JavaScript it
+// is an ordinary POST and redirect; with JavaScript the page asks for just that
+// pane and replaces only its own island.
+func (h *handler) setLivePane(w http.ResponseWriter, r *http.Request) {
 	cameras, ok := h.liveCameras(w, r)
 	if !ok {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		h.render(w, r, http.StatusBadRequest, "error", pageData{
-			Title:    "The tile could not be changed",
-			Message:  "The camera choice did not reach the appliance. Nothing was changed.",
-			NextStep: "Open the live page and choose a camera again.",
-			BackURL:  BasePath + "/live",
-		})
+		h.renderLiveFormError(w, r, "The pane could not be changed",
+			"The pane change did not reach the appliance. Nothing was changed.",
+			"Open the live page and choose a camera again.")
 		return
 	}
-	index, err := strconv.Atoi(strings.TrimSpace(r.PostFormValue("tile")))
-	if err != nil || index < 0 || index >= liveMaxTiles {
-		h.render(w, r, http.StatusBadRequest, "error", pageData{
-			Title:    "That tile is not on the live page",
-			Message:  "The tile number was not one of the tiles Bittern shows. Nothing was changed.",
-			NextStep: "Open the live page and choose a camera again.",
-			BackURL:  BasePath + "/live",
-		})
-		return
-	}
-	cameraID := strings.TrimSpace(r.PostFormValue("camera"))
 	stored := liveLayoutFromRequest(r)
 	resolved := resolveLiveGrid(stored, cameras, "")
-	tiles := resolved.tileIDs()
-	for len(tiles) <= index {
-		tiles = append(tiles, "")
+	index, err := strconv.Atoi(strings.TrimSpace(r.PostFormValue("pane")))
+	if err != nil || index < 1 || index > len(resolved.Panes) {
+		h.renderLiveFormError(w, r, "That pane is not on the live page",
+			"The pane number was not one of the panes Bittern shows. Nothing was changed.",
+			"Open the live page and choose a pane again.")
+		return
 	}
-	tiles[index] = ""
-	if cameraID != "" {
+	tiles := resolved.tileIDs()
+	qualities := resolved.tileQualities()
+	for len(tiles) < index {
+		tiles = append(tiles, "")
+		qualities = append(qualities, liveQualityAutomatic)
+	}
+	switch strings.TrimSpace(r.PostFormValue("action")) {
+	case "camera":
+		cameraID := strings.TrimSpace(r.PostFormValue("camera"))
+		known := false
 		for _, camera := range cameras {
 			if camera.ID == cameraID {
-				tiles[index] = camera.ID
+				known = true
 				break
 			}
 		}
-	}
-	layout := liveLayout{Stored: true, Preset: stored.Preset, Tiles: trimLiveTiles(tiles)}
-	writeLiveLayout(w, layout)
-	if r.Header.Get("X-Bittern-Tile") == "1" {
-		updated := resolveLiveGrid(layout, cameras, liveCSRF(r))
-		if index < len(updated.Tiles) {
-			h.renderTemplate(w, http.StatusOK, "live-tile", updated.Tiles[index])
-			return
+		if !known {
+			cameraID = ""
 		}
+		// A camera sits in one pane: assigning it here clears the pane it left.
+		for position := range tiles {
+			if position != index-1 && tiles[position] == cameraID && cameraID != "" {
+				tiles[position] = ""
+				qualities[position] = liveQualityAutomatic
+			}
+		}
+		tiles[index-1] = cameraID
+		if cameraID == "" {
+			qualities[index-1] = liveQualityAutomatic
+		}
+	default:
+		qualities[index-1] = liveQualityFromValue(r.PostFormValue("quality"))
+	}
+	next := liveLayout{
+		Stored:    true,
+		Layout:    stored.Layout,
+		Tiles:     trimLiveTiles(tiles),
+		Qualities: trimLiveQualities(qualities),
+	}
+	writeLiveLayout(w, next)
+	if r.Header.Get("X-Bittern-Inline") == "1" {
+		// The owner changed a pane's quality at runtime: the player switches on
+		// its own, so the page does not reload (ADR 0037 section 3).
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if redirect := safeLiveNext(r.PostFormValue("next")); redirect != "" {
+		http.Redirect(w, r, redirect, http.StatusSeeOther)
+		return
 	}
 	http.Redirect(w, r, BasePath+"/live", http.StatusSeeOther)
 }
 
-// tileIDs returns the resolved camera per tile in order, with an empty string
-// for an empty tile.
+// safeLiveNext accepts only a local live page as the return target.
+func safeLiveNext(value string) string {
+	value = strings.TrimSpace(value)
+	if value == BasePath+"/live" {
+		return value
+	}
+	if !strings.HasPrefix(value, BasePath+"/live/") {
+		return ""
+	}
+	if strings.Contains(value, "..") || strings.Contains(value, "//") || strings.Contains(value, "?") {
+		return ""
+	}
+	return value
+}
+
+func (h *handler) renderLiveFormError(w http.ResponseWriter, r *http.Request, title, message, nextStep string) {
+	h.render(w, r, http.StatusBadRequest, "error", pageData{
+		Title:    title,
+		Message:  message,
+		NextStep: nextStep,
+		BackURL:  BasePath + "/live",
+	})
+}
+
+// trimLiveTiles drops trailing empty panes but keeps the panes before them, so
+// a quality value stays aligned with its camera.
 func trimLiveTiles(tiles []string) []string {
 	for len(tiles) > 0 && tiles[len(tiles)-1] == "" {
 		tiles = tiles[:len(tiles)-1]
@@ -418,16 +732,31 @@ func trimLiveTiles(tiles []string) []string {
 	return tiles
 }
 
+func trimLiveQualities(qualities []string) []string {
+	for len(qualities) > 0 && qualities[len(qualities)-1] == liveQualityAutomatic {
+		qualities = qualities[:len(qualities)-1]
+	}
+	return qualities
+}
+
 func (grid liveGrid) tileIDs() []string {
-	ids := make([]string, 0, len(grid.Tiles))
-	for _, tile := range grid.Tiles {
-		if tile.Occupied && tile.Player != nil {
-			ids = append(ids, tile.Player.ID)
+	ids := make([]string, 0, len(grid.Panes))
+	for _, pane := range grid.Panes {
+		if pane.Occupied {
+			ids = append(ids, pane.CameraID)
 			continue
 		}
 		ids = append(ids, "")
 	}
 	return ids
+}
+
+func (grid liveGrid) tileQualities() []string {
+	qualities := make([]string, 0, len(grid.Panes))
+	for _, pane := range grid.Panes {
+		qualities = append(qualities, pane.Manual)
+	}
+	return qualities
 }
 
 func (h *handler) renderTemplate(w http.ResponseWriter, code int, name string, data any) {

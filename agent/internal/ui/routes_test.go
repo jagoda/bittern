@@ -222,12 +222,12 @@ func exerciseRoute(t *testing.T, route route) (int, string) {
 		configPath, secretsPath := writeCameraFixture(t)
 		server, client := newTestServer(t, Options{ConfigPath: configPath, SecretsPath: secretsPath, MockPreview: true})
 		disableRedirects(client)
-		return postPage(t, client, server.URL+path, url.Values{"preset": {"4"}})
-	case "live-tile":
+		return postPage(t, client, server.URL+path, url.Values{"layout": {"4"}})
+	case "live-pane":
 		configPath, secretsPath := writeCameraFixture(t)
 		server, client := newTestServer(t, Options{ConfigPath: configPath, SecretsPath: secretsPath, MockPreview: true})
 		disableRedirects(client)
-		return postPage(t, client, server.URL+path, url.Values{"tile": {"0"}, "camera": {"front_door"}})
+		return postPage(t, client, server.URL+path, url.Values{"pane": {"1"}, "camera": {"front_door"}, "action": {"camera"}})
 	case "camera-edit-submit":
 		configPath, secretsPath := writeCameraFixture(t)
 		server, client := newTestServer(t, Options{ConfigPath: configPath, SecretsPath: secretsPath})

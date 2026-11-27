@@ -46,7 +46,7 @@ pattern in [patterns.md](patterns.md), not a component here.
 | Footer and page links | `.site-footer`, `.page-links`, `.action-links` | Keep |
 | Camera card | `.camera-card`, `.camera-head`, `.camera-ident`, `.camera-actions` | Extend |
 | Test picture preview | `.camera-picture`, `.camera-picture-image`, `.camera-picture-error`, `.camera-picture figcaption` | Extend |
-| Live player island | `[data-live-player]`, `.live-media`, `.live-video`, `.live-status`, `.live-profiles` | Extend |
+| Live player island | `[data-live-player]`, `.live-player`, `.live-media`, `.live-video`, `.live-snapshot`, `.live-pane`, `.live-pane-overlay`, `.live-pane-name`, `.live-pane-note`, `.live-overlay`, `.live-profiles` | Extend |
 | Candidate list and row | `.candidate-list`, `.candidate-row`, `.candidate-meta` | Extend |
 | Layer list and evidence | `.layer-list`, `.candidate-evidence` | Keep |
 | Error summary | top `.alert` with `ErrorList` | Extend |
@@ -723,9 +723,10 @@ Current evidence for the list:
   capacity snapshot, offline, unsupported, session ended, device limit, above the tested capacity and
   player error.
 - Tokens: `--color-surface`, `--color-text`, `--color-text-muted`, `--color-border-control`,
-  `--color-action`, `--color-on-action`, `--color-focus`, `--focus-ring`, `--focus-ring-width`,
-  `--radius-control`, `--border-width`, `--space-4`, `--space-8`, `--space-12`, `--space-16`,
-  `--touch-target`, `--type-body`, `--type-meta`, `--type-label`.
+  `--color-action`, `--color-on-action`, `--color-focus`, `--color-scrim`, `--color-on-scrim`,
+  `--focus-ring`, `--focus-ring-width`, `--radius-control`, `--border-width`, `--space-4`,
+  `--space-8`, `--space-12`, `--space-16`, `--touch-target`, `--type-body`, `--type-meta`,
+  `--type-label`.
 - Do: render the player once. Keep the video and the overlay as siblings, with the overlay inside the
   pane and outside the player node. Keep the state sentence and the next action in the overlay. Expose
   the class prior, the live count and the current capacity as data attributes. Give every pane its
