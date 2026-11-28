@@ -224,8 +224,12 @@ Media1 `ConfigurationEntity` has a `UseCount` field: "Number of internal referen
 this configuration." [S9] `ConfigurationEntity`. Media2 deprecates `UseCount` but keeps the concept:
 "Read-only property indicating the number of referenced profiles. Deprecated in Media2." [S2] 5.2.1.
 A profile may therefore share one encoder with another profile, and one encoder may be used by
-several profiles. The client must dedupe by encoder token before classifying, or it will count the
-same stream twice.
+several profiles. The client must not dedupe by encoder token alone: two profiles with one encoder
+can return different stream URIs, and collapsing them hides a working sub stream. The stream URI is
+the identity. Profiles that resolve to the same URI are one stream; profiles with different URIs are
+kept even when they share an encoder. A field report from an Amcrest camera on 2026-11-28 confirmed
+this failure and the `subtype=1` vendor sub stream, recorded as quirk `Q-0001` in
+[the compatibility matrix](../engineering/onvif-compatibility.md#quirk-register).
 
 Media2 also has virtual profiles for multitrack streaming. A virtual profile token bundles several
 profiles into one RTSP session. [S2] 5.1.6. It is not a single video source and encoder pair, so it

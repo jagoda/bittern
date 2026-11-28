@@ -2,6 +2,7 @@ package cameraprofile
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -57,11 +58,11 @@ func TestCollectCoversMediaServicesAndAuthentication(t *testing.T) {
 		{name: "both services prefer media2", media: 3, auth: "wsse", profiles: twoProfiles(), wantState: StateOK, wantMedia: "Media2", wantAuth: "wsse-digest", wantSub: true},
 		{name: "http digest", media: 2, auth: "digest", profiles: twoProfiles(), wantState: StateOK, wantMedia: "Media2", wantAuth: "http-digest", wantSub: true},
 		{name: "password text over tls", media: 1, auth: "text", tls: true, allowText: true, profiles: twoProfiles(), wantState: StateOK, wantMedia: "Media1", wantAuth: "wsse-text", wantSub: true},
-		{name: "one profile", media: 1, auth: "wsse", profiles: twoProfiles()[:1], wantState: StateOneStream, wantMedia: "Media1", wantAuth: "wsse-digest"},
-		{name: "two profiles one encoder", media: 1, auth: "wsse", profiles: []fakeProfile{
-			{Token: "A", Name: "Main", Encoding: "H264", Width: 1920, Height: 1080, Encoder: "shared"},
-			{Token: "B", Name: "Sub", Encoding: "H264", Width: 640, Height: 360, Encoder: "shared"},
-		}, wantState: StateOneStream, wantMedia: "Media1", wantAuth: "wsse-digest"},
+		{name: "one profile", media: 1, auth: "wsse", profiles: twoProfiles()[:1], wantState: StateOneProfile, wantMedia: "Media1", wantAuth: "wsse-digest"},
+		{name: "two profiles one encoder with distinct URIs", media: 1, auth: "wsse", profiles: []fakeProfile{
+			{Token: "A", Name: "Main", Encoding: "H264", Width: 1920, Height: 1080, Encoder: "shared", Stream: "rtsp://127.0.0.1:554/cam/realmonitor?channel=1&subtype=0"},
+			{Token: "B", Name: "Sub", Encoding: "H264", Width: 640, Height: 360, Encoder: "shared", Stream: "rtsp://127.0.0.1:554/cam/realmonitor?channel=1&subtype=1"},
+		}, wantState: StateOK, wantMedia: "Media1", wantAuth: "wsse-digest", wantSub: true},
 		{name: "unusual tokens", media: 2, auth: "wsse", profiles: []fakeProfile{
 			{Token: `Profile & <one>`, Name: "Main", Encoding: "H264", Width: 1920, Height: 1080, Encoder: "enc & <1>"},
 			{Token: "Profile/üz", Name: "Sub", Encoding: "H264", Width: 640, Height: 360, Encoder: "enc/üz"},
@@ -101,7 +102,9 @@ func TestCollectCoversMediaServicesAndAuthentication(t *testing.T) {
 			if testCase.wantAuth != "" && result.AuthMethod != testCase.wantAuth {
 				t.Fatalf("auth method = %q, want %q", result.AuthMethod, testCase.wantAuth)
 			}
-			if testCase.wantState != StateOK && testCase.wantState != StateOneStream {
+			if testCase.wantState != StateOK && testCase.wantState != StateOneStream &&
+				testCase.wantState != StateOneProfile && testCase.wantState != StateProfilesShareURI &&
+				testCase.wantState != StateNoSmallerProfile {
 				if result.Profiles != nil {
 					t.Fatalf("a failed probe stored profiles: %+v", result.Profiles)
 				}
@@ -170,15 +173,17 @@ func TestClassifyUsesReportedFactsNotNames(t *testing.T) {
 }
 
 func TestClassifyUsesBitrateFrameRateAndTokenAsTieBreaks(t *testing.T) {
-	base := onvif.MediaProfile{Encoding: "H264", Width: 1920, Height: 1080, StreamURI: "/same", EncoderToken: "enc"}
+	base := onvif.MediaProfile{Encoding: "H264", Width: 1920, Height: 1080, EncoderToken: "enc"}
 	lowBitrate := base
 	lowBitrate.Token = "A"
 	lowBitrate.EncoderToken = "enc-a"
 	lowBitrate.Bitrate = 2048
+	lowBitrate.StreamURI = "/a"
 	highBitrate := base
 	highBitrate.Token = "B"
 	highBitrate.EncoderToken = "enc-b"
 	highBitrate.Bitrate = 4096
+	highBitrate.StreamURI = "/b"
 	classification := Classify([]onvif.MediaProfile{lowBitrate, highBitrate})
 	if classification.Main == nil || classification.Main.Token != "B" {
 		t.Fatalf("bitrate did not break the area tie: %+v", classification.Main)
@@ -188,10 +193,12 @@ func TestClassifyUsesBitrateFrameRateAndTokenAsTieBreaks(t *testing.T) {
 	lowFrame.Token = "C"
 	lowFrame.EncoderToken = "enc-c"
 	lowFrame.FrameRate = 15
+	lowFrame.StreamURI = "/c"
 	highFrame := highBitrate
 	highFrame.Token = "D"
 	highFrame.EncoderToken = "enc-d"
 	highFrame.FrameRate = 25
+	highFrame.StreamURI = "/d"
 	classification = Classify([]onvif.MediaProfile{lowFrame, highFrame})
 	if classification.Main == nil || classification.Main.Token != "D" {
 		t.Fatalf("frame rate did not break the bitrate tie: %+v", classification.Main)
@@ -211,23 +218,29 @@ func TestClassifyUsesBitrateFrameRateAndTokenAsTieBreaks(t *testing.T) {
 	}
 }
 
-func TestClassifyDeduplicatesByEncoderAndRejectsUnusableProfiles(t *testing.T) {
+func TestClassifyCollapsesDuplicateURIsAndRejectsUnusableProfiles(t *testing.T) {
 	profiles := []onvif.MediaProfile{
-		{Token: "B", Encoding: "H264", Width: 1920, Height: 1080, EncoderToken: "shared", StreamURI: "/b"},
-		{Token: "A", Encoding: "H264", Width: 640, Height: 360, EncoderToken: "shared", StreamURI: "/a"},
+		{Token: "B", Encoding: "H264", Width: 1920, Height: 1080, EncoderToken: "shared", StreamURI: "/shared"},
+		{Token: "A", Encoding: "H264", Width: 640, Height: 360, EncoderToken: "shared", StreamURI: "/shared"},
 		{Token: "C", Encoding: "JPEG", Width: 1920, Height: 1080, EncoderToken: "jpeg", StreamURI: "/c"},
 		{Token: "D", Encoding: "H264", Width: 0, Height: 0, EncoderToken: "zero", StreamURI: "/d"},
 		{Token: "E", Encoding: "H264", Width: 1280, Height: 720, EncoderToken: "nostream"},
 	}
 	classification := Classify(profiles)
-	if classification.Eligible != 1 {
-		t.Fatalf("eligible = %d, want one", classification.Eligible)
+	if classification.Eligible != 2 {
+		t.Fatalf("eligible = %d, want two", classification.Eligible)
+	}
+	if classification.DistinctURIs != 1 {
+		t.Fatalf("distinct URIs = %d, want one", classification.DistinctURIs)
 	}
 	if classification.Main == nil || classification.Main.Token != "A" {
-		t.Fatalf("main = %+v, want the first profile by token for the shared encoder", classification.Main)
+		t.Fatalf("main = %+v, want the first profile by token for the shared URI", classification.Main)
 	}
 	if classification.Sub != nil {
 		t.Fatalf("sub = %+v, want none", classification.Sub)
+	}
+	if len(classification.Collapsed) != 1 || classification.Collapsed[0] != "B" {
+		t.Fatalf("collapsed = %v, want B", classification.Collapsed)
 	}
 }
 
@@ -260,5 +273,138 @@ func TestCollectFallsBackToMedia1WhenMedia2ReturnsNoStream(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the fallback was not recorded: %v", result.Evidence)
+	}
+}
+
+func vendorCamera(vendor string) config.Camera {
+	camera := testCamera()
+	camera.Vendor = &vendor
+	return camera
+}
+
+func TestCollectProbesTheVendorSubstreamOnlyWhenNeeded(t *testing.T) {
+	mainOnly := []fakeProfile{{
+		Token: "Profile_1", Name: "Main", Encoding: "H264", Width: 1920, Height: 1080, Encoder: "main",
+		Stream: "rtsp://127.0.0.1:554/cam/realmonitor?channel=1&subtype=0",
+	}}
+	twoStreams := []fakeProfile{
+		mainOnly[0],
+		{Token: "Profile_2", Name: "Sub", Encoding: "H264", Width: 640, Height: 360, Encoder: "sub",
+			Stream: "rtsp://127.0.0.1:554/cam/realmonitor?channel=1&subtype=1"},
+	}
+	cases := []struct {
+		name       string
+		vendor     string
+		profiles   []fakeProfile
+		probe      StreamProbe
+		wantState  State
+		wantProbe  bool
+		wantSub    bool
+		wantQuirk  bool
+		wantDetail string
+	}{
+		{
+			name: "amcrest one profile", vendor: "Amcrest", profiles: mainOnly,
+			probe: func(context.Context, config.Camera, string, secrets.CameraAccount) (StreamProbeResult, error) {
+				return StreamProbeResult{Codec: "h264", Width: 640, Height: 360}, nil
+			},
+			wantState: StateOK, wantProbe: true, wantSub: true, wantQuirk: true,
+		},
+		{
+			name: "dahua one profile", vendor: "Dahua Technology", profiles: mainOnly,
+			probe: func(context.Context, config.Camera, string, secrets.CameraAccount) (StreamProbeResult, error) {
+				return StreamProbeResult{Codec: "h264", Width: 640, Height: 360}, nil
+			},
+			wantState: StateOK, wantProbe: true, wantSub: true, wantQuirk: true,
+		},
+		{
+			name: "two distinct profiles are never given the vendor pattern", vendor: "Amcrest", profiles: twoStreams,
+			probe: func(context.Context, config.Camera, string, secrets.CameraAccount) (StreamProbeResult, error) {
+				t.Error("the vendor probe ran although ONVIF reported two distinct streams")
+				return StreamProbeResult{}, nil
+			},
+			wantState: StateOK, wantSub: true,
+		},
+		{
+			name: "unknown vendor is not guessed", vendor: "ACME", profiles: mainOnly,
+			probe: func(context.Context, config.Camera, string, secrets.CameraAccount) (StreamProbeResult, error) {
+				t.Error("the vendor probe ran for an unknown vendor")
+				return StreamProbeResult{}, nil
+			},
+			wantState: StateOneProfile,
+		},
+		{
+			name: "failed probe is unverified and not offered", vendor: "Amcrest", profiles: mainOnly,
+			probe: func(context.Context, config.Camera, string, secrets.CameraAccount) (StreamProbeResult, error) {
+				return StreamProbeResult{}, errors.New("the camera did not answer")
+			},
+			wantState: StateSubUnverified, wantProbe: true, wantQuirk: true,
+			wantDetail: "could not verify",
+		},
+		{
+			name: "wrong shape is unverified and not offered", vendor: "Amcrest", profiles: mainOnly,
+			probe: func(context.Context, config.Camera, string, secrets.CameraAccount) (StreamProbeResult, error) {
+				return StreamProbeResult{Codec: "h264", Width: 1920, Height: 1080}, nil
+			},
+			wantState: StateSubUnverified, wantProbe: true, wantQuirk: true,
+			wantDetail: "could not verify",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			camera := &fakeCamera{Media: 1, Auth: "wsse", Profiles: testCase.profiles}
+			server := newFakeCamera(t, camera)
+			defer server.Close()
+			probed := make([]string, 0, 1)
+			options := testOptions(server)
+			options.StreamProbe = func(ctx context.Context, cam config.Camera, path string, account secrets.CameraAccount) (StreamProbeResult, error) {
+				probed = append(probed, path)
+				if testCase.probe != nil {
+					return testCase.probe(ctx, cam, path, account)
+				}
+				return StreamProbeResult{}, nil
+			}
+			result := Collect(context.Background(), vendorCamera(testCase.vendor), secrets.CameraAccount{Username: "admin", Password: "s3cret"}, options)
+			if result.State != testCase.wantState {
+				t.Fatalf("state = %q, detail = %q, evidence = %v, want %q", result.State, result.Detail, result.Evidence, testCase.wantState)
+			}
+			if testCase.wantDetail != "" && !strings.Contains(strings.ToLower(result.Detail), strings.ToLower(testCase.wantDetail)) {
+				t.Fatalf("detail = %q, want %q", result.Detail, testCase.wantDetail)
+			}
+			if testCase.wantProbe {
+				if len(probed) != 1 {
+					t.Fatalf("probe calls = %v, want one", probed)
+				}
+				if probed[0] != "/cam/realmonitor?channel=1&subtype=1" {
+					t.Fatalf("probe path = %q", probed[0])
+				}
+			} else if len(probed) != 0 {
+				t.Fatalf("probe calls = %v, want none", probed)
+			}
+			if testCase.wantQuirk {
+				if len(result.Quirks) != 1 || result.Quirks[0] != QuirkDahuaAmcrestSubtype {
+					t.Fatalf("quirks = %v", result.Quirks)
+				}
+				found := false
+				for _, evidence := range result.Evidence {
+					if strings.Contains(evidence, QuirkDahuaAmcrestSubtype) {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("quirk evidence missing: %v", result.Evidence)
+				}
+			}
+			if result.Profiles == nil || result.Profiles.Main == nil {
+				t.Fatal("no main profile was stored")
+			}
+			if testCase.wantSub {
+				if result.Profiles.Sub == nil || result.Profiles.Sub.RTSPPath != "/cam/realmonitor?channel=1&subtype=1" {
+					t.Fatalf("sub profile = %+v", result.Profiles.Sub)
+				}
+			} else if result.Profiles.Sub != nil {
+				t.Fatalf("unexpected sub profile: %+v", result.Profiles.Sub)
+			}
+		})
 	}
 }

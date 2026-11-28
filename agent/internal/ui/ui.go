@@ -20,6 +20,7 @@ import (
 
 	"bittern.invalid/agent/internal/assets"
 	"bittern.invalid/agent/internal/auth"
+	"bittern.invalid/agent/internal/cameraprofile"
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/discovery"
 	"bittern.invalid/agent/internal/status"
@@ -74,6 +75,9 @@ type Options struct {
 	// Go2RTCURL is the loopback go2rtc base used by the live media proxy.
 	// Empty uses http://127.0.0.1:1984. Tests point it at a local server.
 	Go2RTCURL string
+	// StreamProbe verifies a manually entered sub stream path before it is
+	// saved. Nil uses the bounded RTSP probe.
+	StreamProbe cameraprofile.StreamProbe
 }
 
 // CameraTimeNotifier marks cameras for one bounded time sync after adoption.
@@ -158,6 +162,7 @@ func newHandler(options Options) (*handler, *routeMux, error) {
 		stateRoot:   options.StateRoot,
 		updates:     options.Updates,
 		go2rtcURL:   options.Go2RTCURL,
+		streamProbe: options.StreamProbe,
 		liveLimiter: newLiveLimiter(liveMaxConnections),
 	}
 
@@ -187,6 +192,7 @@ type handler struct {
 	stateRoot   string
 	updates     UpdateService
 	go2rtcURL   string
+	streamProbe cameraprofile.StreamProbe
 	liveLimiter *liveLimiter
 }
 

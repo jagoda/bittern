@@ -55,6 +55,10 @@ type CameraTimeSection struct {
 const (
 	CameraProfileOK               = "ok"
 	CameraProfileOneStream        = "one-stream"
+	CameraProfileOneProfile       = "one-profile"
+	CameraProfileProfilesShareURI = "profiles-share-uri"
+	CameraProfileNoSmallerProfile = "no-smaller-profile"
+	CameraProfileSubUnverified    = "sub-unverified"
 	CameraProfileONVIFDisabled    = "onvif-disabled"
 	CameraProfileSignInRejected   = "sign-in-rejected"
 	CameraProfileNoMediaService   = "no-media-service"
@@ -83,6 +87,7 @@ type CameraProfileSection struct {
 	MainHeight   int        `json:"main_height,omitempty"`
 	SubWidth     int        `json:"sub_width,omitempty"`
 	SubHeight    int        `json:"sub_height,omitempty"`
+	Quirks       []string   `json:"quirks,omitempty"`
 	CollectedAt  *time.Time `json:"collected_at,omitempty"`
 }
 
@@ -151,6 +156,7 @@ type CameraProfileHealth struct {
 	MainHeight   int        `json:"main_height,omitempty"`
 	SubWidth     int        `json:"sub_width,omitempty"`
 	SubHeight    int        `json:"sub_height,omitempty"`
+	Quirks       []string   `json:"quirks,omitempty"`
 	CollectedAt  *time.Time `json:"collected_at,omitempty"`
 }
 
@@ -444,6 +450,7 @@ func cameraProfileSection(health *CameraProfileHealth) CameraProfileSection {
 			MainHeight:   health.MainHeight,
 			SubWidth:     health.SubWidth,
 			SubHeight:    health.SubHeight,
+			Quirks:       append([]string(nil), health.Quirks...),
 			CollectedAt:  health.CollectedAt,
 		}
 	}

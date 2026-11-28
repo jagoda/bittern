@@ -328,7 +328,8 @@ link back to the list. The form is one column at every width, with the control m
    made.
 2. Show current values, grouped by owner model: identity, stream, sign-in.
 3. Keep required fields visible. Put optional overrides in a named disclosure, not in the main
-   path.
+   path. The sub stream override is one such disclosure: it is tested by connecting before saving,
+   and a blank value removes the saved sub profile.
 4. On submit, validate, keep values, link and focus the summary, and repeat the message at the
    field.
 5. Apply through the operation pattern if the apply is slow. On success, return to the list with a

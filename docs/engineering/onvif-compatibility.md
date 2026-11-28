@@ -109,10 +109,12 @@ test. The policy is in [the strategy note](../notes/2026-11-27-onvif-compatibili
 
 | Quirk ID | Vendor | Model pattern | Firmware | Symptom | Detection | Adjustment | Scope | Evidence | Test | Owner | Status | Review after |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| _none yet_ | | | | | | | | | | | | |
+| Q-0001 | Dahua, Amcrest OEM | model unknown in the field report | unknown | ONVIF returns one usable main profile while the sub stream is the same RTSP path with `subtype=1` | Exactly one distinct usable stream URI, and the reported vendor or model contains `Dahua` or `Amcrest` | Construct the same path with `subtype=1`, connect with RTSP DESCRIBE, require an H.264 or H.265 video track, and require any reported dimensions to be smaller than main. Never apply when two distinct URIs were reported. A failed probe records the quirk as unverified and stores no sub profile. | Profile collection only; render never probes | Field report, 2026-11-28, an Amcrest camera: ONVIF surfaced one stream; the same path with `subtype=1` connected and returned H.264 video. Model and firmware were not captured. | `TestCollectProbesTheVendorSubstreamOnlyWhenNeeded`, `TestProbeStreamConnectsChallengesAndReadsTheSDP` | runtime | active | 2027-05-28 or the next firmware change |
 
-No quirk with evidence is recorded. A candidate is not a quirk and is not applied. The candidates
-below are listed so the next agent does not turn folklore into code without a record:
+Q-0001 is the only active quirk. Its model and firmware cells stay unknown until the next field run
+captures them. The row records the camera behaviour as evidence, not a claim about every Amcrest
+model. A candidate is not a quirk and is not applied. The candidates below are listed so the next
+agent does not turn folklore into code without a record:
 
 | Candidate | Why it is a candidate, not a quirk | Evidence needed |
 | --- | --- | --- |

@@ -45,6 +45,16 @@
     {{if hasError .Errors "path"}}<p class="field-error" id="camera-path-error">{{index .Errors "path"}}</p>{{end}}
     <input id="camera-path" name="rtsp_path" type="text" value="{{.Form.Path}}" required="required" autocomplete="off" aria-describedby="camera-path-hint{{if hasError .Errors "path"}} camera-path-error{{end}}"{{if hasError .Errors "path"}} aria-invalid="true"{{end}} />
   </div>
+  <details class="disclosure advanced-settings"{{if hasError .Errors "sub_path"}} open="open"{{end}}>
+    <summary>Sub stream override</summary>
+    <p class="hint">Optional. Use this only when the camera has a lighter sub stream that Bittern did not find. Bittern tests the path before saving it. Leave it blank to remove a saved sub stream.</p>
+    <div class="field">
+      <label for="camera-sub-path">Sub stream path <span class="field-required">Optional</span></label>
+      <p class="hint" id="camera-sub-path-hint">For a Dahua or Amcrest camera, the main path usually works with subtype=1. Do not type the address, user name, or password.</p>
+      {{if hasError .Errors "sub_path"}}<p class="field-error" id="camera-sub-path-error">{{index .Errors "sub_path"}}</p>{{end}}
+      <input id="camera-sub-path" name="sub_path" type="text" value="{{.Form.SubPath}}" autocomplete="off" data-camera-sub-path="true" aria-describedby="camera-sub-path-hint{{if hasError .Errors "sub_path"}} camera-sub-path-error{{end}}"{{if hasError .Errors "sub_path"}} aria-invalid="true"{{end}} />
+    </div>
+  </details>
 </fieldset>
 {{end}}
 

@@ -224,7 +224,7 @@ message, with BIT-029 rendering the cleared list inside it. Today a new session 
 
 | ID | Rule | Check |
 | --- | --- | --- |
-| M1 | Every camera keeps its own settings. Name, address, stream port, path, sign-in and hardware address belong to the camera being added or edited. Opening one camera's settings renders only that camera's values and changes no other camera. | Q11 and Q15; a two-camera walk; the per-camera settings test in BIT-029. |
+| M1 | Every camera keeps its own settings. Name, address, stream port, path, optional sub stream path, sign-in and hardware address belong to the camera being added or edited. Opening one camera's settings renders only that camera's values and changes no other camera. | Q11 and Q15; a two-camera walk; the per-camera settings test in BIT-029. |
 | M2 | One add or one save touches one camera. A failed add creates no row and changes no existing row, and the next add is available immediately. | Q15; the two-camera add test, including a failed first add. |
 | M3 | A camera that fails validation does not block adding the next one, and a camera already in the list whose check failed does not block the review or the next add. A validation failure renders on the destination that holds the add form and creates no row; a check failure stays on the camera's own row with its reason and its two actions. | Q5 and Q15; the failed-add and failed-check-row tests. |
 | M4 | Removing a camera from the pending list is not the destructive remove. It needs no confirmation, it changes nothing on the appliance, and it says that the sign-in typed for that camera is dropped. The label is "Remove from list", never "Remove camera". | Q9; [D6](patterns.md#destructive-action); the remove-from-list test. |

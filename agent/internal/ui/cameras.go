@@ -79,6 +79,11 @@ func (h *handler) submitCameraEdit(w http.ResponseWriter, r *http.Request) {
 			validationErrors[field] = message
 		}
 	}
+	if len(validationErrors) == 0 {
+		for field, message := range h.applySubstreamOverride(r.Context(), &camera, existing, form, credentialURL, h.secretsPath()) {
+			validationErrors[field] = message
+		}
+	}
 	if len(validationErrors) != 0 {
 		h.renderCameraEdit(w, r, existing, form, validationErrors, "")
 		return
@@ -225,6 +230,7 @@ func (h *handler) parseCameraForm(r *http.Request, existing *config.Camera) (con
 		Address:  r.PostFormValue("address"),
 		Port:     r.PostFormValue("rtsp_port"),
 		Path:     r.PostFormValue("rtsp_path"),
+		SubPath:  r.PostFormValue("sub_path"),
 		MAC:      r.PostFormValue("camera_mac"),
 		Username: r.PostFormValue("username"),
 		Password: r.PostFormValue("password"),

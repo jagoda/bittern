@@ -181,8 +181,10 @@ begin with `/`, contains `://` or `@`, or exceeds the string cap. The camera-lev
 the manual or fallback path. A camera that uses `credentials_ref` stores one account under that key;
 the renderer builds each profile's URL from the account and the profile path, so two profiles produce
 two credentialed URLs and one stream produces one URL under both keys. Profiles are collected at
-adoption by the bounded ONVIF Media probe, not by the migration and never at render time. A version 2
-document migrates with no `profiles` key and therefore keeps the one-stream behaviour.
+adoption by the bounded ONVIF Media probe, not by the migration and never at render time. An owner
+can also set a sub stream path in the camera settings; Bittern connects and verifies it before
+saving it under `profiles.sub`, and a blank path removes it. A version 2 document migrates with no
+`profiles` key and therefore keeps the one-stream behaviour.
 
 A camera address inside the dynamic pool is accepted only when `mac` is set. The renderer then
 emits one `dhcp-host=<mac>,<address>` line into `/etc/dnsmasq.d/bittern-reservation.conf`.

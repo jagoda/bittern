@@ -181,8 +181,14 @@ A profile is **eligible** when all of these are true:
 5. `GetStreamUri` returned a URI that passed endpoint validation, and an RTSP `DESCRIBE` or
    `OPTIONS` on that URI succeeded.
 6. It is not a virtual or multitrack profile.
-7. Its encoder token has not already been seen. When two profiles share an encoder token, keep the
-   first by profile token and record the duplicate. [S9] `ConfigurationEntity`; [S2] 5.2.1.
+7. Its stream URI is not already represented by another eligible profile. When two profiles share a
+   stream URI, keep the first by profile token and record the collapsed profile. When two profiles
+   share an encoder token but return different stream URIs, keep both: the URI identifies the
+   stream, not the encoder. [S9] `ConfigurationEntity`; [S2] 5.2.1.
+
+The URI rule is deliberate. A shared encoder token does not mean a shared stream: some cameras return
+two profiles with different URIs from one encoder. Deduplicating by encoder alone hides a working
+sub stream. Profile order, names and encoder reuse never decide quality.
 
 For each eligible profile, compute:
 
@@ -210,7 +216,8 @@ Then:
   profile exists, `low` is absent.
 
 The rule uses resolution first, then the reported bitrate limit, then the reported frame rate limit.
-It never uses the profile name or the token semantics. The token is only the final tie-break that
+It never uses the profile name or the token semantics. Main and sub are selected from the distinct
+stream URIs; profiles that resolve to the same URI are one stream. The token is only the final tie-break that
 makes the result deterministic. A missing bitrate or frame rate is treated as `0`, which ranks below
 any reported positive value; it is recorded as `unknown`, not as a claim that the stream is low
 quality.
@@ -477,12 +484,20 @@ establish; it is not implemented as a default.
 | 6 | A camera may accept only WS-UsernameToken, only HTTP Digest, or both | Verified | [S1] 5.9.1; [S11] 7.1.3; [S12] 7.1.3 | Read `Security/UsernameToken` and `Security/HttpDigest`; prefer HTTP Digest; keep the WS-UsernameToken ladder; remember the method |
 | 7 | A camera may reject an authenticated request whose timestamp is far from its clock | Verified that timestamps are checked; the exact window is folklore | [S1] 5.9.5; [S14] 3.1 | Read the camera clock first; fall back to the HTTP `Date` header; use HTTP Digest as the skew escape; record a rejection |
 | 8 | ONVIF may need enabling, and the ONVIF account may differ from the web or RTSP account | Verified for Hikvision enablement and separate accounts, and for Dahua's separate ONVIF user; assumed for other vendors | [S18]; [S20]; [S26] | Treat auth failure as a capability gap; offer an optional ONVIF account under the same `credentials_ref`; never block adoption |
-| 9 | Profile tokens, names and order may not mean main or sub, and profiles may share an encoder | Verified for token and name meaning; the specification is silent on order | [S10] `ReferenceToken`; [S9] `Profile`; [S2] 5.2.1 | Classify by resolution, bitrate, frame rate and encoding; dedupe by encoder token; use the token only as a final tie-break |
+| 9 | Profile tokens, names and order may not mean main or sub, and profiles may share an encoder | Verified for token and name meaning; the specification is silent on order | [S10] `ReferenceToken`; [S9] `Profile`; [S2] 5.2.1 | Classify by resolution, bitrate, frame rate and encoding; identify streams by URI, never by encoder token; use the token only as a final tie-break |
 | 10 | PTZ may be partial: continuous move and stop are mandatory, but presets, zoom, home and absolute or relative moves are conditional | Verified | [S4] 5.1.1, 5.3.1, 5.3.2, 5.3.3, 5.3.5, 5.4, 5.7, 5.10; [S12] 7.22 | Detect the node, spaces, preset count and status capabilities; show only the supported controls; always pair a move with Stop and a timeout |
 
 The folklore items are deliberate. A client that assumes a different device service path, a SOAP 1.1
 binding, a `PasswordText` requirement, or presets on every PTZ camera will add code that no evidence
 supports. Each becomes a quirk candidate, not a default.
+
+Quirk `Q-0001` is the exception with field evidence. A Dahua or Amcrest OEM camera may expose only
+one usable ONVIF profile while its sub stream is the same path with `subtype=1`. The client constructs
+that candidate only when ONVIF produced one distinct stream URI, probes it with an RTSP DESCRIBE, and
+offers it only when the SDP declares H.264 or H.265 and any reported dimensions are smaller than
+main. A failed probe records the quirk as unverified and offers no sub profile. The evidence and test
+are in [the compatibility matrix](../engineering/onvif-compatibility.md#quirk-register) and
+[the field note](2026-11-28-amcrest-substream-detection.md).
 
 ## What this proposal does not decide
 

@@ -385,7 +385,9 @@ weight so it is lighter than a button.
 
 The field component is extended because the current camera form nests bordered fieldsets inside a
 disclosure and puts required stream fields in an "Advanced settings" group whose hint says
-"Optional".
+"Optional". The camera stream group also has a "Sub stream override" disclosure for the optional
+path Bittern did not detect; it is tested before saving and a blank value removes the saved sub
+profile.
 
 ## Disclosure
 

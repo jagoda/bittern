@@ -2,14 +2,19 @@ package ui
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"bittern.invalid/agent/internal/apply"
 	"bittern.invalid/agent/internal/cameraprofile"
 	"bittern.invalid/agent/internal/config"
+	"bittern.invalid/agent/internal/render"
 	"bittern.invalid/agent/internal/secrets"
 	"bittern.invalid/agent/internal/status"
 )
@@ -173,5 +178,181 @@ func TestProfileNoticesCarryTheWizardReasonAndAction(t *testing.T) {
 	}
 	if notice.Class != "degraded" || notice.Label != "Stream settings unavailable" {
 		t.Fatalf("class and label = %q %q", notice.Class, notice.Label)
+	}
+}
+
+func TestCameraEditValidatesStoresAndRendersAManualSubstream(t *testing.T) {
+	configPath, secretsPath := writeCameraFixture(t)
+	applier := &fakeApplier{}
+	probed := make([]string, 0, 1)
+	server, client := newTestServer(t, Options{
+		ConfigPath:  configPath,
+		SecretsPath: secretsPath,
+		Applier:     applier,
+		StreamProbe: func(_ context.Context, _ config.Camera, path string, account secrets.CameraAccount) (cameraprofile.StreamProbeResult, error) {
+			probed = append(probed, path)
+			if account.Username != "viewer" || account.Password != "secret" {
+				t.Fatalf("the saved camera account was not used: %+v", account)
+			}
+			return cameraprofile.StreamProbeResult{Codec: "h264", Width: 640, Height: 360}, nil
+		},
+	})
+	statusCode, body := postPage(t, client, server.URL+"/ui/cameras/front_door/edit", url.Values{
+		"name":      {"Front door"},
+		"address":   {"10.77.0.20"},
+		"rtsp_port": {"554"},
+		"rtsp_path": {"/stream1"},
+		"sub_path":  {"/cam/realmonitor?channel=1&subtype=1"},
+	})
+	if statusCode != http.StatusOK {
+		t.Fatalf("edit status = %d\n%s", statusCode, body)
+	}
+	if len(probed) != 1 || probed[0] != "/cam/realmonitor?channel=1&subtype=1" {
+		t.Fatalf("probe calls = %v", probed)
+	}
+	if len(applier.calls) != 1 {
+		t.Fatalf("apply calls = %d", len(applier.calls))
+	}
+	camera := applier.calls[0].Cameras[0]
+	if camera.Profiles == nil || camera.Profiles.Sub == nil {
+		t.Fatalf("manual sub profile was not stored: %+v", camera.Profiles)
+	}
+	sub := camera.Profiles.Sub
+	if sub.ProfileToken != cameraprofile.ManualSubstreamToken ||
+		sub.RTSPPath != "/cam/realmonitor?channel=1&subtype=1" ||
+		sub.Width == nil || *sub.Width != 640 || sub.Height == nil || *sub.Height != 360 ||
+		sub.Codec == nil || *sub.Codec != "h264" {
+		t.Fatalf("stored sub profile = %+v", sub)
+	}
+	qualities := render.DistinctLiveQualities(camera)
+	if len(qualities) != 2 || qualities[0] != "main" || qualities[1] != "sub" {
+		t.Fatalf("renderer qualities = %v, want main and sub", qualities)
+	}
+}
+
+func TestCameraEditRejectsAnUnverifiedManualSubstream(t *testing.T) {
+	configPath, secretsPath := writeCameraFixture(t)
+	applier := &fakeApplier{}
+	server, client := newTestServer(t, Options{
+		ConfigPath:  configPath,
+		SecretsPath: secretsPath,
+		Applier:     applier,
+		StreamProbe: func(context.Context, config.Camera, string, secrets.CameraAccount) (cameraprofile.StreamProbeResult, error) {
+			return cameraprofile.StreamProbeResult{}, errors.New("no video")
+		},
+	})
+	statusCode, body := postPage(t, client, server.URL+"/ui/cameras/front_door/edit", url.Values{
+		"name":      {"Front door"},
+		"address":   {"10.77.0.20"},
+		"rtsp_port": {"554"},
+		"rtsp_path": {"/stream1"},
+		"sub_path":  {"/cam/realmonitor?channel=1&subtype=1"},
+	})
+	if statusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("edit status = %d\n%s", statusCode, body)
+	}
+	assertContains(t, body, "Bittern could not open a video stream at this path", `value="/cam/realmonitor?channel=1&amp;subtype=1"`)
+	if len(applier.calls) != 0 {
+		t.Fatal("an unverified sub stream was saved")
+	}
+}
+
+func TestCameraEditRemovesASavedManualSubstream(t *testing.T) {
+	configPath, secretsPath := writeCameraFixture(t)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withProfile := strings.Replace(string(data), "    credentials_ref: cameras.front_door.rtsp_url\n", "    credentials_ref: cameras.front_door.rtsp_url\n    profiles:\n      sub:\n        profile_token: manual-sub\n        rtsp_path: /cam/realmonitor?channel=1&subtype=1\n", 1)
+	if err := os.WriteFile(configPath, []byte(withProfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	applier := &fakeApplier{}
+	server, client := newTestServer(t, Options{
+		ConfigPath:  configPath,
+		SecretsPath: secretsPath,
+		Applier:     applier,
+		StreamProbe: func(context.Context, config.Camera, string, secrets.CameraAccount) (cameraprofile.StreamProbeResult, error) {
+			t.Fatal("the probe ran for an empty sub stream path")
+			return cameraprofile.StreamProbeResult{}, nil
+		},
+	})
+	statusCode, body := postPage(t, client, server.URL+"/ui/cameras/front_door/edit", url.Values{
+		"name":      {"Front door"},
+		"address":   {"10.77.0.20"},
+		"rtsp_port": {"554"},
+		"rtsp_path": {"/stream1"},
+		"sub_path":  {""},
+	})
+	if statusCode != http.StatusOK {
+		t.Fatalf("edit status = %d\n%s", statusCode, body)
+	}
+	if len(applier.calls) != 1 {
+		t.Fatalf("apply calls = %d", len(applier.calls))
+	}
+	camera := applier.calls[0].Cameras[0]
+	if camera.Profiles != nil {
+		t.Fatalf("the saved sub profile was not removed: %+v", camera.Profiles)
+	}
+}
+
+func TestOneStreamReasonComesFromTheStoredProfileResult(t *testing.T) {
+	stateRoot := t.TempDir()
+	now := time.Now().UTC()
+	if err := status.SaveCameraHealth(stateRoot, "front_door", status.CameraHealth{
+		Profiles: &status.CameraProfileHealth{
+			State:  status.CameraProfileSubUnverified,
+			Detail: "ONVIF reported one stream. Bittern found this camera's usual sub stream address but could not verify a usable video stream there, so it is not offered.",
+		},
+		CheckedAt: &now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := &handler{stateRoot: stateRoot}
+	reason := h.oneStreamReason("front_door")
+	if !strings.Contains(reason, "could not verify") {
+		t.Fatalf("one-stream reason = %q, want the stored reason", reason)
+	}
+	fallback := h.oneStreamReason("side_gate")
+	if !strings.Contains(fallback, "does not report a second stream") {
+		t.Fatalf("fallback reason = %q", fallback)
+	}
+}
+
+func TestWizardAddVerifiesASubstreamBeforeAddingTheCamera(t *testing.T) {
+	applier := &fakeApplier{}
+	probed := make([]string, 0, 1)
+	server, client := newTestServer(t, Options{
+		Applier: applier,
+		StreamProbe: func(_ context.Context, _ config.Camera, path string, account secrets.CameraAccount) (cameraprofile.StreamProbeResult, error) {
+			probed = append(probed, path)
+			if account.Username != "viewer" || account.Password != "s3cret" {
+				t.Fatalf("the sign-in typed on the form was not used: %+v", account)
+			}
+			return cameraprofile.StreamProbeResult{Codec: "h264", Width: 640, Height: 360}, nil
+		},
+	})
+	getPage(t, client, server.URL+"/ui/wizard")
+	postPage(t, client, server.URL+"/ui/wizard/network", url.Values{})
+	postPage(t, client, server.URL+"/ui/wizard/storage", url.Values{})
+	values := frontDoorValues()
+	values.Set("sub_path", "/cam/realmonitor?channel=1&subtype=1")
+	addCamera(t, client, server.URL, values)
+	if len(probed) != 1 || probed[0] != "/cam/realmonitor?channel=1&subtype=1" {
+		t.Fatalf("probe calls = %v", probed)
+	}
+	continueToReview(t, client, server.URL)
+	statusCode, done := postPage(t, client, server.URL+"/ui/wizard/apply", url.Values{})
+	if statusCode != http.StatusOK {
+		t.Fatalf("apply status = %d\n%s", statusCode, done)
+	}
+	if len(applier.calls) != 1 {
+		t.Fatalf("apply calls = %d", len(applier.calls))
+	}
+	camera := applier.calls[0].Cameras[0]
+	if camera.Profiles == nil || camera.Profiles.Sub == nil ||
+		camera.Profiles.Sub.RTSPPath != "/cam/realmonitor?channel=1&subtype=1" ||
+		camera.Profiles.Sub.ProfileToken != cameraprofile.ManualSubstreamToken {
+		t.Fatalf("wizard sub profile = %+v", camera.Profiles)
 	}
 }

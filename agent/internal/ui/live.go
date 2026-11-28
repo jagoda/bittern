@@ -8,6 +8,7 @@ import (
 	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/livestream"
 	"bittern.invalid/agent/internal/render"
+	"bittern.invalid/agent/internal/status"
 )
 
 // liveCameraLink is one entry in the single-camera picker.
@@ -78,6 +79,7 @@ func (h *handler) showLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	grid := resolveLiveGrid(liveLayoutFromRequest(r), cameras, liveCSRF(r))
+	h.annotateOneStreamReasons(&grid)
 	grid.Preview = h.preview
 	h.render(w, r, http.StatusOK, "live", pageData{
 		Title:     "Live",
@@ -148,6 +150,43 @@ func (h *handler) liveCameras(w http.ResponseWriter, r *http.Request) ([]config.
 	return cameras, true
 }
 
+// annotateOneStreamReasons replaces the generic one-stream note with the
+// stored reason for that camera. A camera whose health has not been read keeps
+// the generic note.
+func (h *handler) annotateOneStreamReasons(grid *liveGrid) {
+	if grid == nil {
+		return
+	}
+	for index := range grid.Panes {
+		if grid.Panes[index].OneStream && grid.Panes[index].Occupied {
+			grid.Panes[index].OneStreamReason = h.oneStreamReason(grid.Panes[index].CameraID)
+		}
+	}
+	for index := range grid.CameraTemplates {
+		if grid.CameraTemplates[index].OneStream {
+			grid.CameraTemplates[index].ProfileHint = h.oneStreamReason(grid.CameraTemplates[index].ID)
+		}
+	}
+	for index := range grid.Panes {
+		if grid.Panes[index].Number == grid.Selected.Number {
+			grid.Panes[index].OneStreamReason = h.oneStreamReason(grid.Panes[index].CameraID)
+			grid.Selected = grid.Panes[index]
+			break
+		}
+	}
+}
+
+func (h *handler) oneStreamReason(cameraID string) string {
+	const fallback = "One stream. This camera does not report a second stream, so main and sub use the same picture."
+	health := status.LoadCameraHealth(h.stateRootPath())[cameraID]
+	if health.Profiles != nil {
+		if detail := strings.TrimSpace(health.Profiles.Detail); detail != "" {
+			return detail
+		}
+	}
+	return fallback
+}
+
 // renderLive is the single-camera view: one pane of the wall, with the camera
 // fixed by the route and the profile chosen by the page's own link control.
 // ADR 0034 section 5 keeps this route; ADR 0037 gives it the wall's pane and
@@ -196,6 +235,7 @@ func (h *handler) renderLive(w http.ResponseWriter, r *http.Request, cameras []c
 		})
 	}
 	oneStream := len(render.DistinctLiveQualities(selected)) < 2
+	oneStreamReason := h.oneStreamReason(selected.ID)
 	selection := &liveSelection{
 		ID:          selected.ID,
 		Name:        selected.Name,
@@ -209,7 +249,7 @@ func (h *handler) renderLive(w http.ResponseWriter, r *http.Request, cameras []c
 		SnapshotURL: BasePath + "/live/media/" + url.PathEscape(selected.ID) + "/" + url.PathEscape(profile) + "/snapshot.jpg",
 		MediaBase:   BasePath + "/live/media/" + url.PathEscape(selected.ID) + "/" + url.PathEscape(profile),
 		LoginURL:    BasePath + "/login?next=" + url.QueryEscape(BasePath+"/live/"+selected.ID),
-		ProfileHint: "This camera has one stream. Main and sub use it until Bittern learns the camera profiles.",
+		ProfileHint: oneStreamReason,
 		ElementID:   "live-player",
 		TileIndex:   -1,
 	}
@@ -228,7 +268,7 @@ func (h *handler) renderLive(w http.ResponseWriter, r *http.Request, cameras []c
 		CurrentStream:   "Current stream: " + liveQualityLabel(profile) + ".",
 		Manual:          profile,
 		OneStream:       oneStream,
-		OneStreamReason: "One stream. This camera does not report a second stream, so main and sub use the same picture.",
+		OneStreamReason: oneStreamReason,
 		Player:          selection,
 		FullURL:         BasePath + "/live/" + url.PathEscape(selected.ID),
 		Qualities:       liveQualityOptions(profile),

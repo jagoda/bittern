@@ -72,6 +72,7 @@ func (a AgentApplier) recordProfileResult(stateRoot, cameraID string, result cam
 		MainHeight:   result.MainHeight,
 		SubWidth:     result.SubWidth,
 		SubHeight:    result.SubHeight,
+		Quirks:       append([]string(nil), result.Quirks...),
 		CollectedAt:  &now,
 	}
 	if health.Detail == "" {

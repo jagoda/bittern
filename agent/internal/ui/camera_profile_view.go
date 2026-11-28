@@ -44,8 +44,11 @@ func (h *handler) profileNotices() []profileNotice {
 
 func cameraProfileClass(state string) string {
 	switch state {
-	case status.CameraProfileOK, status.CameraProfileOneStream:
+	case status.CameraProfileOK, status.CameraProfileOneStream, status.CameraProfileOneProfile:
 		return "ok"
+	case status.CameraProfileProfilesShareURI, status.CameraProfileNoSmallerProfile,
+		status.CameraProfileSubUnverified:
+		return "degraded"
 	case status.CameraProfileNotProbed, "":
 		return "unknown"
 	default:
@@ -59,6 +62,14 @@ func cameraProfileLabel(state string) string {
 		return "Two streams"
 	case status.CameraProfileOneStream:
 		return "One stream"
+	case status.CameraProfileOneProfile:
+		return "One profile"
+	case status.CameraProfileProfilesShareURI:
+		return "Profiles share one stream"
+	case status.CameraProfileNoSmallerProfile:
+		return "No smaller stream"
+	case status.CameraProfileSubUnverified:
+		return "Sub stream unverified"
 	case status.CameraProfileONVIFDisabled, status.CameraProfileNoMediaService,
 		status.CameraProfileNoProfile, status.CameraProfileNoStream,
 		status.CameraProfileSignInRejected, status.CameraProfileClockUnavailable,

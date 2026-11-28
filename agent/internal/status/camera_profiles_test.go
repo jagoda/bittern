@@ -21,6 +21,10 @@ func TestCameraProfileVocabularyHasAnOwnerAction(t *testing.T) {
 	}{
 		{CameraProfileOK, "two streams", ""},
 		{CameraProfileOneStream, "one stream", "second"},
+		{CameraProfileOneProfile, "one usable profile", "second"},
+		{CameraProfileProfilesShareURI, "same stream address", "sub stream"},
+		{CameraProfileNoSmallerProfile, "none is smaller", "smaller"},
+		{CameraProfileSubUnverified, "could not verify", "subtype=1"},
 		{CameraProfileONVIFDisabled, "does not answer ONVIF", "Turn on ONVIF"},
 		{CameraProfileSignInRejected, "refused the sign-in", "sign-in"},
 		{CameraProfileNoMediaService, "does not offer", "stream settings"},
@@ -48,6 +52,31 @@ func TestCameraProfileVocabularyHasAnOwnerAction(t *testing.T) {
 		if !strings.Contains(section.Action, testCase.action) {
 			t.Fatalf("%s action = %q, want a mention of %q", testCase.state, section.Action, testCase.action)
 		}
+	}
+}
+
+func TestOneStreamReasonsAreSpecificAndDistinct(t *testing.T) {
+	states := []string{
+		CameraProfileONVIFDisabled,
+		CameraProfileSignInRejected,
+		CameraProfileOneProfile,
+		CameraProfileProfilesShareURI,
+		CameraProfileSubUnverified,
+	}
+	seen := make(map[string]bool, len(states))
+	for _, state := range states {
+		section := cameraProfileSection(&CameraProfileHealth{State: state})
+		if section.Detail == "" || section.Action == "" {
+			t.Fatalf("%s has no reason or action: %+v", state, section)
+		}
+		if !strings.Contains(strings.ToLower(section.Detail), "one stream") &&
+			!strings.Contains(strings.ToLower(section.Detail), "one usable profile") {
+			t.Fatalf("%s detail does not name the one-stream outcome: %q", state, section.Detail)
+		}
+		if seen[section.Detail] {
+			t.Fatalf("%s repeats another state's reason: %q", state, section.Detail)
+		}
+		seen[section.Detail] = true
 	}
 }
 

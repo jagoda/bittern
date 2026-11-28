@@ -171,21 +171,27 @@ from [ADR 0037](adr/0037-nvr-grid-per-pane-quality-and-full-screen.md) and
 It records what the camera advertises, which media service answered, which
 scheme and account worked, where the first authenticated timestamp came from,
 and the reason a sub stream is absent. It never holds a complete URI or a
-credential. A camera is probed once at adoption; the renderer never probes.
+credential. A camera is probed once at adoption; the renderer never probes. A
+Dahua or Amcrest camera with one usable ONVIF stream may also carry verified
+quirk `Q-0001`, or an owner-supplied sub stream path verified before saving.
 
 | State | Meaning | Primary copy | Next step |
 | --- | --- | --- | --- |
-| `ok` | Two usable profiles were selected | This camera offers two streams. Bittern uses the sharper one for one camera and the lighter one for the camera wall. | None. |
-| `one-stream` | One usable profile, or two profiles that share an encoder | This camera offers one stream. Bittern uses it for both views. | Turn on a second, lighter stream in the camera's own settings, then run setup again. |
-| `onvif-disabled` | The camera does not answer ONVIF, or has it switched off | This camera does not answer ONVIF. It records through the stream address you entered. | Turn on ONVIF in the camera's own settings, then run setup again to use its lighter stream. |
-| `sign-in-rejected` | The camera refused every sign-in scheme and account | This camera refused the sign-in Bittern used for its stream settings. | Check the camera sign-in, or add the camera's ONVIF sign-in on the camera form. |
-| `no-media-service` | ONVIF answers but advertises no Media1 or Media2 service | This camera answers ONVIF but does not offer its stream settings. | Turn on the camera's media or ONVIF profile service, then run setup again. |
-| `no-profile` | Profiles are empty or none is an eligible H.264 or H.265 stream | This camera did not list a video profile Bittern can use. | Check the camera's stream settings, or add the stream address on the camera form. |
-| `no-stream` | Profiles exist but no stream URI passed validation | This camera did not return a usable stream address. | Check the camera's stream settings, or add the stream address on the camera form. |
-| `unreachable` | The camera did not answer the ONVIF endpoint | Bittern could not reach this camera to read its stream settings. | Check the camera's power and network cable, then run setup again. |
-| `clock-unavailable` | The camera rejected the first authenticated timestamp | Bittern could not read this camera's clock, so the camera refused its stream settings. | Set the camera's clock in its own settings, then run setup again. |
-| `malformed` | The camera answered with XML or a service list the client could not read | This camera returned stream settings Bittern could not read. | Update the camera firmware, or add the stream address on the camera form. |
-| `not-probed` | No probe has run for this camera | Bittern has not read this camera's stream profiles yet. | Run setup or edit the camera again. |
+| `ok` | Two distinct stream URIs were selected, including a verified vendor candidate or manual sub stream | This camera offers two streams. Bittern uses the sharper one for one camera and the lighter one for the camera wall. | None. |
+| `one-profile` | ONVIF listed one usable profile | ONVIF listed one usable profile for this camera, so Bittern has one stream for both views. The camera did not report a second profile. | Turn on a second, lighter stream in the camera's own settings, or add the sub stream path in the camera settings. |
+| `profiles-share-uri` | ONVIF listed more than one profile but they resolve to one stream URI | ONVIF listed more than one profile, but they resolve to the same stream address, so Bittern has one stream. | Turn on a separate sub stream profile, or add the sub stream path in the camera settings. |
+| `no-smaller-profile` | ONVIF listed distinct streams but none is smaller than main | ONVIF listed more than one stream, but none is smaller than the main stream, so Bittern has one stream. | Turn on a smaller sub stream, or add its path in the camera settings. |
+| `sub-unverified` | A vendor sub-stream candidate was constructed but did not verify | ONVIF reported one stream. Bittern found this camera's usual sub stream address but could not verify a usable video stream there, so it is not offered. | Check that the sub stream is on and uses subtype=1, or add its path in the camera settings and test it again. |
+| `one-stream` | Legacy stored result from before the specific reasons existed | This camera offers one stream. Bittern uses it for both views. | Turn on a second, lighter stream, or add the sub stream path in the camera settings. |
+| `onvif-disabled` | The camera does not answer ONVIF, or has it switched off | This camera does not answer ONVIF, so Bittern has one stream. It records through the stream address you entered. | Turn on ONVIF in the camera's own settings, then run setup again to use its lighter stream. |
+| `sign-in-rejected` | The camera refused every sign-in scheme and account | This camera refused the sign-in Bittern used for ONVIF, so Bittern could not read a second stream and has one stream. | Check the camera sign-in, or add the camera's ONVIF sign-in on the camera form. |
+| `no-media-service` | ONVIF answers but advertises no Media1 or Media2 service | This camera answers ONVIF but does not offer its stream settings, so Bittern has one stream. | Turn on the camera's media or ONVIF profile service, then run setup again. |
+| `no-profile` | Profiles are empty or none is an eligible H.264 or H.265 stream | This camera did not list a video profile Bittern can use, so Bittern has one stream. | Check the camera's stream settings, or add the stream address on the camera form. |
+| `no-stream` | Profiles exist but no stream URI passed validation | This camera did not return a usable stream address, so Bittern has one stream. | Check the camera's stream settings, or add the stream address on the camera form. |
+| `unreachable` | The camera did not answer the ONVIF endpoint | Bittern could not reach this camera to read its stream settings, so it has one stream for now. | Check the camera's power and network cable, then run setup again. |
+| `clock-unavailable` | The camera rejected the first authenticated timestamp | Bittern could not read this camera's clock, so the camera refused its stream settings and Bittern has one stream. | Set the camera's clock in its own settings, then run setup again. |
+| `malformed` | The camera answered with XML or a service list the client could not read | This camera returned stream settings Bittern could not read, so Bittern has one stream. | Update the camera firmware, or add the stream address on the camera form. |
+| `not-probed` | No probe has run for this camera | Bittern has not read this camera's stream profiles yet, so it has one stream for now. | Run setup or edit the camera again. |
 
 Every failure state is a capability record, not an adoption failure. Adoption
 commits the camera, its reservation, and its credential; the manual stream

@@ -193,3 +193,31 @@ func TestRendererDirectSourceWithoutCredentials(t *testing.T) {
 }
 
 func stringPointer(value string) *string { return &value }
+
+func TestManualSubProfileRendersDistinctSubStream(t *testing.T) {
+	camera := config.Camera{
+		ID:       "front_door",
+		Address:  "10.77.0.20",
+		RTSPPath: stringPointer("/cam/realmonitor?channel=1&subtype=0"),
+		Profiles: &config.CameraProfiles{
+			Sub: &config.CameraProfile{
+				ProfileToken: "manual-sub",
+				RTSPPath:     "/cam/realmonitor?channel=1&subtype=1",
+			},
+		},
+	}
+	streams := LiveStreams(camera)
+	if len(streams) != 2 {
+		t.Fatalf("streams = %+v", streams)
+	}
+	if streams[0].Source != "rtsp://10.77.0.20:554/cam/realmonitor?channel=1&subtype=0" {
+		t.Fatalf("main source = %q", streams[0].Source)
+	}
+	if streams[1].Source != "rtsp://10.77.0.20:554/cam/realmonitor?channel=1&subtype=1" {
+		t.Fatalf("sub source = %q", streams[1].Source)
+	}
+	qualities := DistinctLiveQualities(camera)
+	if len(qualities) != 2 || qualities[0] != "main" || qualities[1] != "sub" {
+		t.Fatalf("distinct qualities = %v", qualities)
+	}
+}

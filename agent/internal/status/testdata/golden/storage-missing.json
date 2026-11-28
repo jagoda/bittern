@@ -84,7 +84,7 @@
           },
           "profiles": {
             "state": "not-probed",
-            "detail": "Bittern has not read this camera's stream profiles yet."
+            "detail": "Bittern has not read this camera's stream profiles yet, so it has one stream for now."
           },
           "distinct_qualities": [
             "main"

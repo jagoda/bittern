@@ -22,6 +22,10 @@ type State string
 const (
 	StateOK               State = "ok"
 	StateOneStream        State = "one-stream"
+	StateOneProfile       State = "one-profile"
+	StateProfilesShareURI State = "profiles-share-uri"
+	StateNoSmallerProfile State = "no-smaller-profile"
+	StateSubUnverified    State = "sub-unverified"
 	StateONVIFDisabled    State = "onvif-disabled"
 	StateSignInRejected   State = "sign-in-rejected"
 	StateNoMediaService   State = "no-media-service"
@@ -52,6 +56,7 @@ type Result struct {
 	SubHeight    int
 	Eligible     int
 	Evidence     []string
+	Quirks       []string
 }
 
 // Options configures one camera's collection. Endpoint and HTTPClient are test
@@ -65,6 +70,9 @@ type Options struct {
 	HTTPClient        *http.Client
 	Now               func() time.Time
 	MaxOperations     int
+	// StreamProbe verifies a constructed or manually entered stream path. Nil
+	// uses ProbeStream, the bounded RTSP DESCRIBE probe.
+	StreamProbe StreamProbe
 }
 
 const (
@@ -137,7 +145,7 @@ func Collect(ctx context.Context, camera config.Camera, account secrets.CameraAc
 	version, endpoint, ok := services.MediaService()
 	if !ok {
 		return failure(StateNoMediaService,
-			"This camera answers ONVIF but does not offer its stream settings.",
+			"This camera answers ONVIF but does not offer its stream settings, so Bittern has one stream.",
 			"Turn on the camera's media or ONVIF profile service, then run setup again.")
 	}
 
@@ -177,17 +185,25 @@ func Collect(ctx context.Context, camera config.Camera, account secrets.CameraAc
 	if classification.Main == nil {
 		if streamedProfiles(profiles) == 0 {
 			return probe.failure(StateNoStream,
-				"This camera listed a stream profile but did not return a usable stream address.",
+				"This camera listed a stream profile but did not return a usable stream address, so Bittern has one stream.",
 				"Check the camera's ONVIF stream settings, or add the stream address on the camera form.")
 		}
 		return probe.failure(StateNoProfile,
-			"This camera did not list a video profile Bittern can use.",
+			"This camera did not list a video profile Bittern can use, so Bittern has one stream.",
 			"Check the camera's stream settings, or add the stream address on the camera form.")
+	}
+
+	// A camera that reported two distinct ONVIF streams is never given a vendor
+	// pattern. Only a single usable ONVIF stream is eligible for the documented
+	// Dahua/Amcrest subtype candidate, and the candidate must pass a real probe
+	// before it is stored or offered.
+	if classification.Sub == nil && classification.DistinctURIs == 1 {
+		probe.probeVendorSubstream(probeContext, &classification)
 	}
 
 	snapshots := make(map[string]string, 2)
 	for _, selected := range []*onvif.MediaProfile{classification.Main, classification.Sub} {
-		if selected == nil {
+		if selected == nil || selected.Token == VendorSubstreamToken || selected.Token == ManualSubstreamToken {
 			continue
 		}
 		raw, snapshotErr := device.GetSnapshotURI(probeContext, version, endpoint, selected.Token)
@@ -211,12 +227,81 @@ func Collect(ctx context.Context, camera config.Camera, account secrets.CameraAc
 		result.SubHeight = classification.Sub.Height
 		result.State = StateOK
 		result.Detail = "This camera offers two streams. Bittern uses the sharper one for one camera and the lighter one for the camera wall."
-	} else {
-		result.State = StateOneStream
-		result.Detail = "This camera offers one stream. Bittern uses it for both views."
-		result.Action = "Turn on a second, lighter stream in the camera's own settings, then run setup again."
+		return result
+	}
+
+	switch {
+	case len(result.Quirks) > 0:
+		result.State = StateSubUnverified
+		result.Detail = "ONVIF reported one stream. Bittern found this camera's usual sub stream address but could not verify a usable video stream there, so it is not offered."
+		result.Action = "Check that the camera's sub stream is turned on and uses subtype=1, or add its path in the camera settings and test it again."
+	case classification.DistinctURIs > 1:
+		result.State = StateNoSmallerProfile
+		result.Detail = "ONVIF listed more than one stream, but none is smaller than the main stream, so Bittern has one stream for both views."
+		result.Action = "Turn on a smaller sub stream in the camera's own settings, or add its path in the camera settings."
+	case classification.Eligible > 1:
+		result.State = StateProfilesShareURI
+		result.Detail = "ONVIF listed more than one profile, but they resolve to the same stream address, so Bittern has one stream. The camera does not expose a different sub stream through ONVIF."
+		result.Action = "Turn on a separate sub stream profile in the camera's own settings, or add the sub stream path in the camera settings."
+	default:
+		result.State = StateOneProfile
+		result.Detail = "ONVIF listed one usable profile for this camera, so Bittern has one stream for both views. The camera did not report a second profile."
+		result.Action = "Turn on a second, lighter stream in the camera's own settings, or add the sub stream path in the camera settings."
 	}
 	return result
+}
+
+func (c *collector) probeVendorSubstream(ctx context.Context, classification *Classification) {
+	candidate, quirkID, ok := VendorSubstreamCandidate(c.camera, classification.Main.StreamURI)
+	if !ok {
+		return
+	}
+	c.result.Quirks = appendUnique(c.result.Quirks, quirkID)
+	c.result.Evidence = append(c.result.Evidence, "quirk "+quirkID+" candidate")
+	probe := c.options.StreamProbe
+	if probe == nil {
+		probe = ProbeStream
+	}
+	account := secrets.CameraAccount{}
+	if len(c.accounts) > 0 && c.accounts[0].label == "rtsp" {
+		account = secrets.CameraAccount{Username: c.accounts[0].credentials.Username, Password: c.accounts[0].credentials.Password}
+	}
+	verified, err := probe(ctx, c.camera, candidate, account)
+	if err != nil {
+		c.result.Evidence = append(c.result.Evidence, "quirk "+quirkID+" unverified: "+onvif.ErrorDetail(err))
+		return
+	}
+	if verified.Codec == "" {
+		c.result.Evidence = append(c.result.Evidence, "quirk "+quirkID+" unverified: no supported video codec")
+		return
+	}
+	if verified.Width > 0 && verified.Height > 0 && classification.Main.WidthHeight() > 0 &&
+		verified.Width*verified.Height >= classification.Main.WidthHeight() {
+		c.result.Evidence = append(c.result.Evidence, "quirk "+quirkID+" unverified: the candidate is not smaller than the main stream")
+		return
+	}
+	sub := onvif.MediaProfile{
+		Token:        VendorSubstreamToken,
+		Name:         "Sub stream",
+		Encoding:     strings.ToUpper(verified.Codec),
+		Width:        verified.Width,
+		Height:       verified.Height,
+		EncoderToken: VendorSubstreamToken,
+		StreamURI:    candidate,
+	}
+	classification.Sub = &sub
+	classification.DistinctURIs = 2
+	classification.Streams = append(classification.Streams, sub)
+	c.result.Evidence = append(c.result.Evidence, "quirk "+quirkID+" verified")
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func (c *collector) profileSet(ctx context.Context, version onvif.ServiceVersion, endpoint *url.URL, allowed netip.Addr) ([]onvif.MediaProfile, Classification, error) {
@@ -363,11 +448,11 @@ func (c *collector) failureFor(err error) Result {
 	if onvif.IsAuthentication(err) {
 		if c.timestampRejected {
 			return c.failure(StateClockUnavailable,
-				"Bittern could not read this camera's clock, so the camera refused its stream settings.",
+				"Bittern could not read this camera's clock, so the camera refused its stream settings and Bittern has one stream.",
 				"Set the camera's clock in its own settings, then run setup again.")
 		}
 		return c.failure(StateSignInRejected,
-			"This camera refused the sign-in Bittern used for its stream settings. The camera still records with the address you entered.",
+			"This camera refused the sign-in Bittern used for ONVIF, so Bittern could not read a second stream and has one stream. The camera still records with the address you entered.",
 			"Check the camera sign-in, or add the camera's ONVIF sign-in on the camera form, then run setup again.")
 	}
 	detail := onvif.ErrorDetail(err)
@@ -375,23 +460,23 @@ func (c *collector) failureFor(err error) Result {
 	switch {
 	case strings.Contains(lower, "no onvif service"), strings.Contains(lower, "http 404"), strings.Contains(lower, "http 400"):
 		return c.failure(StateONVIFDisabled,
-			"This camera does not answer ONVIF. It records through the stream address you entered.",
+			"This camera does not answer ONVIF, so Bittern has one stream. It records through the stream address you entered.",
 			"Turn on ONVIF in the camera's own settings, then run setup again to use its lighter stream.")
 	case onvif.IsUnreachable(err), strings.Contains(lower, "did not answer"):
 		return c.failure(StateUnreachable,
-			"Bittern could not reach this camera to read its stream settings. The camera still records with the address you entered.",
+			"Bittern could not reach this camera to read its stream settings, so it has one stream for now. The camera still records with the address you entered.",
 			unreachableAction())
 	case strings.Contains(lower, "timestamp"), strings.Contains(lower, "clock"):
 		return c.failure(StateClockUnavailable,
-			"Bittern could not read this camera's clock, so the camera refused its stream settings.",
+			"Bittern could not read this camera's clock, so the camera refused its stream settings and Bittern has one stream.",
 			"Set the camera's clock in its own settings, then run setup again.")
 	case strings.Contains(lower, "valid xml"), strings.Contains(lower, "did not return"):
 		return c.failure(StateMalformed,
-			"This camera returned stream settings Bittern could not read.",
+			"This camera returned stream settings Bittern could not read, so Bittern has one stream.",
 			"Update the camera firmware, or add the lighter stream address on the camera form.")
 	default:
 		return c.failure(StateNoProfile,
-			"This camera did not return a usable stream profile.",
+			"This camera did not return a usable stream profile, so Bittern has one stream.",
 			"Check the camera's stream settings, or add the stream address on the camera form.")
 	}
 }
@@ -408,27 +493,27 @@ func (c *collector) failure(state State, detail, action string) Result {
 func classifyServiceError(err error) Result {
 	if onvif.IsAuthentication(err) {
 		return failure(StateSignInRejected,
-			"This camera refused the sign-in Bittern used for its stream settings.",
+			"This camera refused the sign-in Bittern used for ONVIF, so Bittern has one stream.",
 			"Check the camera sign-in, then run setup again.")
 	}
 	detail := strings.ToLower(onvif.ErrorDetail(err))
 	if strings.Contains(detail, "does not advertise a media service") {
 		return failure(StateNoMediaService,
-			"This camera answers ONVIF but does not offer its stream settings.",
+			"This camera answers ONVIF but does not offer its stream settings, so Bittern has one stream.",
 			"Turn on the camera's media or ONVIF profile service, then run setup again.")
 	}
 	if strings.Contains(detail, "no onvif service") || strings.Contains(detail, "http 404") {
 		return failure(StateONVIFDisabled,
-			"This camera does not answer ONVIF. It records through the stream address you entered.",
+			"This camera does not answer ONVIF, so Bittern has one stream. It records through the stream address you entered.",
 			"Turn on ONVIF in the camera's own settings, then run setup again to use its lighter stream.")
 	}
 	if onvif.IsUnreachable(err) {
 		return failure(StateUnreachable,
-			"Bittern could not reach this camera to read its stream settings.",
+			"Bittern could not reach this camera to read its stream settings, so it has one stream for now.",
 			unreachableAction())
 	}
 	return failure(StateMalformed,
-		"This camera answered ONVIF but did not return a readable service list.",
+		"This camera answered ONVIF but did not return a readable service list, so Bittern has one stream.",
 		"Update the camera firmware, or add the stream address on the camera form.")
 }
 
@@ -458,32 +543,46 @@ func StateDetail(state State) string {
 		return "This camera offers two streams."
 	case StateOneStream:
 		return "This camera offers one stream. Bittern uses it for both views."
+	case StateOneProfile:
+		return "ONVIF listed one usable profile for this camera, so Bittern has one stream for both views. The camera did not report a second profile."
+	case StateProfilesShareURI:
+		return "ONVIF listed more than one profile, but they resolve to the same stream address, so Bittern has one stream. The camera does not expose a different sub stream through ONVIF."
+	case StateNoSmallerProfile:
+		return "ONVIF listed more than one stream, but none is smaller than the main stream, so Bittern has one stream for both views."
+	case StateSubUnverified:
+		return "ONVIF reported one stream. Bittern found this camera's usual sub stream address but could not verify a usable video stream there, so it is not offered."
 	case StateONVIFDisabled:
-		return "This camera does not answer ONVIF. It records through the stream address you entered."
+		return "This camera does not answer ONVIF, so Bittern cannot read a second stream and has one stream. It records through the stream address you entered."
 	case StateSignInRejected:
-		return "This camera refused the sign-in Bittern used for its stream settings."
+		return "This camera refused the sign-in Bittern used for ONVIF, so Bittern could not read a second stream and has one stream."
 	case StateNoMediaService:
-		return "This camera answers ONVIF but does not offer its stream settings."
+		return "This camera answers ONVIF but does not offer its stream settings, so Bittern has one stream."
 	case StateNoProfile:
-		return "This camera did not list a video profile Bittern can use."
+		return "This camera did not list a video profile Bittern can use, so Bittern has one stream."
 	case StateNoStream:
-		return "This camera did not return a usable stream address."
+		return "This camera did not return a usable stream address, so Bittern has one stream."
 	case StateUnreachable:
-		return "Bittern could not reach this camera to read its stream settings."
+		return "Bittern could not reach this camera to read its stream settings, so it has one stream for now."
 	case StateClockUnavailable:
-		return "Bittern could not read this camera's clock, so the camera refused its stream settings."
+		return "Bittern could not read this camera's clock, so the camera refused its stream settings and Bittern has one stream."
 	case StateMalformed:
-		return "This camera returned stream settings Bittern could not read."
+		return "This camera returned stream settings Bittern could not read, so Bittern has one stream."
 	default:
-		return "Bittern has not read this camera's stream profiles yet."
+		return "Bittern has not read this camera's stream profiles yet, so it has one stream for now."
 	}
 }
 
 // StateAction returns the default owner action for a state.
 func StateAction(state State) string {
 	switch state {
-	case StateOneStream:
-		return "Turn on a second, lighter stream in the camera's own settings, then run setup again."
+	case StateOneStream, StateOneProfile:
+		return "Turn on a second, lighter stream in the camera's own settings, or add the sub stream path in the camera settings."
+	case StateProfilesShareURI:
+		return "Turn on a separate sub stream profile in the camera's own settings, or add the sub stream path in the camera settings."
+	case StateNoSmallerProfile:
+		return "Turn on a smaller sub stream in the camera's own settings, or add its path in the camera settings."
+	case StateSubUnverified:
+		return "Check that the camera's sub stream is turned on and uses subtype=1, or add its path in the camera settings and test it again."
 	case StateONVIFDisabled:
 		return "Turn on ONVIF in the camera's own settings, then run setup again to use its lighter stream."
 	case StateSignInRejected:

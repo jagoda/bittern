@@ -144,6 +144,7 @@ type cameraForm struct {
 	Address       string
 	Port          string
 	Path          string
+	SubPath       string
 	MAC           string
 	Username      string
 	Password      string
@@ -365,6 +366,11 @@ func (h *handler) submitCamera(w http.ResponseWriter, r *http.Request) {
 			validationErrors[field] = message
 		}
 	}
+	if len(validationErrors) == 0 {
+		for field, message := range h.applySubstreamOverride(r.Context(), &camera, nil, form, credentialURL, h.secretsPath()) {
+			validationErrors[field] = message
+		}
+	}
 	if len(validationErrors) != 0 {
 		candidates, discoveryError, rateLimited := h.discover(r.Context())
 		h.render(w, r, http.StatusUnprocessableEntity, "camera",
@@ -464,6 +470,11 @@ func (h *handler) submitCameraSettings(w http.ResponseWriter, r *http.Request) {
 			validationErrors[field] = message
 		}
 	}
+	if len(validationErrors) == 0 {
+		for field, message := range h.applySubstreamOverride(r.Context(), &camera, &entry.Camera, form, firstNonEmpty(credentialURL, entry.CredentialURL), h.secretsPath()) {
+			validationErrors[field] = message
+		}
+	}
 
 	if len(validationErrors) != 0 {
 		h.renderCameraSettings(w, r, entry, form, validationErrors, from)
@@ -543,6 +554,7 @@ func cameraFormFromRequest(r *http.Request) cameraForm {
 		Address:       r.PostFormValue("address"),
 		Port:          r.PostFormValue("rtsp_port"),
 		Path:          r.PostFormValue("rtsp_path"),
+		SubPath:       r.PostFormValue("sub_path"),
 		MAC:           r.PostFormValue("camera_mac"),
 		Username:      r.PostFormValue("username"),
 		Password:      r.PostFormValue("password"),
@@ -902,11 +914,16 @@ func formFromCamera(camera *config.Camera) cameraForm {
 	if camera.MAC != nil {
 		mac = *camera.MAC
 	}
+	subPath := ""
+	if sub := camera.Profile("sub"); sub != nil {
+		subPath = sub.RTSPPath
+	}
 	return cameraForm{
 		Name:    camera.Name,
 		Address: camera.Address,
 		Port:    strconv.Itoa(camera.RTSPPortValue()),
 		Path:    camera.RTSPPathValue(),
+		SubPath: subPath,
 		MAC:     mac,
 	}
 }
@@ -1217,6 +1234,7 @@ func orderedCameraErrors(validationErrors map[string]string) []fieldError {
 		{field: "address", label: "Camera address"},
 		{field: "port", label: "Stream port"},
 		{field: "path", label: "Stream path"},
+		{field: "sub_path", label: "Sub stream path"},
 		{field: "mac", label: "Hardware address"},
 		{field: "username", label: "Camera username"},
 		{field: "password", label: "Camera password"},

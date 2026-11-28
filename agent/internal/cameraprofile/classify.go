@@ -13,57 +13,75 @@ import (
 )
 
 // Classification is the selected pair from one camera's advertised profiles.
-// Main and Sub are nil when no eligible profile exists.
+// Main and Sub are nil when no eligible profile exists. Streams keeps one
+// representative for every distinct validated stream URI; a shared encoder
+// token never removes a stream.
 type Classification struct {
 	Main     *onvif.MediaProfile
 	Sub      *onvif.MediaProfile
 	Eligible int
+	// DistinctURIs is the number of different validated stream URIs. It is the
+	// stream count, not the profile count.
+	DistinctURIs int
+	// Streams is one representative per distinct stream URI, ordered from the
+	// lightest to the sharpest by the ADR 0037 ranking. Main is the last entry.
+	Streams []onvif.MediaProfile
+	// Collapsed names profile tokens that resolved to a URI already represented
+	// by an earlier profile. They are evidence of duplicate profiles, not
+	// separate streams.
+	Collapsed []string
 }
 
 // Classify applies the ADR 0037 mapping to advertised profiles:
 //
 //   - A profile is eligible when it has a video source and encoder token, an
 //     H.264 or H.265 encoding, a positive resolution, a validated stream URI,
-//     and an encoder token not already claimed.
+//     and a token the schema can store.
+//   - A stream is identified by its validated stream URI. Two profiles with
+//     different URIs are always distinct streams, even when they share an
+//     encoder token. Profiles that resolve to the same URI collapse to the
+//     first profile by token, so a duplicate URI never becomes a second
+//     stream. The encoder token only records that the collapsed profiles use
+//     the same encoder; it never removes a URI.
 //   - Profiles are ordered by reported area, then bitrate, then frame rate,
 //     then profile token as the final tie-break. Order and names never decide
 //     quality.
-//   - Main is the largest eligible profile. Sub is the smallest strictly
-//     smaller profile whose stream URI differs from main.
-//
-// A duplicate encoder token keeps the first profile by token and records the
-// duplicate in the caller's evidence, never in the selection.
+//   - Main is the largest eligible stream. Sub is the smallest strictly
+//     smaller stream whose stream URI differs from main.
 func Classify(profiles []onvif.MediaProfile) Classification {
-	// Duplicate encoder tokens keep the first profile by token, not the first
-	// in the camera's response order.
 	ordered := append([]onvif.MediaProfile(nil), profiles...)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Token < ordered[j].Token })
 	eligible := make([]onvif.MediaProfile, 0, len(ordered))
-	seenEncoders := make(map[string]bool, len(ordered))
 	for _, profile := range ordered {
-		if !eligibleProfile(profile) {
-			continue
+		if eligibleProfile(profile) {
+			eligible = append(eligible, profile)
 		}
-		encoder := strings.TrimSpace(profile.EncoderToken)
-		if seenEncoders[encoder] {
-			continue
-		}
-		seenEncoders[encoder] = true
-		eligible = append(eligible, profile)
 	}
 	classification := Classification{Eligible: len(eligible)}
 	if len(eligible) == 0 {
 		return classification
 	}
-	sort.SliceStable(eligible, func(i, j int) bool {
-		return lessProfile(eligible[i], eligible[j])
-	})
-	main := eligible[len(eligible)-1]
-	classification.Main = &main
-	for _, candidate := range eligible {
-		if candidate.Token == main.Token {
+
+	// The stream URI is the identity. Keep the first profile by token for each
+	// URI; a shared encoder token must not collapse two different URIs.
+	seenURIs := make(map[string]bool, len(eligible))
+	streams := make([]onvif.MediaProfile, 0, len(eligible))
+	for _, profile := range eligible {
+		if seenURIs[profile.StreamURI] {
+			classification.Collapsed = append(classification.Collapsed, profile.Token)
 			continue
 		}
+		seenURIs[profile.StreamURI] = true
+		streams = append(streams, profile)
+	}
+	sort.SliceStable(streams, func(i, j int) bool {
+		return lessProfile(streams[i], streams[j])
+	})
+	classification.DistinctURIs = len(streams)
+	classification.Streams = append([]onvif.MediaProfile(nil), streams...)
+	main := streams[len(streams)-1]
+	classification.Main = &main
+	for _, candidate := range streams {
 		if candidate.StreamURI == main.StreamURI {
 			continue
 		}
