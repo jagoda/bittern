@@ -567,7 +567,17 @@ func runUpdateApplyConfig(args []string) error {
 	if running != journal.CandidateGeneration {
 		return fmt.Errorf("the activation pointer names generation %d, not the candidate %d", running, journal.CandidateGeneration)
 	}
-	cfg, validationErrors := config.Load("/etc/bittern/appliance.yaml")
+	liveConfig := "/etc/bittern/appliance.yaml"
+	if data, readErr := os.ReadFile(liveConfig); readErr == nil {
+		if version, ok := config.DocumentSchemaVersion(data); ok && version > config.SchemaVersion {
+			return fmt.Errorf(
+				"config.schema-newer: the live configuration has schema version %d, newer than this bundle's %d; "+
+					"run the update with the helper from the active verified bundle (/usr/libexec/bittern/bittern-update update helper) or install the current preparation kit",
+				version, config.SchemaVersion,
+			)
+		}
+	}
+	cfg, validationErrors := config.Load(liveConfig)
 	if len(validationErrors) > 0 {
 		return fmt.Errorf("the live appliance configuration is invalid: %s", validationErrors[0].Error())
 	}

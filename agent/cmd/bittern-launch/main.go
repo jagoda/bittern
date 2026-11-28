@@ -1,9 +1,12 @@
-// Command bittern-launch is the fixed agent launcher. bitternd.service starts
-// it instead of the installed binary, and it execs the agent from the active
-// app bundle or from the installed /usr/bin/bitternd baseline.
+// Command bittern-launch is the fixed launcher for the agent and the update
+// helper. bitternd.service starts it as /usr/libexec/bittern/bitternd and
+// bittern-update.service starts it as /usr/libexec/bittern/bittern-update. The
+// installed name selects the profile: the agent resolves usr/bin/bitternd, the
+// helper resolves usr/bin/bittern, and both fall back to the installed
+// baseline.
 //
-// The launcher takes the agent's own arguments and passes them through. It has
-// no flags of its own and reads no environment-derived path.
+// The launcher takes the program's own arguments and passes them through. It
+// has no flags of its own and reads no environment-derived path.
 package main
 
 import (
@@ -14,7 +17,7 @@ import (
 )
 
 func main() {
-	if err := launcher.Run(launcher.DefaultConfig(), os.Args[1:]); err != nil {
+	if err := launcher.RunInstalled(os.Args[0], os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "bittern-launch:", err)
 		os.Exit(1)
 	}

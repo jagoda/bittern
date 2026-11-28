@@ -13,8 +13,10 @@ func fixture(t *testing.T, generation int64) (Config, string) {
 	root := t.TempDir()
 	stateRoot := filepath.Join(root, "var", "lib", "bittern")
 	baseline := filepath.Join(root, "usr", "bin", "bitternd")
+	helperBaseline := filepath.Join(root, "usr", "bin", "bittern")
 	bundleBinary := filepath.Join(stateRoot, "app", "bundles", strconv.FormatInt(generation, 10), "files", "usr", "bin", "bitternd")
-	for _, directory := range []string{filepath.Dir(baseline), filepath.Dir(bundleBinary), filepath.Join(stateRoot, "app")} {
+	helperBundleBinary := filepath.Join(stateRoot, "app", "bundles", strconv.FormatInt(generation, 10), "files", "usr", "bin", "bittern")
+	for _, directory := range []string{filepath.Dir(baseline), filepath.Dir(helperBaseline), filepath.Dir(bundleBinary), filepath.Join(stateRoot, "app")} {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -25,11 +27,23 @@ func fixture(t *testing.T, generation int64) (Config, string) {
 	if err := os.Chmod(baseline, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(helperBaseline, []byte("#!/bin/sh\necho helper baseline\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(helperBaseline, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if generation > 0 {
 		if err := os.WriteFile(bundleBinary, []byte("#!/bin/sh\necho bundle\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Chmod(bundleBinary, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(helperBundleBinary, []byte("#!/bin/sh\necho helper bundle\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(helperBundleBinary, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -194,11 +208,61 @@ func TestPreparationKitInstallsTheLauncherAndPlatformMetadata(t *testing.T) {
 	for _, required := range []string{
 		"bittern-launch",
 		"/usr/libexec/bittern/bitternd",
+		"/usr/libexec/bittern/bittern-update",
 		"platform.json",
 		"/usr/lib/bittern/platform.json",
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("installer is missing %q", required)
 		}
+	}
+}
+
+// TestHelperLauncherPicksTheActiveBundleThenFallsBackToTheBaseline is the
+// update helper's version of the agent launcher contract. The fixed unit starts
+// the launcher under its second installed name; the launcher must resolve the
+// active bundle's usr/bin/bittern and fall back to /usr/bin/bittern.
+func TestHelperLauncherPicksTheActiveBundleThenFallsBackToTheBaseline(t *testing.T) {
+	config, _ := fixture(t, 2)
+	helperConfig := ConfigForName("/usr/libexec/bittern/bittern-update")
+	helperConfig.StateRoot = config.StateRoot
+	helperConfig.Pointer = config.Pointer
+	helperConfig.Baseline = filepath.Join(config.StateRoot, "..", "..", "..", "usr", "bin", "bittern")
+	helperConfig.UID = config.UID
+
+	writePointer(t, config, "2\n")
+	choice, err := Resolve(helperConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBundle := filepath.Join(config.StateRoot, "app", "bundles", "2", "files", "usr", "bin", "bittern")
+	if choice.Baseline || choice.Path != wantBundle || choice.Generation != 2 {
+		t.Fatalf("choice = %+v, want the active bundle %s", choice, wantBundle)
+	}
+
+	if err := os.WriteFile(helperConfig.Pointer, []byte("0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	choice, err = Resolve(helperConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !choice.Baseline || choice.Path != helperConfig.Baseline {
+		t.Fatalf("choice = %+v, want the baseline %s", choice, helperConfig.Baseline)
+	}
+}
+
+func TestLauncherProfilesAreSelectedByTheInstalledName(t *testing.T) {
+	agent := ConfigForName("/usr/libexec/bittern/bitternd")
+	if agent.Baseline != "/usr/bin/bitternd" || agent.AgentPath != "usr/bin/bitternd" {
+		t.Fatalf("agent profile = %+v, want the agent binary", agent)
+	}
+	helper := ConfigForName("/usr/libexec/bittern/bittern-update")
+	if helper.Baseline != "/usr/bin/bittern" || helper.AgentPath != "usr/bin/bittern" {
+		t.Fatalf("helper profile = %+v, want the CLI binary", helper)
+	}
+	other := ConfigForName("/tmp/bittern-launch")
+	if other.Baseline != "/usr/bin/bitternd" || other.AgentPath != "usr/bin/bitternd" {
+		t.Fatalf("unknown name profile = %+v, want the agent profile", other)
 	}
 }

@@ -16,7 +16,7 @@ func TestUpdateHelperUnitIsFixedAndArgumentFree(t *testing.T) {
 	text := string(data)
 	for _, required := range []string{
 		"Type=oneshot",
-		"ExecStart=/usr/bin/bittern update helper",
+		"ExecStart=/usr/libexec/bittern/bittern-update update helper",
 		"ConditionPathExists=/var/lib/bittern/update/request.json",
 		"User=root",
 		"Group=root",
@@ -27,6 +27,9 @@ func TestUpdateHelperUnitIsFixedAndArgumentFree(t *testing.T) {
 		if !strings.Contains(text, required) {
 			t.Fatalf("unit is missing %q:\n%s", required, text)
 		}
+	}
+	if strings.Contains(text, "ExecStart=/usr/bin/bittern") {
+		t.Fatalf("the unit still starts the installed baseline:\n%s", text)
 	}
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -47,6 +50,7 @@ func TestUpdateHelperUnitIsFixedAndArgumentFree(t *testing.T) {
 	}
 	for _, required := range []string{
 		"bittern-update.service",
+		"/usr/libexec/bittern/bittern-update",
 		"enable_unit bittern-update.service",
 	} {
 		if !strings.Contains(string(install), required) {

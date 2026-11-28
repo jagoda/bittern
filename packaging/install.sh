@@ -1003,6 +1003,9 @@ install_files() {
     run install -d -o root -g root -m 0755 /usr/libexec/bittern ||
         die "could not create /usr/libexec/bittern"
     install_binary "$SCRIPT_DIR/bittern-launch" /usr/libexec/bittern/bitternd
+    # The same launcher binary serves the fixed update helper unit under its
+    # second fixed name; the installed name selects the bundle binary.
+    install_binary "$SCRIPT_DIR/bittern-launch" /usr/libexec/bittern/bittern-update
 
     # The platform provider reads this root-owned file and fails closed without
     # it. Generation 1 is provisional until the image ADR fixes the layout.

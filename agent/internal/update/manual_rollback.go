@@ -44,11 +44,11 @@ func Rollback(options Options) (Result, error) {
 		return Result{Status: ResultFailed}, errorf("rollback.busy", "an update operation %s is active; finish it before rolling back", journal.OperationID)
 	}
 	if journal != nil {
-		cfg, _, err := loadConfig(options.ConfigPath)
+		view, _, err := loadConfig(options.ConfigPath, options.HelperSchemaVersion)
 		if err != nil {
 			return Result{}, err
 		}
-		if err := validateJournal(journal, cfg); err != nil {
+		if err := validateJournal(journal, view); err != nil {
 			return Result{Status: ResultFailed, Failure: err.Error()}, fmt.Errorf("update: invalid journal: %w", err)
 		}
 	}
@@ -57,7 +57,7 @@ func Rollback(options Options) (Result, error) {
 	}
 	now := options.Now().UTC()
 	if journal == nil {
-		cfg, _, err := loadConfig(options.ConfigPath)
+		view, _, err := loadConfig(options.ConfigPath, options.HelperSchemaVersion)
 		if err != nil {
 			return Result{}, err
 		}
@@ -75,13 +75,13 @@ func Rollback(options Options) (Result, error) {
 			Phase:                   PhaseManualRollback,
 			State:                   StateRunning,
 			Source:                  RequestSourceManualRollback,
-			Channel:                 cfg.Updates.Channel,
+			Channel:                 view.Channel,
 			CandidateGeneration:     state.CommittedGeneration,
 			CandidateVersion:        state.CommittedVersion,
 			CandidateManifestSHA256: state.CommittedManifestSHA256,
 			Reason:                  options.Reason,
 			NextStep:                StepManualPreflight,
-			Steps:                   manualRollbackSteps(frigateConfigured(cfg)),
+			Steps:                   manualRollbackSteps(frigateConfigured(view)),
 			CreatedAt:               now.Format(time.RFC3339),
 			UpdatedAt:               now.Format(time.RFC3339),
 		}
@@ -124,11 +124,11 @@ func manualRollbackSteps(frigate bool) []Step {
 }
 
 func (r *runner) manualPreflight() error {
-	cfg, _, err := loadConfig(r.options.ConfigPath)
+	view, _, err := loadConfig(r.options.ConfigPath, r.options.HelperSchemaVersion)
 	if err != nil {
 		return err
 	}
-	r.config = cfg
+	r.view = view
 	state, present, err := readState(r.paths.state)
 	if err != nil {
 		return err
@@ -152,7 +152,7 @@ func (r *runner) manualPreflight() error {
 			return errorf("rollback.no-target", "no previous bundle is retained and the baseline binary is not usable: %v", err)
 		}
 	}
-	r.journal.Channel = cfg.Updates.Channel
+	r.journal.Channel = view.Channel
 	r.journal.CandidateGeneration = state.CommittedGeneration
 	r.journal.CandidateVersion = state.CommittedVersion
 	r.journal.CandidateManifestSHA256 = state.CommittedManifestSHA256

@@ -23,7 +23,7 @@ path.
 | --- | --- |
 | `bittern` | Operator CLI: `detect`, `render`, `first-boot`, `setup-token --qr`, `image`, `update` |
 | `bitternd` | Status API and TLS wizard daemon |
-| `bittern-launch` | Fixed agent launcher installed at `/usr/libexec/bittern/bitternd`; execs the active bundle or the `/usr/bin/bitternd` baseline |
+| `bittern-launch` | Fixed launcher installed at `/usr/libexec/bittern/bitternd` for the agent and `/usr/libexec/bittern/bittern-update` for the update helper; execs the active bundle binary or the `/usr/bin` baseline |
 | `platform.json` | Provisional image platform metadata installed at `/usr/lib/bittern/platform.json` with generation 1 |
 | `bittern-first-boot.service` | Oneshot provisioning unit |
 | `bittern-image-prewarm.service` | Background prewarm of the pinned recording-software image |
@@ -89,11 +89,14 @@ stops with a clear error naming the reboot consequence. It does not rely on the 
 postinst for dnsmasq or chrony. The rendered `bittern-frigate.service` does not exist until the
 first camera apply, so apply owns its enablement and verifies it before starting the stack.
 
-The installer also installs the fixed launcher at `/usr/libexec/bittern/bitternd`, mode 0755 and
-root-owned. `bitternd.service` starts that launcher, which reads
+The installer also installs the same fixed launcher binary twice: at
+`/usr/libexec/bittern/bitternd` for the agent and at `/usr/libexec/bittern/bittern-update` for the
+update helper, both mode 0755 and root-owned. `bitternd.service` starts the first, which reads
 `/var/lib/bittern/app/current`, execs `usr/bin/bitternd` from the active bundle, and falls back to
-the installed `/usr/bin/bitternd` when no bundle is active or the pointer cannot be read. A present
-but malformed pointer, a bundle binary that is not a regular root-owned executable, or a path that
+the installed `/usr/bin/bitternd` when no bundle is active or the pointer cannot be read.
+`bittern-update.service` starts the second with the fixed `update helper` arguments, which execs
+`usr/bin/bittern` from the active bundle and falls back to `/usr/bin/bittern`. A present but
+malformed pointer, a bundle binary that is not a regular root-owned executable, or a path that
 escapes the bundle tree is refused instead of executed.
 
 `platform.json` is installed as `/usr/lib/bittern/platform.json`, mode 0644 and root-owned, with

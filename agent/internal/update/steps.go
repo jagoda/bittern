@@ -26,11 +26,11 @@ func (r *runner) preflight() error {
 	if r.options.Platform == nil {
 		return errorf("platform.missing", "no platform provider is configured")
 	}
-	cfg, raw, err := loadConfig(r.options.ConfigPath)
+	view, raw, err := loadConfig(r.options.ConfigPath, r.options.HelperSchemaVersion)
 	if err != nil {
 		return err
 	}
-	r.config = cfg
+	r.view = view
 	r.configBytes = raw
 	now := r.options.Now().UTC()
 	if now.Year() < 2020 {
@@ -104,15 +104,15 @@ func (r *runner) preflight() error {
 	if current != r.journal.PreviousGeneration && r.journal.LastCompletedStep == "" && r.journal.NextStep == StepPreflight {
 		return errorf("state.changed", "the activation pointer changed from %d to %d while the journal existed", r.journal.PreviousGeneration, current)
 	}
-	r.journal.Channel = cfg.Updates.Channel
+	r.journal.Channel = view.Channel
 	r.journal.PreviousGeneration = current
 	r.journal.PreviousManifestSHA256 = previousDigest
 	r.journal.Platform = platform
 	r.journal.Base = base
-	r.journal.SchemaBefore = cfg.SchemaVersion
-	r.journal.SchemaAfter = cfg.SchemaVersion
+	r.journal.SchemaBefore = view.SchemaVersion
+	r.journal.SchemaAfter = view.SchemaVersion
 	if r.journal.Steps == nil || len(r.journal.Steps) == 0 {
-		r.journal.Steps = installSteps(cfg)
+		r.journal.Steps = installSteps(view)
 	}
 	return nil
 }
@@ -189,7 +189,7 @@ func (r *runner) verifyManifestStep() error {
 	if err != nil {
 		return err
 	}
-	manifest, err := verifyManifest(manifestBytes, signature, trust, state.CommittedGeneration, r.journal, r.journal.Channel, r.journal.Platform, int64(r.config.SchemaVersion))
+	manifest, err := verifyManifest(manifestBytes, signature, trust, state.CommittedGeneration, r.journal, r.journal.Channel, r.journal.Platform, int64(r.view.SchemaVersion))
 	if err != nil {
 		return err
 	}
@@ -675,7 +675,7 @@ func (r *runner) backupData() error {
 		record.Path = backup
 	}
 	switch {
-	case !frigateConfigured(r.config):
+	case !frigateConfigured(r.view):
 		record.Database = "not-configured"
 	case r.options.Data == nil:
 		record.Database = "no-adapter"
@@ -718,13 +718,27 @@ func (r *runner) backupData() error {
 }
 
 func (r *runner) migrate() error {
+	pending := r.paths.pendingMigration(r.journal.OperationID)
+	if r.view != nil && r.view.Newer {
+		// The live document is newer than this helper. The helper must not
+		// rewrite it, and it has no migration to apply: the candidate bundle
+		// reads the document with its own newer schema. Recording the no-op is
+		// the honest result; a step that genuinely needs a write it cannot
+		// produce refuses in newRunner instead of reaching this point.
+		r.journal.SchemaBefore = r.view.SchemaVersion
+		r.journal.SchemaAfter = r.view.SchemaVersion
+		if err := removePendingMigration(pending); err != nil {
+			return err
+		}
+		r.journal.Migration = MigrationRecord{Result: MigrationNone, From: r.view.SchemaVersion, To: r.view.SchemaVersion}
+		return nil
+	}
 	migration, migrationErrors := config.Migrate(r.configBytes)
 	if len(migrationErrors) > 0 {
 		return errorf("config.migrate", "migrate appliance.yaml: %s", migrationErrors[0].Error())
 	}
 	r.journal.SchemaBefore = migration.From
 	r.journal.SchemaAfter = migration.To
-	pending := r.paths.pendingMigration(r.journal.OperationID)
 	if !migration.Changed || migration.From == migration.To {
 		if err := removePendingMigration(pending); err != nil {
 			return err

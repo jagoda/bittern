@@ -360,7 +360,7 @@ func FetchCandidate(options CheckOptions, candidate CheckCandidate) (string, err
 			return "", err
 		}
 	}
-	cfg, _, err := loadConfig(options.ConfigPath)
+	view, _, err := loadConfig(options.ConfigPath, 0)
 	if err != nil {
 		return "", err
 	}
@@ -398,10 +398,10 @@ func FetchCandidate(options CheckOptions, candidate CheckCandidate) (string, err
 	if sha256Hex(manifestBytes) != candidate.ManifestSHA256 {
 		return "", errorf("channel.manifest-digest", "the downloaded manifest digest does not match the checked candidate")
 	}
-	if manifest.Channel != cfg.Updates.Channel {
-		return "", errorf("channel.mismatch", "the manifest channel %q is not the device channel %q", manifest.Channel, cfg.Updates.Channel)
+	if manifest.Channel != view.Channel {
+		return "", errorf("channel.mismatch", "the manifest channel %q is not the device channel %q", manifest.Channel, view.Channel)
 	}
-	if err := verifyCompatibility(manifest, platform, int64(cfg.SchemaVersion)); err != nil {
+	if err := verifyCompatibility(manifest, platform, int64(view.SchemaVersion)); err != nil {
 		return "", err
 	}
 	if err := validatePayloadFilename(manifest.Payload.Filename); err != nil {

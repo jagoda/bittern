@@ -22,7 +22,7 @@ type runner struct {
 	options       Options
 	paths         paths
 	journal       *Journal
-	config        *config.Config
+	view          *config.HelperView
 	configBytes   []byte
 	trust         *release.TrustStore
 	redactor      *redactRedactor
@@ -82,11 +82,11 @@ func Install(options Options) (Result, error) {
 		return Result{}, errorf("journal.source-mismatch", "the journal started from %s, not %s", journal.SourcePath, options.SourcePath)
 	}
 	if journal != nil {
-		cfg, _, err := loadConfig(options.ConfigPath)
+		view, _, err := loadConfig(options.ConfigPath, options.HelperSchemaVersion)
 		if err != nil {
 			return Result{}, err
 		}
-		if err := validateJournal(journal, cfg); err != nil {
+		if err := validateJournal(journal, view); err != nil {
 			result := Result{Status: ResultFailed, Failure: err.Error()}
 			if operationIDPattern.MatchString(journal.OperationID) {
 				result.OperationID = journal.OperationID
@@ -171,11 +171,11 @@ func newJournal(options Options, p paths, now time.Time) (*Journal, error) {
 	if options.Source == nil {
 		return nil, errorf("source.missing", "no bundle source is configured")
 	}
-	cfg, _, err := loadConfig(options.ConfigPath)
+	view, _, err := loadConfig(options.ConfigPath, options.HelperSchemaVersion)
 	if err != nil {
 		return nil, err
 	}
-	channel := cfg.Updates.Channel
+	channel := view.Channel
 	previous := int64(0)
 	if current, err := readCurrent(p.current); err == nil {
 		previous = current
@@ -204,7 +204,7 @@ func newJournal(options Options, p paths, now time.Time) (*Journal, error) {
 		PreviousGeneration:     previous,
 		PreviousManifestSHA256: state.CommittedManifestSHA256,
 		NextStep:               StepPreflight,
-		Steps:                  installSteps(cfg),
+		Steps:                  installSteps(view),
 		CreatedAt:              now.Format(time.RFC3339),
 		UpdatedAt:              now.Format(time.RFC3339),
 	}, nil
@@ -231,7 +231,7 @@ var operationIDPattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}Z-g[0-9]{6,}-[0-9
 // validateJournal refuses a loaded journal whose identity, phase, or plan is
 // not one this engine wrote. It runs before a step, a pointer write, or a unit
 // action, so a tampered journal cannot steer the transaction.
-func validateJournal(journal *Journal, cfg *config.Config) error {
+func validateJournal(journal *Journal, view *config.HelperView) error {
 	if journal == nil {
 		return nil
 	}
@@ -244,11 +244,11 @@ func validateJournal(journal *Journal, cfg *config.Config) error {
 	var expected []Step
 	switch journal.Phase {
 	case PhaseInstall:
-		expected = installSteps(cfg)
+		expected = installSteps(view)
 	case PhaseRollback:
-		expected = rollbackSteps(frigateConfigured(cfg))
+		expected = rollbackSteps(view.HasEnabledCamera())
 	case PhaseManualRollback:
-		expected = manualRollbackSteps(frigateConfigured(cfg))
+		expected = manualRollbackSteps(view.HasEnabledCamera())
 	default:
 		return errorf("journal.phase", "the journal phase %q is not install, rollback, or manual-rollback", journal.Phase)
 	}
@@ -277,35 +277,40 @@ func validateJournal(journal *Journal, cfg *config.Config) error {
 	return nil
 }
 
-func loadConfig(path string) (*config.Config, []byte, error) {
-	data, err := os.ReadFile(path)
+// loadConfig returns the helper projection of appliance.yaml. A document at or
+// below the schema version this helper knows is fully validated; a newer one is
+// read for the helper's stable field set only. knownVersion is zero in
+// production, which selects config.SchemaVersion; a test sets it lower to model
+// an older baseline helper reading a newer document.
+func loadConfig(path string, knownVersion int) (*config.HelperView, []byte, error) {
+	view, err := config.LoadHelperAt(path, knownVersion)
 	if err != nil {
-		return nil, nil, errorf("config.read", "read the appliance configuration %s: %v", path, err)
+		if rule, ok := config.IsHelperError(err); ok {
+			return nil, nil, errorf(rule, "%s", err.Error())
+		}
+		return nil, nil, err
 	}
-	cfg, validationErrors := config.Parse(data)
-	if len(validationErrors) > 0 {
-		return nil, data, errorf("config.invalid", "the appliance configuration is invalid: %s", validationErrors[0].Error())
-	}
-	return cfg, data, nil
+	return view, view.Raw, nil
 }
 
 func newRunner(options Options, p paths, journal *Journal, now time.Time) (*runner, error) {
-	cfg, configBytes, err := loadConfig(options.ConfigPath)
+	view, configBytes, err := loadConfig(options.ConfigPath, options.HelperSchemaVersion)
 	if err != nil {
 		return nil, err
 	}
+	// The redactor knows every scalar in secrets.yaml, as the apply-config
+	// entry point does. This does not depend on the camera shape, so it keeps
+	// working when the live configuration is newer than this helper.
 	secrets := append([]string(nil), options.Secrets...)
-	cameraSecrets, err := apply.CameraSecretValues(cfg, options.SecretsPath)
-	if err != nil {
-		return nil, err
+	if data, readErr := os.ReadFile(options.SecretsPath); readErr == nil {
+		secrets = append(secrets, redact.ValuesFromYAML(data)...)
 	}
-	secrets = append(secrets, cameraSecrets...)
 	redactor := redact.New(secrets...)
 	r := &runner{
 		options:     options,
 		paths:       p,
 		journal:     journal,
-		config:      cfg,
+		view:        view,
 		configBytes: configBytes,
 		redactor:    &redactRedactor{string: redactor.String},
 		now:         now,
@@ -323,7 +328,7 @@ func (r *runner) loadCandidate() {
 	_, _ = r.candidateManifest()
 }
 
-func installSteps(cfg *config.Config) []Step {
+func installSteps(view *config.HelperView) []Step {
 	steps := []Step{
 		{Key: StepPreflight, Kind: kindPreflight},
 		{Key: StepFetchManifest, Kind: kindFetchManifest},
@@ -336,7 +341,7 @@ func installSteps(cfg *config.Config) []Step {
 		{Key: StepBackupConfig, Kind: kindBackupConfig},
 		{Key: StepBackupData, Kind: kindBackupData},
 	}
-	if frigateConfigured(cfg) {
+	if frigateConfigured(view) {
 		steps = append(steps, Step{Key: StepStopFrigate, Kind: kindStop, Unit: "bittern-frigate.service"})
 	}
 	steps = append(steps,
@@ -344,12 +349,12 @@ func installSteps(cfg *config.Config) []Step {
 		Step{Key: StepActivate, Kind: kindActivate},
 		Step{Key: StepMigrate, Kind: kindMigrate},
 	)
-	if frigateConfigured(cfg) {
+	if frigateConfigured(view) {
 		steps = append(steps, Step{Key: StepEnsureImage, Kind: kindEnsureImage, TimeoutSeconds: int((60 * time.Minute).Seconds())})
 	}
 	steps = append(steps, Step{Key: StepApplyConfig, Kind: kindApplyConfig, TimeoutSeconds: int(applyConfigTimeout.Seconds())})
 	steps = append(steps, Step{Key: StepStartAgent, Kind: kindStart, Unit: "bitternd.service", TimeoutSeconds: 60})
-	if frigateConfigured(cfg) {
+	if frigateConfigured(view) {
 		steps = append(steps, Step{Key: StepStartFrigate, Kind: kindStart, Unit: "bittern-frigate.service"})
 	}
 	return append(steps,
@@ -392,16 +397,11 @@ func planStartsFrigate(steps []Step) bool {
 	return hasStep(steps, StepStartFrigate) || hasStep(steps, StepRollbackStartFrigate)
 }
 
-func frigateConfigured(cfg *config.Config) bool {
-	if cfg == nil {
+func frigateConfigured(view *config.HelperView) bool {
+	if view == nil {
 		return true
 	}
-	for _, camera := range cfg.Cameras {
-		if camera.IsEnabled() {
-			return true
-		}
-	}
-	return false
+	return view.HasEnabledCamera()
 }
 
 func (r *runner) run() (Result, error) {

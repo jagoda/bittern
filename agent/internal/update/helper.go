@@ -42,6 +42,11 @@ type HelperOptions struct {
 	Now           func() time.Time
 	Logger        func(format string, args ...any)
 	UID           func() int
+
+	// HelperSchemaVersion is the schema version this helper build knows.
+	// Production leaves it zero, which selects config.SchemaVersion; a test
+	// sets it lower to model an older baseline helper reading a newer document.
+	HelperSchemaVersion int
 }
 
 func (o HelperOptions) normalized() HelperOptions {
@@ -111,17 +116,18 @@ func RunHelper(options HelperOptions) (Result, error) {
 	}
 
 	installOptions := Options{
-		StateRoot:        options.StateRoot,
-		ConfigPath:       options.ConfigPath,
-		FrigateConfig:    options.FrigateConfig,
-		Source:           LocalSource{Dir: sourcePath},
-		SourcePath:       sourcePath,
-		TrustImageDir:    options.TrustImageDir,
-		TrustRotationDir: options.TrustRotationDir,
-		SecretsPath:      options.SecretsPath,
-		Now:              options.Now,
-		Logger:           options.Logger,
-		ConfigApplier:    options.ConfigApplier,
+		StateRoot:           options.StateRoot,
+		ConfigPath:          options.ConfigPath,
+		FrigateConfig:       options.FrigateConfig,
+		Source:              LocalSource{Dir: sourcePath},
+		SourcePath:          sourcePath,
+		TrustImageDir:       options.TrustImageDir,
+		TrustRotationDir:    options.TrustRotationDir,
+		SecretsPath:         options.SecretsPath,
+		Now:                 options.Now,
+		Logger:              options.Logger,
+		ConfigApplier:       options.ConfigApplier,
+		HelperSchemaVersion: options.HelperSchemaVersion,
 	}
 	if options.System != nil {
 		installOptions.System = options.System
@@ -160,17 +166,18 @@ func runRollbackHelper(options HelperOptions, p paths, request Request, journal 
 		return Result{Status: ResultFailed}, errorf("rollback.busy", "an update operation %s is active; finish it before rolling back", journal.OperationID)
 	}
 	rollbackOptions := Options{
-		StateRoot:        options.StateRoot,
-		ConfigPath:       options.ConfigPath,
-		FrigateConfig:    options.FrigateConfig,
-		TrustImageDir:    options.TrustImageDir,
-		TrustRotationDir: options.TrustRotationDir,
-		SecretsPath:      options.SecretsPath,
-		Now:              options.Now,
-		Logger:           options.Logger,
-		Reason:           request.Reason,
-		BaselineBinary:   options.BaselineBinary,
-		ConfigApplier:    options.ConfigApplier,
+		StateRoot:           options.StateRoot,
+		ConfigPath:          options.ConfigPath,
+		FrigateConfig:       options.FrigateConfig,
+		TrustImageDir:       options.TrustImageDir,
+		TrustRotationDir:    options.TrustRotationDir,
+		SecretsPath:         options.SecretsPath,
+		Now:                 options.Now,
+		Logger:              options.Logger,
+		Reason:              request.Reason,
+		BaselineBinary:      options.BaselineBinary,
+		ConfigApplier:       options.ConfigApplier,
+		HelperSchemaVersion: options.HelperSchemaVersion,
 	}
 	if options.System != nil {
 		rollbackOptions.System = options.System
@@ -207,11 +214,11 @@ func resolveDatabasePath(options HelperOptions) (string, error) {
 	if options.DatabasePath != "" {
 		return options.DatabasePath, nil
 	}
-	cfg, _, err := loadConfig(options.ConfigPath)
+	view, _, err := loadConfig(options.ConfigPath, options.HelperSchemaVersion)
 	if err != nil {
 		return "", err
 	}
-	media := cfg.Storage.Recording.MountPointValue()
+	media := view.RecordingMountPoint
 	if media == "" {
 		media = DefaultMediaPath
 	}

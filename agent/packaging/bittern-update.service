@@ -1,6 +1,9 @@
 # Fixed app bundle update worker. The agent writes /var/lib/bittern/update/request.json and starts
-# this unit. The unit takes no arguments, no environment file, and no user-controlled property; the
-# helper reads the request record and exits. The beta preparation kit installs it and the image keeps it.
+# this unit. ExecStart is the fixed launcher, installed at /usr/libexec/bittern/bittern-update. It
+# execs the active bundle's verified usr/bin/bittern, falling back to the installed /usr/bin/bittern
+# baseline when no bundle is active or the pointer cannot be read, exactly as bitternd.service does.
+# The unit passes only the fixed "update helper" arguments; no argument, environment file, or
+# property is user-controlled. The beta preparation kit installs it and the image keeps it.
 [Unit]
 Description=Bittern app bundle update
 Documentation=file:/usr/share/doc/bittern/README.md
@@ -10,7 +13,7 @@ RequiresMountsFor=/etc/bittern /var/lib/bittern
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/bittern update helper
+ExecStart=/usr/libexec/bittern/bittern-update update helper
 TimeoutStartSec=2h
 Restart=no
 User=root

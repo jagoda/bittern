@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"bittern.invalid/agent/internal/apply"
+	"bittern.invalid/agent/internal/config"
 	"bittern.invalid/agent/internal/oplock"
 )
 
@@ -98,9 +99,13 @@ func TestApplyAndUpdateContendOnTheSameOperationLock(t *testing.T) {
 	}
 	defer func() { _ = lock.Release() }()
 
-	cfg, _, err := loadConfig(env.configPath)
+	document, err := os.ReadFile(env.configPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	cfg, validationErrors := config.Parse(document)
+	if len(validationErrors) > 0 {
+		t.Fatal(validationErrors[0])
 	}
 	if _, err := apply.Apply(cfg, apply.Options{StateRoot: env.stateRoot, LiveRoot: t.TempDir()}); !errors.Is(err, oplock.ErrBusy) {
 		t.Fatalf("apply under contention = %v, want oplock.ErrBusy", err)

@@ -161,11 +161,11 @@ func writeCheck(stateRoot string, check Check) error {
 func CheckChannel(options CheckOptions) (CheckResult, error) {
 	options = normalizeCheckOptions(options)
 	now := options.Now().UTC()
-	cfg, _, err := loadConfig(options.ConfigPath)
+	view, _, err := loadConfig(options.ConfigPath, 0)
 	if err != nil {
 		return CheckResult{}, err
 	}
-	channel := cfg.Updates.Channel
+	channel := view.Channel
 	state, _, err := readState(normalizeOptions(Options{StateRoot: options.StateRoot}).paths().state)
 	if err != nil {
 		return CheckResult{}, err
@@ -202,7 +202,7 @@ func CheckChannel(options CheckOptions) (CheckResult, error) {
 	if platformErr != nil {
 		return finishCheck(options, check, checkFailure(CheckFailed, "platform.read", "%v", platformErr))
 	}
-	candidate, result, reason, err := discoverCandidate(client, options, channel, committed, platform, int64(cfg.SchemaVersion))
+	candidate, result, reason, err := discoverCandidate(client, options, channel, committed, platform, int64(view.SchemaVersion))
 	check.Result = result
 	check.Reason = redactReason(reason)
 	check.Available = candidate

@@ -30,6 +30,14 @@ const (
 	DefaultBaseline = "/usr/bin/bitternd"
 	// DefaultAgentPath is the agent's path inside a bundle files tree.
 	DefaultAgentPath = "usr/bin/bitternd"
+	// DefaultHelperBaseline is the operator CLI the preparation kit installs.
+	DefaultHelperBaseline = "/usr/bin/bittern"
+	// DefaultHelperAgentPath is the operator CLI's path inside a bundle files
+	// tree.
+	DefaultHelperAgentPath = "usr/bin/bittern"
+	// DefaultHelperLauncherName is the installed name that selects the helper
+	// profile. The unit starts /usr/libexec/bittern/bittern-update.
+	DefaultHelperLauncherName = "bittern-update"
 )
 
 // Config is the launcher's fixed path set. The production binary uses
@@ -55,6 +63,33 @@ func DefaultConfig() Config {
 		AgentPath: DefaultAgentPath,
 		UID:       func() int { return 0 },
 	}
+}
+
+// HelperConfig returns the fixed launcher config for the fixed update helper
+// unit. It resolves the bundle's usr/bin/bittern and falls back to the
+// /usr/bin/bittern baseline. The unit passes only the fixed "update helper"
+// arguments; the launcher adds no path of its own.
+func HelperConfig() Config {
+	return Config{
+		StateRoot: DefaultStateRoot,
+		Pointer:   DefaultPointer,
+		Baseline:  DefaultHelperBaseline,
+		AgentPath: DefaultHelperAgentPath,
+		UID:       func() int { return 0 },
+	}
+}
+
+// ConfigForName selects the launcher profile from the installed executable
+// name. The preparation kit installs one launcher binary under two fixed
+// names: /usr/libexec/bittern/bitternd for the agent and
+// /usr/libexec/bittern/bittern-update for the update helper. Every other name
+// keeps the agent profile, so running the kit's bittern-launch directly does
+// what it did before.
+func ConfigForName(name string) Config {
+	if filepath.Base(name) == DefaultHelperLauncherName {
+		return HelperConfig()
+	}
+	return DefaultConfig()
 }
 
 // Choice is the resolved exec target. Baseline is true when no active bundle
@@ -119,7 +154,13 @@ func Resolve(config Config) (Choice, error) {
 	return Choice{Path: candidate, Generation: generation}, nil
 }
 
-// Run resolves and execs the agent. It returns only on error.
+// RunInstalled selects the launcher profile from the installed executable name
+// and runs it. It returns only on error.
+func RunInstalled(name string, args []string) error {
+	return Run(ConfigForName(name), args)
+}
+
+// Run resolves and execs the selected binary. It returns only on error.
 func Run(config Config, args []string) error {
 	choice, err := Resolve(config)
 	if err != nil {

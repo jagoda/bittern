@@ -518,4 +518,8 @@ type Options struct {
 	BeforeStep       func(Step) error
 	AfterStep        func(Step) error
 	Logger           func(format string, args ...any)
+	// HelperSchemaVersion is the appliance.yaml schema version this build
+	// knows. Production leaves it zero, which selects config.SchemaVersion;
+	// a test sets it lower to model an older helper reading a newer document.
+	HelperSchemaVersion int
 }

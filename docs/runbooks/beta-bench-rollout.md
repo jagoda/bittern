@@ -416,6 +416,57 @@ the device and the channel unchanged.
 A rate-limited check is a retry-later state, not a failure of the device or the channel. It never
 reads as up to date.
 
+### Recover a stranded update helper
+
+A device can be stranded when a bundle migrates `appliance.yaml` to a newer schema and the fixed
+`bittern-update.service` still runs the preparation kit baseline, which only knows the schema it
+shipped with. The first field case was a beta.7 device at generation 7: the live configuration was
+version 3 and the baseline helper refused it with `schema_version value must be 2`.
+
+The failure looks like this:
+
+- The Updates card stays at "The update did not finish" and the journal is absent or stops at
+  `preflight`.
+- `sudo systemctl status bittern-update.service` names `config.invalid` and
+  `schema_version value must be 2`.
+- `sudo sed -n '1p' /etc/bittern/appliance.yaml` shows `schema_version: 3`.
+- `/var/lib/bittern/update/request.json` is present and `/var/lib/bittern/app/current` names the
+  generation that migrated the configuration.
+
+The cause is the fixed unit, not the release: it starts `/usr/bin/bittern update helper`, the kit
+baseline built when schema version 2 was current.
+
+The smallest safe bridge, for one update only, runs the same helper binary from the active verified
+bundle against the request the card already wrote. The bundle was verified against the signed
+manifest before it was activated, and the command passes only the fixed `update helper` argument.
+
+```sh
+generation=$(cat /var/lib/bittern/app/current)
+test -x "/var/lib/bittern/app/bundles/$generation/files/usr/bin/bittern"
+sudo "/var/lib/bittern/app/bundles/$generation/files/usr/bin/bittern" update helper
+```
+
+Expected: the same steps and history as a unit run, and the update commits or reports its own
+failure with a reason. If the process is cut, run the same command again; the journal resumes it.
+The command is a bridge, not the product procedure. The durable fix is to install the current
+preparation kit, which installs the fixed launcher at `/usr/libexec/bittern/bittern-update` and the
+unit that starts it, then start the next update normally.
+
+Do not edit any of these files to get the update in:
+
+| Path | Why it must not be touched |
+| --- | --- |
+| `/etc/bittern/appliance.yaml` | Lowering `schema_version` to 2 or deleting version 3 keys makes the baseline read it, but the document is the migration source and the agent would persist the wrong bytes. The mtime and digest no longer match the staged migration |
+| `/var/lib/bittern/update/request.json` | It is the only helper input. Rewriting or deleting it changes the source path or removes the pending operation |
+| `/var/lib/bittern/update/journal.json` | If present it is the resume point. Deleting it to force a fresh start loses the recorded candidate and the live-touched flag |
+| `/var/lib/bittern/app/current` | It is the activation pointer. Pointing it at the baseline or another generation runs a different, unverified transaction |
+| `/var/lib/bittern/update/state.json`, `history/`, `pending/` | They are the anti-rollback and support record. Do not delete or rewrite them |
+| `/var/lib/bittern/app/bundles/<generation>/` and the trust stores | They are the verified input and the trust anchor. Do not modify either |
+
+If the bridge itself fails, stop and collect the unit journal, `/var/lib/bittern/update/journal.json`,
+the history, `bittern update status`, and the first line of `appliance.yaml`. Attach the failing
+rule and message to the support note. Do not repair the state root by hand.
+
 ## If something fails
 
 Stop at the failed check and collect the evidence before changing anything. Do not retry the update,
