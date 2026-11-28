@@ -46,6 +46,9 @@ func runCamera(args []string) error {
 func runCameraProbe(args []string) error {
 	flags := flag.NewFlagSet("camera probe", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
+	flags.Usage = func() {
+		fmt.Fprint(os.Stderr, cameraUsage)
+	}
 	configPath := flags.String("config", "/etc/bittern/appliance.yaml", "appliance.yaml to load")
 	secretsPath := flags.String("secrets", "/etc/bittern/secrets.yaml", "secrets.yaml to load")
 	accountRef := flags.String("account", "", "credentials_ref for an address argument")
@@ -53,6 +56,9 @@ func runCameraProbe(args []string) error {
 	timeout := flags.Duration("timeout", 5*time.Second, "per-operation timeout")
 	jsonOutput := flags.Bool("json", false, "print the structured report as JSON")
 	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if flags.NArg() != 1 {

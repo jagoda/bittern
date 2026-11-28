@@ -17,6 +17,12 @@ func TestCameraProbeRejectsAnUnknownCameraOrAddress(t *testing.T) {
 	}
 }
 
+func TestCameraProbeHelpSucceeds(t *testing.T) {
+	if err := runCameraProbe([]string{"--help"}); err != nil {
+		t.Fatalf("--help returned %v", err)
+	}
+}
+
 func TestCameraProbeRequiresOneTarget(t *testing.T) {
 	if err := runCameraProbe(nil); err == nil {
 		t.Fatal("a probe without a camera was accepted")
