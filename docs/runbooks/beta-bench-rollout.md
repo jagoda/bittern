@@ -436,9 +436,15 @@ The failure looks like this:
 The cause is the fixed unit, not the release: it starts `/usr/bin/bittern update helper`, the kit
 baseline built when schema version 2 was current.
 
-The smallest safe bridge, for one update only, runs the same helper binary from the active verified
-bundle against the request the card already wrote. The bundle was verified against the signed
-manifest before it was activated, and the command passes only the fixed `update helper` argument.
+On a release that carries [self-service update recovery](../notes/2026-11-28-self-service-update-recovery.md),
+open the Updates card and use the action it names. For this state it reads "Run the saved update
+another way"; the confirmation states that the installed version, settings, recordings, and history
+are not changed. A device whose active bundle predates that release cannot show the action, so it
+needs the bridge below for one update only.
+
+The bridge runs the same helper binary from the active verified bundle against the request the card
+already wrote. The bundle was verified against the signed manifest before it was activated, and the
+command passes only the fixed `update helper` argument.
 
 ```sh
 generation=$(cat /var/lib/bittern/app/current)

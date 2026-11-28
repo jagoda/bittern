@@ -1,7 +1,7 @@
 # Design system changelog
 
-- Date: 2026-11-27
-- Status: Accepted; v0.25 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
+- Date: 2026-11-28
+- Status: Accepted; v0.26 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
   implemented in `ui/static/bittern.css` and the templates; the v0.3 flow layer is binding from v0.6,
   when [ADR 0027](../adr/0027-flow-layer-above-patterns.md) was accepted with amendments P1 and P3.
 - Applies to: every change to a token, a component, a pattern, a flow, or a rule in
@@ -18,6 +18,21 @@ like at vN, and why is it different now".
 Versions are internal to the design documents. Bittern does not publish a package and has no
 second consumer, so there is no SemVer promise, no changeset tooling, and no codemod. A version is
 a date-stamped batch of class changes; the date is how it maps to an app release.
+
+## v0.26: 2026-11-28
+
+- Class: pattern and flow implementation
+- What changed: the status update card gains a recovery state for a stuck update. The state names
+  the problem and one action, hides check, install, and rollback while it stands, and links to a
+  confirmation destination at `/ui/status/updates/recovery` that states the effect and what is not
+  touched. The result reports recovered, started, or still stuck with the reason. See
+  [patterns.md](patterns.md#status-page) S15 and [flows.md](flows.md).
+- Why: the first stranded update helper could only be cleared with a root shell. A failure that
+  needs a shell to escape is a product defect.
+- Evidence: [the self-service update recovery note](../notes/2026-11-28-self-service-update-recovery.md).
+  The browser check reads every recovery state and the confirmation at four widths, and the update
+  tests cover detection, the live-transaction refusal, quarantine, the active-bundle recovery, and
+  the untouched state root.
 
 ## v0.25: 2026-11-28
 

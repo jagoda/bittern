@@ -140,7 +140,7 @@ func TestRollbackConfirmationIsANavigationNotAnInPlaceSwap(t *testing.T) {
 func TestUpdateFailureViewKeepsTheStartDetailOutOfThePrimaryCopy(t *testing.T) {
 	progress := startFailureProgress(update.NewStartError(update.StartSpace, nil, "the state root has 10 bytes free, less than the 20 bytes required"))
 	document := MockStatusDocument("ready|available", testNow)
-	view := buildUpdateView(document, progress, time.UTC)
+	view := buildUpdateView(document, progress, time.UTC, update.RecoveryStatus{State: update.RecoveryNone}, nil, "")
 	if view.Summary != progress.Failure {
 		t.Fatalf("summary = %q, want the primary sentence", view.Summary)
 	}

@@ -245,6 +245,7 @@ type pageData struct {
 	StatusQuery            string
 	StatusRefresh          string
 	UpdateCard             updateView
+	Recovery               *recoveryView
 	Live                   liveView
 	MockPreview            bool
 	StateOptions           []stateOption

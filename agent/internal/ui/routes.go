@@ -221,6 +221,15 @@ var uiRoutes = []route{
 		Auth: true, InPlace: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).startUpdateInstall),
 	},
 	{
+		Name: "update-recovery", Method: http.MethodGet, Pattern: "/ui/status/updates/recovery",
+		Template: "update-recovery", Auth: true, Responsive: true, Status: http.StatusOK,
+		Handler: routeHandler((*handler).showUpdateRecovery),
+	},
+	{
+		Name: "update-recovery-submit", Method: http.MethodPost, Pattern: "/ui/status/updates/recovery",
+		Auth: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).startUpdateRecovery),
+	},
+	{
 		Name: "update-rollback", Method: http.MethodGet, Pattern: "/ui/status/updates/rollback",
 		Template: "update-rollback", Auth: true, Responsive: true, Status: http.StatusOK,
 		Handler: routeHandler((*handler).showUpdateRollback),

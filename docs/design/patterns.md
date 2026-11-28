@@ -167,7 +167,9 @@ fact list, table and table wrapper, inline alert, disclosure, empty state, page 
 **States.** Booting, ready, degraded, updating, failed, unknown section, not applicable section,
 stale status, partial data, no data yet, unavailable API, expired session, reconnecting, factory
 version, update available, up to date, update check failed, update installing, update failed, update
-rolled back.
+rolled back, update waiting, update interrupted, update stuck, update cannot read the settings,
+leftover download, update service stopped, not enough free space, update recovery started,
+update recovered.
 
 **Rules.**
 
@@ -186,6 +188,7 @@ rolled back.
 | S11 | Install and rollback show the current step and the measured progress, and the update card's live region polls every two seconds while either runs. A failure names the step and the effect, and offers the next action. | Q5, Q7, and Q14; the operation fragment and state tests. |
 | S12 | A manual rollback asks for confirmation on its own destination and states that configuration and recordings are not reverted. It is a secondary, destructive-variant action, not the page's filled action. | Q1, Q9, and Q13; the rollback confirmation test and 360 screenshot. |
 | S13 | A live poll that cannot reach the daemon shows a reconnecting notice beside the live region, leaves the panel and its owner state in place, and clears the notice after the next successful poll. | Q6 and the live refresh browser check with the fragment request aborted. |
+| S15 | A stuck update state names the state, the effect, and one recovery action, and hides check, install, and rollback while it stands. The recovery action has its own confirmation destination at `/ui/status/updates/recovery` that states what changes and what is not touched. A recovery that starts a transaction reports started, recovered, or still stuck with the reason; it never claims success from a cleared request alone. | Q5, Q7, and Q11 to Q15; the recovery state tests and the four-width screenshots. |
 | S14 | A card action that does not navigate acts in place and must not replace the page with itself. Installing from the status page keeps the URL, does not reload the page, and shows the preparing or downloading step and the progress region in the update card. The HTMX response is the card fragment, never the status page, and a marker outside the card survives the swap. | Q11 and Q14; the status install browser check at four widths, including the page-structure and outside-marker assertions. |
 
 The current status page has an overall badge and reason, but then nine cards of equal weight. It

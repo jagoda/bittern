@@ -34,6 +34,7 @@ tracker.
 | UX-13 | Read every changed screen's full-page screenshots before human review | Level 2 hardware run, BIT-033 |
 | UX-14 (candidate) | Live updates must not disturb state the user owns | Live refresh bench report, BIT-044 |
 | UX-15 | An in-place control must not replace the page with itself | Status install field report, 2026-11-28 |
+| UX-16 | A stuck state that needs a shell to escape is a defect | Stranded update helper, 2026-11-28 |
 | EN-1 | A bug fix carries the regression test that reproduces it | GK41 bug ledger, ADR 0012 |
 | EN-2 | Tests assert structure and values, not user-facing copy, because copy is expected to change | QEMU adoption fixture note, BIT-035 |
 | EN-3 | A regression test starts from the state that failed in the field, and says so | Reboot failures, field parity |
@@ -401,6 +402,28 @@ does not apply gets a one-line reason in the review.
   requires a browser test that opens Technical details, focuses a control, scrolls a table region,
   waits for at least two polls, and asserts the state is unchanged while the values still update.
   The [UX review checklist](#ux-review-checklist) applies the same rule to every live update.
+
+### UX-16 A stuck state that needs a shell to escape is a defect
+
+- Date: 2026-11-28
+- Rule: Every state the product can enter has an owner-facing action in the product. If the only
+  escape is a root shell, a manual file edit, or a support command, that is a product defect even
+  when the underlying bug is fixed. The action names the state, the effect, and what is not
+  touched, and it is a small named action rather than a general-purpose console.
+- Evidence: [the stranded update helper note](notes/2026-11-28-helper-runs-the-active-bundle.md)
+  records a beta.7 device whose update helper could not read the configuration its own update path
+  had migrated. Every retry failed the same way, and the only recovery was a root shell command.
+  [The self-service recovery note](notes/2026-11-28-self-service-update-recovery.md) records the
+  detected states, the seven actions, and the refusals.
+- Do: Detect the state from what the agent observes, combine the observations, offer one action,
+  confirm its effect, and verify the result. Refuse to act on a live transaction or a state that
+  changed.
+- Don't: Treat a retry button as recovery when the retry cannot succeed, edit state by hand, or add a
+  general-purpose root console as the escape hatch.
+- Check: The update package carries the detection and action tests named in the recovery note,
+  including the live-transaction refusal, the quarantine leaving the state root intact, and the
+  active-bundle recovery completing a pending update. The browser check reads each recovery state at
+  four widths.
 
 ## Engineering
 

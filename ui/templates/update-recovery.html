@@ -1,0 +1,30 @@
+{{define "update-recovery"}}{{template "head" .}}
+{{if .Recovery}}
+<h1>{{.Recovery.Badge}}</h1>
+<p class="lede">{{.Recovery.Summary}}</p>
+{{template "preview-notice" .}}
+{{if .Recovery.CanAct}}
+<div class="card">
+  <h2>What changes</h2>
+  <p>{{.Recovery.Effect}}</p>
+  <form method="post" action="/ui/status/updates/recovery{{.StatusQuery}}" data-busy="true" data-busy-label="Starting the recovery">
+    {{template "csrf" .}}
+    <div class="form-actions">
+      <button type="submit">{{.Recovery.ActionLabel}}</button>
+      <a href="/ui/status{{.StatusQuery}}">Cancel</a>
+    </div>
+  </form>
+</div>
+{{else}}
+<div class="card">
+  <h2>Nothing to recover</h2>
+  <p>Bittern did not find a stuck update. Nothing has changed.</p>
+  <p class="action-links"><a href="/ui/status{{.StatusQuery}}">Open status</a></p>
+</div>
+{{end}}
+{{else}}
+<h1>Nothing to recover</h1>
+<p class="lede">Bittern did not find a stuck update. Nothing has changed.</p>
+<p class="action-links"><a href="/ui/status{{.StatusQuery}}">Open status</a></p>
+{{end}}
+{{template "foot" .}}{{end}}

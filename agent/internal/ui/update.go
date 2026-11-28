@@ -31,6 +31,13 @@ type UpdateService interface {
 	StartInstall(context.Context) error
 	StartRollback(context.Context) error
 	Progress() UpdateProgress
+	// Recovery is the typed stuck-state observation. It is read on every card
+	// render and never writes.
+	Recovery(context.Context) update.RecoveryStatus
+	// Recover runs exactly one recovery action from the detected state.
+	Recover(context.Context, update.RecoveryAction) (update.RecoveryResult, error)
+	// RecoveryOutcome is the last action's result, shown once on the card.
+	RecoveryOutcome() *update.RecoveryResult
 }
 
 // UpdateProgress is the UI-owned preparation state before the fixed update
@@ -57,6 +64,13 @@ func (UnavailableUpdateService) Check(context.Context) error         { return er
 func (UnavailableUpdateService) StartInstall(context.Context) error  { return errUpdateUnavailable }
 func (UnavailableUpdateService) StartRollback(context.Context) error { return errUpdateUnavailable }
 func (UnavailableUpdateService) Progress() UpdateProgress            { return UpdateProgress{} }
+func (UnavailableUpdateService) Recovery(context.Context) update.RecoveryStatus {
+	return update.RecoveryStatus{State: update.RecoveryNone}
+}
+func (UnavailableUpdateService) Recover(context.Context, update.RecoveryAction) (update.RecoveryResult, error) {
+	return update.RecoveryResult{}, errUpdateUnavailable
+}
+func (UnavailableUpdateService) RecoveryOutcome() *update.RecoveryResult { return nil }
 
 type updateUnavailableError struct{}
 
@@ -69,8 +83,11 @@ var errUpdateUnavailable = updateUnavailableError{}
 // MockUpdateService is the preview and test implementation. It reports the
 // preparation state a real request would show without touching the appliance.
 type MockUpdateService struct {
-	mu       sync.Mutex
-	progress UpdateProgress
+	mu                sync.Mutex
+	progress          UpdateProgress
+	RecoveryOptions   update.RecoveryOptions
+	recoveryOutcome   *update.RecoveryResult
+	recoveryOutcomeAt time.Time
 }
 
 func (s *MockUpdateService) Check(context.Context) error { return nil }
@@ -101,6 +118,16 @@ func (s *MockUpdateService) Progress() UpdateProgress {
 	return s.progress
 }
 
+func (s *MockUpdateService) Recovery(context.Context) update.RecoveryStatus {
+	return update.RecoveryStatus{State: update.RecoveryNone}
+}
+
+func (s *MockUpdateService) Recover(context.Context, update.RecoveryAction) (update.RecoveryResult, error) {
+	return update.RecoveryResult{}, nil
+}
+
+func (s *MockUpdateService) RecoveryOutcome() *update.RecoveryResult { return nil }
+
 // AgentUpdateService calls the same update package functions as the command
 // line. Fetching a candidate downloads and verifies it before the fixed helper
 // unit starts; that download runs in the background so the POST returns and the
@@ -112,8 +139,11 @@ type AgentUpdateService struct {
 	Systemctl  func(args ...string) error
 	FreeSpace  func(path string) (uint64, error)
 
-	mu       sync.Mutex
-	progress UpdateProgress
+	mu                sync.Mutex
+	progress          UpdateProgress
+	RecoveryOptions   update.RecoveryOptions
+	recoveryOutcome   *update.RecoveryResult
+	recoveryOutcomeAt time.Time
 }
 
 func (s *AgentUpdateService) now() time.Time {
@@ -139,6 +169,46 @@ func (s *AgentUpdateService) checkOptions() update.CheckOptions {
 	}
 }
 
+func (s *AgentUpdateService) recoveryConfig() update.RecoveryOptions {
+	options := s.RecoveryOptions
+	if options.StateRoot == "" {
+		options.StateRoot = s.StateRoot
+	}
+	if options.Now == nil {
+		options.Now = s.now
+	}
+	return options
+}
+
+func (s *AgentUpdateService) Recovery(context.Context) update.RecoveryStatus {
+	return update.DetectRecovery(s.recoveryConfig())
+}
+
+func (s *AgentUpdateService) Recover(ctx context.Context, action update.RecoveryAction) (update.RecoveryResult, error) {
+	result, err := update.Recover(ctx, s.recoveryConfig(), action)
+	s.mu.Lock()
+	s.recoveryOutcome = &result
+	s.recoveryOutcomeAt = s.now()
+	s.mu.Unlock()
+	return result, err
+}
+
+func (s *AgentUpdateService) RecoveryOutcome() *update.RecoveryResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.recoveryOutcome != nil && s.now().Sub(s.recoveryOutcomeAt) > 2*time.Minute {
+		s.recoveryOutcome = nil
+	}
+	return s.recoveryOutcome
+}
+
+func (s *AgentUpdateService) clearRecoveryOutcome() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recoveryOutcome = nil
+	s.recoveryOutcomeAt = time.Time{}
+}
+
 func (s *AgentUpdateService) setProgress(progress UpdateProgress) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -158,6 +228,7 @@ func (s *AgentUpdateService) clearPreparation() {
 // error. If no new record was written, the old record must not keep saying the
 // appliance is up to date.
 func (s *AgentUpdateService) Check(_ context.Context) error {
+	s.clearRecoveryOutcome()
 	previous, present, _ := update.ReadCheck(s.StateRoot)
 	_, err := update.CheckChannel(s.checkOptions())
 	if err != nil {
@@ -177,6 +248,7 @@ func (s *AgentUpdateService) Check(_ context.Context) error {
 }
 
 func (s *AgentUpdateService) StartInstall(_ context.Context) error {
+	s.clearRecoveryOutcome()
 	s.mu.Lock()
 	if s.progress.Active {
 		s.mu.Unlock()
@@ -247,6 +319,7 @@ func (s *AgentUpdateService) install() {
 }
 
 func (s *AgentUpdateService) StartRollback(_ context.Context) error {
+	s.clearRecoveryOutcome()
 	s.mu.Lock()
 	if s.progress.Active {
 		s.mu.Unlock()
@@ -417,22 +490,38 @@ type updateView struct {
 	TechnicalOperation   string
 	TechnicalStartStep   string
 	TechnicalStartReason string
+
+	Recovery                   *recoveryView
+	RecoveryResult             *recoveryResultView
+	TechnicalRecovery          string
+	TechnicalRecoveryMsg       string
+	TechnicalRecoveryResult    string
+	TechnicalRecoveryResultMsg string
 }
 
 func (h *handler) updateCard(document status.Document) updateView {
-	return buildUpdateView(document, h.updates.Progress(), timezone.Load(h.timezoneName()))
+	return buildUpdateView(document, h.updates.Progress(), timezone.Load(h.timezoneName()), h.updates.Recovery(context.Background()), h.updates.RecoveryOutcome(), "")
 }
 
 // updateCardFor adds the preview-only start failure state to an otherwise real
 // progress value. The query hint never reaches production.
 func (h *handler) updateCardFor(r *http.Request, document status.Document) updateView {
 	progress := h.updates.Progress()
+	recovery := h.updates.Recovery(r.Context())
+	outcome := h.updates.RecoveryOutcome()
 	if h.preview {
-		if preview, ok := previewStartFailure(r.URL.Query().Get("update")); ok {
+		hint := r.URL.Query().Get("update")
+		if preview, ok := previewStartFailure(hint); ok {
 			progress = startFailureProgress(preview)
 		}
+		if status, ok := previewRecoveryStatus(hint); ok {
+			recovery = status
+		}
+		if result := previewRecoveryResult(hint); result != nil {
+			outcome = result
+		}
 	}
-	return buildUpdateView(document, progress, timezone.Load(h.timezoneName()))
+	return buildUpdateView(document, progress, timezone.Load(h.timezoneName()), recovery, outcome, h.statusQuery(r, document.State))
 }
 
 func previewStartFailure(hint string) (error, bool) {
@@ -458,8 +547,42 @@ func previewStartFailure(hint string) (error, bool) {
 	return update.NewStartError(kind, nil, "preview: %s", kind), true
 }
 
-func buildUpdateView(document status.Document, progress UpdateProgress, location *time.Location) updateView {
+func buildUpdateView(document status.Document, progress UpdateProgress, location *time.Location, recovery update.RecoveryStatus, outcome *update.RecoveryResult, query string) updateView {
+	view := buildUpdateViewBase(document, progress, location, recovery, outcome, query)
+	applyRecovery(&view)
+	return view
+}
+
+func applyRecovery(view *updateView) {
+	if view.Recovery == nil {
+		return
+	}
+	view.StateName = view.Recovery.State
+	view.StateClass = "degraded"
+	switch update.RecoveryState(view.Recovery.State) {
+	case update.RecoveryRequestFailed, update.RecoveryJournalFailed, update.RecoveryHelperFailure, update.RecoveryFailedUnit:
+		view.StateClass = "failed"
+	case update.RecoveryUnknown:
+		view.StateClass = "unknown"
+	}
+	view.StateLabel = view.Recovery.Badge
+	view.Headline = view.Recovery.Headline
+	view.Summary = view.Recovery.Summary
+	if view.Recovery.CanAct {
+		view.CanInstall = false
+		view.CanCheck = false
+		view.CanRollback = false
+	}
+}
+
+func buildUpdateViewBase(document status.Document, progress UpdateProgress, location *time.Location, recovery update.RecoveryStatus, outcome *update.RecoveryResult, query string) updateView {
 	updates := document.Sections.Updates
+	if progress.Active || updates.CurrentOperation != nil {
+		// A preparation or a journal-owned transaction is live even when the
+		// helper unit is between start attempts. Recovery must not offer to
+		// act on it.
+		recovery = update.RecoveryStatus{State: update.RecoveryLive}
+	}
 	view := updateView{
 		StateName:       "unknown",
 		StateClass:      "unknown",
@@ -485,6 +608,16 @@ func buildUpdateView(document status.Document, progress UpdateProgress, location
 	view.TechnicalRunning = numberOrUnknown(updates.RunningGeneration)
 	view.TechnicalOffered = numberOrUnknown(updates.AvailableGeneration)
 	view.TechnicalCheck = updates.LastCheck.Result
+	view.Recovery = buildRecoveryView(recovery, query)
+	view.RecoveryResult = buildRecoveryResultView(outcome)
+	if recovery.State != "" && recovery.State != update.RecoveryNone && recovery.State != update.RecoveryLive {
+		view.TechnicalRecovery = string(recovery.State)
+		view.TechnicalRecoveryMsg = recovery.Detail
+	}
+	if outcome != nil {
+		view.TechnicalRecoveryResult = outcome.Status
+		view.TechnicalRecoveryResultMsg = outcome.Detail
+	}
 	if updates.LastOperation != nil {
 		view.TechnicalOperation = updates.LastOperation.Result
 		view.TechnicalStep = updates.LastOperation.FailedStep

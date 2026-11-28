@@ -61,12 +61,22 @@
     {{if .UpdateCard.FailureAction}}<p>{{.UpdateCard.FailureAction}}</p>{{end}}
   </div>
   {{end}}
+  {{if .UpdateCard.RecoveryResult}}
+  <div class="notice" role="status" id="update-recovery-result">
+    <p><strong>{{.UpdateCard.RecoveryResult.Badge}}</strong></p>
+    <p>{{.UpdateCard.RecoveryResult.Headline}}</p>
+    <p>{{.UpdateCard.RecoveryResult.Summary}}</p>
+  </div>
+  {{end}}
   {{if .UpdateCard.RolledBack}}
   <p>{{.UpdateCard.NextUpdateRule}}</p>
   {{end}}
 {{end}}
 
 {{define "update-card-actions"}}
+  {{if .UpdateCard.Recovery}}{{if .UpdateCard.Recovery.CanAct}}
+  <a id="update-action-recovery-{{.UpdateCard.Recovery.State}}" href="{{.UpdateCard.Recovery.ActionHref}}">{{.UpdateCard.Recovery.ActionLabel}}</a>
+  {{end}}{{end}}
   {{if .UpdateCard.CanInstall}}
   <form id="update-action-install-{{.UpdateCard.StateName}}" method="post" action="/ui/status/updates/install{{.StatusQuery}}" hx-post="/ui/status/updates/install{{.StatusQuery}}" hx-target="#update-card" hx-swap="outerHTML" data-busy="true" data-busy-label="Starting the update">
     {{template "csrf" .}}

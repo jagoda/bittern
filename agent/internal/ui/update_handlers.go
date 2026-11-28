@@ -92,3 +92,31 @@ func (h *handler) startUpdateRollback(w http.ResponseWriter, r *http.Request) {
 	_ = h.updates.StartRollback(ctx)
 	h.respondUpdateNavigation(w, r)
 }
+
+func (h *handler) showUpdateRecovery(w http.ResponseWriter, r *http.Request) {
+	document := h.buildStatus(r)
+	card := h.updateCardFor(r, document)
+	h.render(w, r, http.StatusOK, "update-recovery", pageData{
+		Title:        "Recover update",
+		Status:       document,
+		StatusQuery:  h.statusQuery(r, document.State),
+		UpdateCard:   card,
+		Recovery:     card.Recovery,
+		MockPreview:  h.preview,
+		StateOptions: mockStateOptions(document.State),
+	})
+}
+
+func (h *handler) startUpdateRecovery(w http.ResponseWriter, r *http.Request) {
+	document := h.buildStatus(r)
+	card := h.updateCardFor(r, document)
+	if card.Recovery == nil || !card.Recovery.CanAct {
+		http.Redirect(w, r, h.statusURL(r), http.StatusSeeOther)
+		return
+	}
+	status := h.updates.Recovery(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), updateActionTimeout)
+	defer cancel()
+	_, _ = h.updates.Recover(ctx, status.Action)
+	h.respondUpdateNavigation(w, r)
+}

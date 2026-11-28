@@ -15,10 +15,13 @@ import (
 )
 
 type fakeUpdateService struct {
-	checks    int
-	installs  int
-	rollbacks int
-	progress  UpdateProgress
+	checks          int
+	installs        int
+	rollbacks       int
+	progress        UpdateProgress
+	recovery        update.RecoveryStatus
+	recoveryOutcome *update.RecoveryResult
+	recoveredAction update.RecoveryAction
 }
 
 func (f *fakeUpdateService) Check(context.Context) error {
@@ -34,6 +37,22 @@ func (f *fakeUpdateService) StartRollback(context.Context) error {
 	return nil
 }
 func (f *fakeUpdateService) Progress() UpdateProgress { return f.progress }
+
+func (f *fakeUpdateService) Recovery(context.Context) update.RecoveryStatus {
+	if f.recovery.State == "" {
+		return update.RecoveryStatus{State: update.RecoveryNone}
+	}
+	return f.recovery
+}
+
+func (f *fakeUpdateService) Recover(_ context.Context, action update.RecoveryAction) (update.RecoveryResult, error) {
+	f.recoveredAction = action
+	result := update.RecoveryResult{Status: update.RecoveryRecovered, Action: action}
+	f.recoveryOutcome = &result
+	return result, nil
+}
+
+func (f *fakeUpdateService) RecoveryOutcome() *update.RecoveryResult { return f.recoveryOutcome }
 
 func TestUpdateCardCoversEveryState(t *testing.T) {
 	tests := []struct {

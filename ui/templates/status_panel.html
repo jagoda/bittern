@@ -341,6 +341,14 @@
     <dd><code>{{.UpdateCard.TechnicalStartStep}}</code></dd>{{end}}
     {{if .UpdateCard.TechnicalStartReason}}<dt>Update start reported reason</dt>
     <dd>{{.UpdateCard.TechnicalStartReason}}</dd>{{end}}
+    {{if .UpdateCard.TechnicalRecovery}}<dt>Update recovery state</dt>
+    <dd><code>{{.UpdateCard.TechnicalRecovery}}</code></dd>{{end}}
+    {{if .UpdateCard.TechnicalRecoveryMsg}}<dt>Update recovery reason</dt>
+    <dd>{{.UpdateCard.TechnicalRecoveryMsg}}</dd>{{end}}
+    {{if .UpdateCard.TechnicalRecoveryResult}}<dt>Last update recovery result</dt>
+    <dd><code>{{.UpdateCard.TechnicalRecoveryResult}}</code></dd>{{end}}
+    {{if .UpdateCard.TechnicalRecoveryResultMsg}}<dt>Last update recovery reported reason</dt>
+    <dd>{{.UpdateCard.TechnicalRecoveryResultMsg}}</dd>{{end}}
     <dt>Reset state</dt>
     <dd><code>{{.Status.Sections.Reset.State}}</code></dd>
     <dt>Reset level</dt>

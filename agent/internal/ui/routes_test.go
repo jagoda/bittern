@@ -253,7 +253,7 @@ func exerciseRoute(t *testing.T, route route) (int, string) {
 	case "status-fragment":
 		server, client := newTestServer(t, Options{MockPreview: true})
 		return getPage(t, client, server.URL+path)
-	case "updates-check", "updates-install", "update-rollback-submit":
+	case "updates-check", "updates-install", "update-rollback-submit", "update-recovery-submit":
 		server, client := newTestServer(t, Options{MockPreview: true})
 		disableRedirects(client)
 		return postPage(t, client, server.URL+path, url.Values{})

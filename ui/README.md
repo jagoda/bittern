@@ -132,6 +132,8 @@ The BIT-020 column is the route's responsive flag. Regenerate the table from `ag
 | GET | `/ui/status` | `status` | Yes | Yes |
 | POST | `/ui/status/updates/check` | - | Yes | No |
 | POST | `/ui/status/updates/install` | - | Yes | No |
+| GET | `/ui/status/updates/recovery` | `update-recovery` | Yes | Yes |
+| POST | `/ui/status/updates/recovery` | - | Yes | No |
 | GET | `/ui/status/updates/rollback` | `update-rollback` | Yes | Yes |
 | POST | `/ui/status/updates/rollback` | - | Yes | No |
 | GET | `/ui/status/fragment` | `status-panel` | Yes | No |

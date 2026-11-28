@@ -640,6 +640,11 @@ func runUpdateHelper(args []string) error {
 	rollback := request.Source == update.RequestSourceManualRollback
 	logger := logging.PrintfLogger{Logger: logging.New(os.Stdout, redact.New())}
 	result, err := update.RunHelper(update.HelperOptions{Logger: logger.Printf})
+	if recordErr := update.RecordHelperOutcome("/var/lib/bittern", result, err, time.Now()); recordErr != nil {
+		// The durable failure record is how the web console classifies a stuck
+		// helper. It never replaces the transaction result.
+		fmt.Fprintf(os.Stderr, "update: record the helper outcome: %v\n", recordErr)
+	}
 	if result.OperationID != "" {
 		fmt.Printf("update: helper finished %s for operation %s\n", result.Status, result.OperationID)
 	}

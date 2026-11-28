@@ -100,24 +100,15 @@
     "landing": "initialized-with-cameras"
   },
   {
-    "route": "live-camera",
-    "path": "/ui/live/front_door",
-    "flow": "auth"
-  },
-  {
     "route": "live",
     "path": "/ui/live",
     "flow": "auth",
-    "variant": "nine-tiles",
-    "actions": [
-      {
-        "action": "cookie",
-        "name": "bittern_live_layout",
-        "value": "v=1&p=9&t=front_door&t=driveway&t=side_gate&t=back_garden",
-        "path": "/ui/live",
-        "selector": "body"
-      }
-    ]
+    "variant": "nine-tiles"
+  },
+  {
+    "route": "live-camera",
+    "path": "/ui/live/front_door",
+    "flow": "auth"
   },
   {
     "route": "status",
@@ -178,8 +169,7 @@
     "route": "status",
     "path": "/ui/status?state=failed&update=installing",
     "flow": "auth",
-    "variant": "live-refresh",
-    "live": "refresh"
+    "variant": "live-refresh"
   },
   {
     "route": "status",
@@ -254,6 +244,11 @@
     "variant": "update-start-source-read"
   },
   {
+    "route": "update-recovery",
+    "path": "/ui/status/updates/recovery",
+    "flow": "auth"
+  },
+  {
     "route": "update-rollback",
     "path": "/ui/status/updates/rollback",
     "flow": "auth"
@@ -263,6 +258,84 @@
     "path": "/ui/status/updates/rollback?update=failed",
     "flow": "auth",
     "variant": "confirm"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=recovery-request-pending",
+    "flow": "auth",
+    "variant": "update-recovery-request-pending"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=recovery-request-failed",
+    "flow": "auth",
+    "variant": "update-recovery-request-failed"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=recovery-journal-pending",
+    "flow": "auth",
+    "variant": "update-recovery-journal-pending"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=recovery-journal-failed",
+    "flow": "auth",
+    "variant": "update-recovery-journal-failed"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=recovery-helper-failure",
+    "flow": "auth",
+    "variant": "update-recovery-helper-failure"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=recovery-orphan-incoming",
+    "flow": "auth",
+    "variant": "update-recovery-orphan-incoming"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=recovery-failed-unit",
+    "flow": "auth",
+    "variant": "update-recovery-failed-unit"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=recovery-insufficient-space",
+    "flow": "auth",
+    "variant": "update-recovery-insufficient-space"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=recovery-unknown",
+    "flow": "auth",
+    "variant": "update-recovery-unknown"
+  },
+  {
+    "route": "update-recovery",
+    "path": "/ui/status/updates/recovery?update=recovery-request-failed",
+    "flow": "auth",
+    "variant": "confirm"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=recovery-result-recovered",
+    "flow": "auth",
+    "variant": "update-recovery-result-recovered"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=recovery-result-started",
+    "flow": "auth",
+    "variant": "update-recovery-result-started"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=recovery-result-failed",
+    "flow": "auth",
+    "variant": "update-recovery-result-failed"
   },
   {
     "route": "not-found",
