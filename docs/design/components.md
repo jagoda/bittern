@@ -713,13 +713,13 @@ Current evidence for the list:
 - Anatomy, in order: the stable `[data-live-player]` node with the camera ID, profile and Bittern
   media base; a media area with the `<video>`, the snapshot image and the idle placeholder; the pane
   content layer that holds the camera name and a failure sentence; and that pane's own overlay, which
-  holds the current-stream line, the explicit stream selector with Main stream, Sub stream and
-  Snapshots, the one-stream reason, the camera chooser, and the polite announce region. An empty pane
-  has no player and no visible form: it is one centered plus icon and "Choose camera", and its
-  overlay opens the camera chooser when the pane is pressed. The media area is an aspect box that
-  reserves 16:9 before the first frame; the video is contained and letterboxed inside it and never
-  sets the player's size. The player carries no border, radius, padding, surface or heading bar; the
-  pane is the frame.
+  holds the compact current-stream word, the icon radio group for Main stream, Sub stream and
+  Snapshots with the stream name in visually hidden text, the selected check glyph, the one-camera
+  glyph chooser, the one-stream reason, and the polite announce region. An empty pane has no player
+  and no visible form: it is one centered plus icon and "Choose camera", and its overlay opens the
+  camera chooser when the pane is pressed. The media area is an aspect box that reserves 16:9 before
+  the first frame; the video is contained and letterboxed inside it and never sets the player's size.
+  The player carries no border, radius, padding, surface or heading bar; the pane is the frame.
 - Variants: MSE, HLS, snapshot fallback, a capacity snapshot pane on the 15 second interval, a
   no-JavaScript snapshot, and a pane at main, sub or snapshot quality. The sub stream is the
   automatic multi-pane choice and main the single-pane choice.
@@ -729,8 +729,8 @@ Current evidence for the list:
 - Tokens: `--color-surface`, `--color-text`, `--color-text-muted`, `--color-border-control`,
   `--color-action`, `--color-on-action`, `--color-focus`, `--color-scrim`, `--color-on-scrim`,
   `--focus-ring`, `--focus-ring-width`, `--radius-control`, `--border-width`, `--space-4`,
-  `--space-8`, `--space-12`, `--space-16`, `--touch-target`, `--type-body`, `--type-meta`,
-  `--type-label`.
+  `--space-8`, `--space-12`, `--space-16`, `--space-24`, `--touch-target`, `--touch-target-min`,
+  `--type-body`, `--type-meta`, `--type-label`.
 - Do: render the player once. Keep the video and the pane overlay as siblings, with the overlay inside
   the pane and outside the player node. Keep the state sentence and the next action in that pane's
   overlay or content. Expose the class prior, the live count and the current capacity as data
@@ -740,19 +740,24 @@ Current evidence for the list:
   show and hide the sixteen slots, and keep the islands that stay visible. Enter full screen on the
   grid from the wall control, keep the current layout and the one pixel gap, hide page overflow while
   it is active, and leave with Escape or a swipe down of at least 120 pixels; show the hint on entry
-  and a plain-language notice when the browser refuses. Hide a pane overlay after three seconds, make
-  it `inert` and `pointer-events: none` while hidden, and reveal it on pointer, focus or Tab with
-  visible focus. Show one selected option and the reason when the camera has one stream.
+  and a plain-language notice when the browser refuses. Keep the pane overlay to one current-stream
+  word, three 24 by 24 stream glyphs and one 24 by 24 camera glyph, within 30 percent of a
+  sixteen-pane cell. Hide it after three seconds, make it `inert` and `pointer-events: none` while
+  hidden, and reveal it on pointer, focus or Tab with visible focus. Dismiss a shown pane overlay and
+  the wall overlay on a video click, dismiss the wall overlay on another wall click, and keep the
+  player and URL unchanged. Show one selected glyph and the reason when the camera has one stream.
 - Don't: put the player or video inside an element with `hx-get`, `hx-post`, `hx-target`, `hx-swap`
   or `hx-trigger`; use `hx-preserve` as the isolation mechanism; put a pane's quality or camera
   control in the wall overlay; render a form in an empty pane; add an exit-full-screen button; put a
   stream name, RTSP URL,
   camera address or credential in the DOM; use a spinner with no state sentence; wrap a pane in a
   border, radius, padding, surface or card; add a persistent toolbar in full screen; use a hover-only
-  control; or tear down every island to replace or remove one pane.
+  control; restore a text select, hint and submit stack in the pane overlay; make the shown overlay
+  larger than the 30 percent budget; or tear down every island to replace or remove one pane.
 - Accessibility: one labelled video per island, a labelled pane group, a labelled pane overlay, a
   polite status region in the overlay, a retry control with a verb, a native icon radio group for the
-  layout with accessible names, a labelled stream selector with the selected option marked, one tab
+  layout with accessible names, a native icon radio group for the stream with accessible names and
+  the selected choice marked by a check glyph and border, a labelled camera glyph chooser, one tab
   stop for the visible pane wall with arrow-key geometry, and the one focus ring drawn inset.
 - Check: Q5, Q6, Q8 and Q11 in [the professional test](professional-test.md); the template guard
   and runtime `closest()` check; the four-width screenshots; the browser state walk; the layout area,

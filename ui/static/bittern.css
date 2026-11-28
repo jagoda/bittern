@@ -1511,9 +1511,10 @@ body.live-wall-page main {
   visibility: visible;
 }
 
-/* A pane's controls live in an overlay on that pane. The overlay is shown for
-   the pane under the pointer or keyboard focus, fades with the wall's idle
-   rule, and is inert and click-through while hidden. */
+/* A pane's controls live in an overlay on that pane. It is a compact head
+   row with the current-stream word and the camera icon, then one row of
+   pictorial stream choices. The overlay is inert and click-through while
+   hidden. */
 .live-pane-overlay {
   position: absolute;
   inset-block-end: var(--space-4);
@@ -1521,10 +1522,10 @@ body.live-wall-page main {
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: 0;
   max-block-size: 50%;
   overflow: auto;
-  padding: var(--space-8);
+  padding: 0 var(--space-4);
   background: var(--color-surface);
   border: var(--border-width) solid var(--color-border-subtle);
   border-radius: var(--radius-control);
@@ -1537,10 +1538,202 @@ body.live-wall-page main {
   pointer-events: none;
 }
 
+.live-pane-overlay-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-inline-size: 0;
+}
+
 .live-pane-current {
+  flex: 1 1 auto;
+  min-inline-size: 0;
   margin: 0;
   color: var(--color-text-muted);
   font: var(--type-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The quality choices are glyphs. The whole label is the target; the radio is
+   visually hidden but still the native control. A selected choice carries a
+   thicker border and a check glyph, and the pane's current-stream word says
+   which stream is playing, so the state never depends on colour. */
+.live-quality-choices,
+.live-profiles {
+  display: flex;
+  gap: var(--space-4);
+  min-inline-size: 0;
+}
+
+.live-quality-choice {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  inline-size: var(--space-24);
+  block-size: var(--space-24);
+  padding: 0;
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.live-quality-choice:has(input:checked),
+.live-quality-choice[aria-current="true"] {
+  border-width: calc(var(--border-width) * 2);
+  border-color: var(--color-action);
+}
+
+.live-quality-choice:has(input:focus-visible),
+.live-quality-choice:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.live-quality-icon {
+  display: inline-flex;
+  inline-size: var(--space-16);
+  block-size: var(--space-16);
+}
+
+.live-quality-glyph {
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.live-quality-check {
+  position: absolute;
+  inset-block-start: calc(-1 * var(--space-4));
+  inset-inline-end: calc(-1 * var(--space-4));
+  display: none;
+  inline-size: var(--space-12);
+  block-size: var(--space-12);
+  padding: calc(var(--border-width) * 2);
+  border-radius: var(--radius-pill);
+  background: var(--color-action);
+  color: var(--color-on-action);
+}
+
+.live-quality-check svg {
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.live-quality-choice:has(input:checked) .live-quality-check,
+.live-quality-choice[aria-current="true"] .live-quality-check {
+  display: inline-flex;
+}
+
+.live-quality-single {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--space-24);
+  block-size: var(--space-24);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+}
+
+/* The camera chooser is one camera glyph. The native select covers the glyph
+   so the whole small target opens the platform chooser and the keyboard still
+   reaches it. The no-JavaScript submit button stays visible until the script
+   hides it. */
+.live-camera-choice {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  inline-size: var(--space-24);
+  block-size: var(--space-24);
+  padding: 0;
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.live-camera-choice select {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.live-camera-choice:has(select:focus-visible),
+.live-camera-choice:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.live-camera-glyph {
+  display: inline-flex;
+  inline-size: var(--space-16);
+  block-size: var(--space-16);
+}
+
+.live-camera-glyph svg {
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.live-camera-menu {
+  position: relative;
+  flex: none;
+}
+
+.live-camera-menu summary {
+  list-style: none;
+}
+
+.live-camera-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.live-camera-menu ul {
+  position: absolute;
+  inset-block-start: calc(100% + var(--space-4));
+  inset-inline-end: 0;
+  z-index: 2;
+  min-inline-size: var(--touch-target);
+  margin: 0;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  list-style: none;
+}
+
+.live-camera-menu li a {
+  display: flex;
+  align-items: center;
+  min-block-size: var(--touch-target-min);
+  padding-inline: var(--space-8);
+  white-space: nowrap;
+}
+
+/* The one-stream reason is visible without JavaScript, when the page is a real
+   form, and stays in the accessibility tree as hidden text on the live page so
+   the compact overlay keeps its area budget. */
+.live-wall[data-live-enhanced="true"] .live-one-stream-reason {
+  position: absolute;
+  inline-size: var(--border-width);
+  block-size: var(--border-width);
+  padding: 0;
+  margin: calc(var(--border-width) * -1);
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* The wall controls are the layout picker and full screen. Per-pane controls
@@ -1612,8 +1805,7 @@ body.live-wall-page main {
   font: var(--type-meta);
 }
 
-.live-layout-radio,
-.live-quality-choice {
+.live-layout-radio {
   display: inline-flex;
   align-items: center;
   gap: var(--space-4);
@@ -1627,14 +1819,12 @@ body.live-wall-page main {
   font: var(--type-label);
 }
 
-.live-layout-radio:has(input:checked),
-.live-quality-choice:has(input:checked) {
+.live-layout-radio:has(input:checked) {
   border-width: calc(var(--border-width) * 2);
   border-color: var(--color-action);
 }
 
-.live-layout-radios input,
-.live-quality-choice input {
+.live-layout-radios input {
   inline-size: var(--space-16);
   block-size: var(--space-16);
   margin: 0;
@@ -1763,56 +1953,6 @@ body.live-wall-page main {
   font: var(--type-meta);
 }
 
-.live-profiles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-8);
-}
-
-.live-profiles a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-block-size: var(--touch-target);
-  min-inline-size: var(--touch-target);
-  padding-inline: var(--space-12);
-  border: var(--border-width) solid var(--color-border-control);
-  border-radius: var(--radius-control);
-  background: var(--color-surface);
-}
-
-.live-profiles a[aria-current="true"] {
-  border: calc(var(--border-width) * 2) solid var(--color-action);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-weight: var(--font-weight-strong);
-}
-
-.live-camera-picker ul {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-8);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.live-camera-picker a {
-  display: inline-flex;
-  align-items: center;
-  min-block-size: var(--touch-target);
-  min-inline-size: var(--touch-target);
-  padding-inline: var(--space-8);
-  border: var(--border-width) solid var(--color-border-subtle);
-  border-radius: var(--radius-control);
-  background: var(--color-surface);
-}
-
-.live-camera-picker a[aria-current="true"] {
-  border-color: var(--color-action);
-  font-weight: var(--font-weight-strong);
-}
-
 .live-camera-state {
   color: var(--color-text-muted);
 }
@@ -1827,18 +1967,13 @@ body.live-wall-page main {
 .live-pane-camera-form {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--space-4) var(--space-8);
+  align-items: center;
+  gap: var(--space-4);
 }
 
 .live-pane-quality-form .live-field,
 .live-pane-camera-form .live-field {
   min-inline-size: 0;
-}
-
-.live-pane-quality-form select[name="quality"],
-.live-pane-camera-form select[name="camera"] {
-  max-inline-size: 100%;
 }
 
 .live-fullscreen-hint {

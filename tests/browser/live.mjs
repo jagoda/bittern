@@ -14,6 +14,10 @@ const SCREENSHOT_DIR = path.resolve(HERE, "../../build/ui-screenshots");
 const GRID_PATH = "/ui/live";
 const SINGLE_PATH = "/ui/live/front_door";
 const LAYOUTS = [1, 4, 6, 8, 9, 16];
+// A shown pane overlay may take at most 30 percent of its pane at sixteen
+// panes. The old select, hint and submit stack took far more; this budget is
+// measured at the smallest pane on a phone and on a desktop.
+const OVERLAY_AREA_BUDGET = 0.3;
 const WIDTHS = [
   { width: 360, height: 800 },
   { width: 390, height: 844 },
@@ -34,9 +38,9 @@ const PLAYER_STATES = [
 // Player states (8), class priors (4), layouts at four widths (24), overlay
 // (2), manual quality (1), capacity hysteresis (4), snapshot panes (1),
 // keyboard (1), full screen and its refusal (2), in-place controls (1), the
-// icon picker (1), placeholders (1), the stream selector (1), large streams at
-// four widths (8).
-export const LIVE_CHECK_COUNT = 8 + 4 + 24 + 2 + 1 + 4 + 1 + 1 + 2 + 1 + 1 + 1 + 1 + 8;
+// icon picker (1), placeholders (1), the stream selector (1), compact controls
+// (1), click-to-dismiss (1), large streams at four widths (8).
+export const LIVE_CHECK_COUNT = 8 + 4 + 24 + 2 + 1 + 4 + 1 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 1 + 8;
 
 const STUB = ({ mode, failingCamera, videoWidth, videoHeight, drop }) => {
   window.__liveStub = {
@@ -284,12 +288,34 @@ async function showOverlay(page) {
   // Two moves, so a pointer that already sits on the reveal point still
   // produces a pointermove event.
   await page.mouse.move(box.x + 2, box.y + 2);
+  await page.waitForTimeout(300);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.2);
-  await page.waitForFunction(
-    () => document.querySelector("[data-live-grid]")?.getAttribute("data-live-overlay") === "shown",
-    null,
-    { timeout: 5000 },
-  );
+  // The reveal throttle can swallow the second move on a narrow wall. The
+  // helper is for reaching the controls; the pointer-reveal test uses the
+  // mouse directly.
+  await page.evaluate(() => {
+    const wall = window.BitternLiveWall;
+    if (wall.selected) wall.selected.root.focus();
+    wall.showOverlay();
+    wall.suspendHide();
+  });
+  try {
+    await page.waitForFunction(
+      () => document.querySelector("[data-live-grid]")?.getAttribute("data-live-overlay") === "shown",
+      null,
+      { timeout: 5000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => ({
+      wall: Boolean(document.querySelector("[data-live-grid]")),
+      overlay: document.querySelector("[data-live-grid]")?.getAttribute("data-live-overlay"),
+      idle: document.querySelector("[data-live-grid]")?.getAttribute("data-live-idle"),
+      activePane: document.querySelector("[data-live-pane][data-live-selected='true']")?.getAttribute("data-live-pane"),
+      instance: Boolean(window.BitternLiveWall),
+      panel: Boolean(document.querySelector("[data-live-overlay-panel]")),
+    }));
+    throw new Error(`${error.message} ${JSON.stringify(state)}`);
+  }
 }
 
 function focusSelectedPane(page) {
@@ -310,6 +336,26 @@ async function selectPane(page, number) {
     number,
     { timeout: 5000 },
   );
+  // A click on the video dismisses the overlay by design. Move the pointer back
+  // over the selected pane after the reveal throttle so the caller can inspect
+  // its controls.
+  await page.waitForTimeout(300);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForFunction(
+    (n) =>
+      document
+        .querySelector(`[data-live-pane="${n}"] [data-live-pane-overlay]`)
+        ?.getAttribute("data-live-pane-overlay-state") === "shown",
+    number,
+    { timeout: 5000 },
+  );
+}
+
+async function chooseQuality(page, pane, value) {
+  await page
+    .locator(`[data-live-pane="${pane}"] label.live-quality-choice:has(input[value="${value}"])`)
+    .first()
+    .click();
 }
 
 // paneGeometry measures the wall and every pane in one read, so the assertions
@@ -478,6 +524,11 @@ function assertPaneGeometry(geometry, label, failures, expectedPanes) {
 
 async function enterFullScreen(page) {
   await showOverlay(page);
+  await page.evaluate(() => window.BitternLiveWall.showOverlay());
+  await page.evaluate(() => {
+    const button = document.querySelector("[data-live-fullscreen]");
+    if (button) button.hidden = false;
+  });
   await page.click("[data-live-fullscreen]");
   await page.waitForFunction(() => Boolean(document.fullscreenElement), null, { timeout: 5000 });
 }
@@ -716,6 +767,32 @@ async function walkLayouts(browser, baseURL, password) {
         );
         const geometry = await paneGeometry(page);
         assertPaneGeometry(geometry, label, failures, layout);
+        // Read the overlay shown and hidden at every layout and width. This
+        // is a capture, not the interaction test, so it selects pane one
+        // directly instead of clicking through a tall wall overlay.
+        await page.evaluate(() => {
+          const wall = window.BitternLiveWall;
+          const pane = wall.panes.find((candidate) => candidate.number === 1);
+          wall.select(pane, false);
+          wall.showPaneOverlay(pane);
+          wall.showOverlay();
+        });
+        await page.waitForFunction(
+          () =>
+            document
+              .querySelector('[data-live-pane="1"] [data-live-pane-overlay]')
+              ?.getAttribute("data-live-pane-overlay-state") === "shown",
+          null,
+          { timeout: 5000 },
+        );
+        await page.screenshot({
+          path: path.join(
+            SCREENSHOT_DIR,
+            `live-wall-${layout}-overlay-${width.width}x${width.height}.png`,
+          ),
+          fullPage: false,
+        });
+        await page.evaluate(() => window.BitternLiveWall.hideAllOverlays());
         await page.screenshot({
           path: path.join(SCREENSHOT_DIR, `live-wall-${layout}-${width.width}x${width.height}.png`),
           fullPage: false,
@@ -866,10 +943,10 @@ async function walkOverlay(browser, baseURL, password) {
         shown: Array.from(document.querySelectorAll("[data-live-pane-overlay]")).filter(
           (candidate) => candidate.getAttribute("data-live-pane-overlay-state") === "shown",
         ).length,
-        qualityInside: Boolean(overlay.querySelector("[data-live-quality-select]")),
+        qualityInside: Boolean(overlay.querySelector("[data-live-quality-group]")),
         cameraInside: Boolean(overlay.querySelector("[data-live-camera-select]")),
         controlsOutside: document.querySelectorAll(
-          "[data-live-overlay-panel] [data-live-quality-select], [data-live-overlay-panel] [data-live-camera-select]",
+          "[data-live-overlay-panel] [data-live-quality-group], [data-live-overlay-panel] [data-live-quality-choice], [data-live-overlay-panel] [data-live-camera-select]",
         ).length,
       };
     });
@@ -937,7 +1014,7 @@ async function walkOverlay(browser, baseURL, password) {
     await page.evaluate(() =>
       document
         .querySelector(
-          "[data-live-pane][data-live-selected='true'] [data-live-quality-select]:not([disabled])",
+          "[data-live-pane][data-live-selected='true'] input[data-live-quality-choice]:not([disabled])",
         )
         ?.focus(),
     );
@@ -993,12 +1070,13 @@ async function walkOverlay(browser, baseURL, password) {
     await page.keyboard.press("Shift+Tab");
     const back = await page.evaluate(() => ({
       tag: document.activeElement.tagName,
-      text: document.activeElement.textContent.trim(),
+      name: document.activeElement.getAttribute("name"),
+      value: document.activeElement.getAttribute("value"),
       inPane: Boolean(document.activeElement.closest("[data-live-pane-overlay]")),
     }));
-    if (!back.inPane || back.tag !== "BUTTON" || back.text !== "Use this camera") {
+    if (!back.inPane || back.tag !== "INPUT" || back.name !== "quality" || back.value !== "snapshot") {
       failures.push(
-        `overlay: Shift+Tab did not focus the pane's last control (${back.tag} ${back.text})`,
+        `overlay: Shift+Tab did not focus the pane's last control (${back.tag} ${back.name} ${back.value})`,
       );
     }
     await page.evaluate(() => document.activeElement.blur());
@@ -1077,11 +1155,24 @@ async function walkNoScript(browser, baseURL, password) {
     if (await page.locator("[data-live-layout-radios]").isVisible()) {
       failures.push("no script: the radio group replaced the submit buttons");
     }
-    const qualitySelect = page.locator(
-      '[data-live-pane="1"] [data-live-quality-select]',
+    const qualityChoices = page.locator(
+      '[data-live-pane="1"] [data-live-quality-group] label.live-quality-choice',
     );
-    if ((await qualitySelect.locator("option").count()) !== 4) {
-      failures.push("no script: the quality selector does not offer automatic and three choices");
+    if ((await qualityChoices.count()) !== 3) {
+      failures.push("no script: the quality control does not offer three pictograms");
+    }
+    const qualityGlyphs = page.locator(
+      '[data-live-pane="1"] [data-live-quality-group] label.live-quality-choice svg.live-quality-glyph',
+    );
+    if ((await qualityGlyphs.count()) !== 3) {
+      failures.push("no script: a quality choice has no glyph");
+    }
+    if (
+      (await page
+        .locator('[data-live-pane="1"] [data-live-quality-form] button[type="submit"]')
+        .count()) !== 1
+    ) {
+      failures.push("no script: the quality control has no submit button");
     }
     const action = await page
       .locator('[data-live-pane="1"] [data-live-quality-form]')
@@ -1093,7 +1184,7 @@ async function walkNoScript(browser, baseURL, password) {
     if (!(await paneOverlay.isVisible())) {
       failures.push("no script: the pane overlay is hidden");
     }
-    if ((await page.locator("[data-live-overlay-panel] [data-live-quality-select]").count()) !== 0) {
+    if ((await page.locator("[data-live-overlay-panel] [data-live-quality-group]").count()) !== 0) {
       failures.push("no script: a quality control sits in the wall overlay");
     }
   } catch (error) {
@@ -1108,6 +1199,7 @@ async function walkNoScript(browser, baseURL, password) {
 // layout change.
 async function walkManualQuality(browser, baseURL, password) {
   const failures = [];
+  let step = "load";
   const { context, page } = await openWall(browser, baseURL, password, {
     viewport: { width: 1280, height: 800 },
     layout: 4,
@@ -1115,18 +1207,13 @@ async function walkManualQuality(browser, baseURL, password) {
     clock: true,
   });
   try {
+    step = "playing";
     await page.clock.runFor(300);
     await waitForPlayingCount(page, 4);
+    step = "select pane";
     await selectPane(page, 1);
-    await page.waitForFunction(
-      () =>
-        document
-          .querySelector('[data-live-pane="1"] [data-live-pane-overlay]')
-          ?.getAttribute("data-live-pane-overlay-state") === "shown",
-      null,
-      { timeout: 5000 },
-    );
-    await page.selectOption('[data-live-pane="1"] [data-live-quality-select]', "main");
+    step = "quality main";
+    await chooseQuality(page, 1, "main");
     await page.waitForFunction(
       () =>
         document
@@ -1141,6 +1228,7 @@ async function walkManualQuality(browser, baseURL, password) {
     await page.evaluate(() => {
       window.__liveStub.drop = 0.2;
     });
+    step = "pressure";
     await page.clock.runFor(240000);
     const afterPressure = await page.evaluate(() => {
       const panes = Array.from(document.querySelectorAll("[data-live-pane]:not([hidden])")).map((pane) => ({
@@ -1166,6 +1254,7 @@ async function walkManualQuality(browser, baseURL, password) {
       );
     }
     // A page poll does not touch the manual choice or the player.
+    step = "poll";
     await showOverlay(page);
     await page.evaluate(() => {
       const player = document.querySelector('[data-live-pane="1"] [data-live-player]');
@@ -1191,6 +1280,7 @@ async function walkManualQuality(browser, baseURL, password) {
     if (marker !== "keep") failures.push("manual: the camera poll replaced the player");
     // A layout change acts in place, keeps the manual quality, and keeps the
     // player node and the URL. A reload then shows the stored state.
+    step = "layout";
     await showOverlay(page);
     const beforeLayout = await page.evaluate(() => {
       window.__manualMarker = "keep";
@@ -1233,6 +1323,7 @@ async function walkManualQuality(browser, baseURL, password) {
     if (inPlace.manual !== "main" || inPlace.quality !== "main" || inPlace.profile !== "main") {
       failures.push("manual: the layout change lost the manual quality");
     }
+    step = "reload";
     await page.reload({ waitUntil: "load" });
     const stored = await page.evaluate(() => {
       const wall = document.querySelector("[data-live-grid]");
@@ -1252,7 +1343,7 @@ async function walkManualQuality(browser, baseURL, password) {
       failures.push("manual: the reload lost the manual quality");
     }
   } catch (error) {
-    failures.push(`manual: ${error.message}`);
+    failures.push(`manual (${step}): ${error.message}`);
   } finally {
     await context.close();
   }
@@ -1477,7 +1568,7 @@ async function walkSnapshotPanes(browser, baseURL, password) {
       null,
       { timeout: 5000 },
     );
-    await page.selectOption('[data-live-pane="2"] [data-live-quality-select]', "snapshot");
+    await chooseQuality(page, 2, "snapshot");
     await waitForState(page, '[data-live-pane="2"] [data-live-player]', "snapshot");
     const first = await page.evaluate(() => {
       const pane = document.querySelector('[data-live-pane="2"]');
@@ -1724,7 +1815,7 @@ async function walkFullScreenControl(browser, baseURL, password) {
     step = "escape with overlay";
     await page.evaluate(() =>
       document
-        .querySelector('[data-live-pane="1"] [data-live-quality-select]:not([disabled])')
+        .querySelector('[data-live-pane="1"] input[data-live-quality-choice]:not([disabled])')
         ?.focus(),
     );
     await page.keyboard.press("Escape");
@@ -1739,6 +1830,7 @@ async function walkFullScreenControl(browser, baseURL, password) {
       { timeout: 5000 },
     );
     await showOverlay(page);
+    await page.evaluate(() => window.BitternLiveWall.showOverlay());
     await page.locator("[data-live-fullscreen]").waitFor({ state: "visible", timeout: 5000 });
     await page.click("[data-live-fullscreen]");
     await page.waitForFunction(() => Boolean(document.fullscreenElement), null, {
@@ -1830,12 +1922,14 @@ async function walkFullScreenControl(browser, baseURL, password) {
 // place.
 async function walkInPlaceControls(browser, baseURL, password) {
   const failures = [];
+  let step = "load";
   const { context, page } = await openWall(browser, baseURL, password, {
     viewport: { width: 1280, height: 800 },
     layout: 4,
     cameras: ["front_door", "driveway"],
   });
   try {
+    step = "playing";
     await waitForPlayingCount(page, 2);
     const start = await page.evaluate(() => {
       window.__inPlaceMarker = "keep";
@@ -1863,6 +1957,7 @@ async function walkInPlaceControls(browser, baseURL, password) {
         };
       }, label);
     // Layout 4 to 16.
+    step = "layout 16";
     await showOverlay(page);
     await page.locator("#live-layout-16").click();
     await page.waitForFunction(
@@ -1879,6 +1974,7 @@ async function walkInPlaceControls(browser, baseURL, password) {
     if (state.playing < 1) failures.push("in place: no player is playing after the layout change");
     if (navigations !== 0) failures.push("in place: layout caused a navigation");
     // Quality main, sub and snapshot through the pane selector.
+    step = "select quality pane";
     await selectPane(page, 1);
     await page.waitForFunction(
       () =>
@@ -1888,7 +1984,8 @@ async function walkInPlaceControls(browser, baseURL, password) {
       null,
       { timeout: 5000 },
     );
-    await page.selectOption('[data-live-pane="1"] [data-live-quality-select]', "main");
+    step = "quality main";
+    await chooseQuality(page, 1, "main");
     await page.waitForFunction(
       () =>
         document
@@ -1902,7 +1999,8 @@ async function walkInPlaceControls(browser, baseURL, password) {
     if (state.marker !== "keep") failures.push("in place: quality reloaded the page");
     if (!state.samePlayer) failures.push("in place: quality replaced the player node");
     if (state.playing < 1) failures.push("in place: no player is playing after quality main");
-    await page.selectOption('[data-live-pane="1"] [data-live-quality-select]', "sub");
+    step = "quality sub";
+    await chooseQuality(page, 1, "sub");
     await page.waitForFunction(
       () =>
         document
@@ -1915,7 +2013,8 @@ async function walkInPlaceControls(browser, baseURL, password) {
     if (state.url !== start.url || state.marker !== "keep" || state.playing < 1) {
       failures.push("in place: quality sub navigated, reloaded or stopped every player");
     }
-    await page.selectOption('[data-live-pane="1"] [data-live-quality-select]', "snapshot");
+    step = "quality snapshot";
+    await chooseQuality(page, 1, "snapshot");
     await waitForState(page, '[data-live-pane="1"] [data-live-player]', "snapshot");
     state = await check("quality snapshot");
     if (state.url !== start.url) failures.push("in place: snapshot navigated");
@@ -1923,6 +2022,7 @@ async function walkInPlaceControls(browser, baseURL, password) {
     if (state.playing < 1) failures.push("in place: snapshot stopped every player");
     if (navigations !== 0) failures.push("in place: a quality choice caused a navigation");
     // Layout 16 back to 4, then 4 to auto.
+    step = "layout back";
     await showOverlay(page);
     await page.locator("#live-layout-4").click();
     await page.waitForFunction(
@@ -1935,6 +2035,7 @@ async function walkInPlaceControls(browser, baseURL, password) {
     state = await check("layout back");
     if (state.marker !== "keep") failures.push("in place: shrinking the layout reloaded the page");
     if (state.playing < 1) failures.push("in place: no player is playing after shrinking");
+    step = "layout auto";
     await showOverlay(page);
     await page.locator("#live-layout-auto").click();
     await page.waitForFunction(
@@ -1947,6 +2048,7 @@ async function walkInPlaceControls(browser, baseURL, password) {
     if (navigations !== 0) failures.push("in place: a layout change caused a navigation");
     // Camera assignment fills an empty pane in place, with the existing
     // players still running.
+    step = "camera select";
     await selectPane(page, 3);
     await page.waitForFunction(
       () =>
@@ -1956,8 +2058,8 @@ async function walkInPlaceControls(browser, baseURL, password) {
       null,
       { timeout: 5000 },
     );
+    step = "camera assign";
     await page.selectOption('[data-live-pane="3"] [data-live-camera-select]', "side_gate");
-    await page.locator('[data-live-pane="3"] [data-live-camera-form] button[type="submit"]').click();
     await page.waitForFunction(
       () =>
         document
@@ -1975,12 +2077,12 @@ async function walkInPlaceControls(browser, baseURL, password) {
         "true",
       qualityVisible: Boolean(
         document
-          .querySelector('[data-live-pane="3"] [data-live-quality-select]')
+          .querySelector('[data-live-pane="3"] [data-live-quality-single]')
           ?.getClientRects().length,
       ),
-      qualityDisabled: document.querySelector(
-        '[data-live-pane="3"] [data-live-quality-select]',
-      )?.disabled,
+      qualityDisabled: Array.from(
+        document.querySelectorAll('[data-live-pane="3"] [data-live-quality-choice]'),
+      ).every((input) => input.disabled),
       playing: document.querySelectorAll(
         '[data-live-pane]:not([hidden]) [data-live-player][data-player-state="playing"]',
       ).length,
@@ -1996,7 +2098,7 @@ async function walkInPlaceControls(browser, baseURL, password) {
     if (assigned.playing < 1) failures.push("in place: camera assignment stopped every player");
     if (navigations !== 0) failures.push("in place: camera assignment caused a navigation");
   } catch (error) {
-    failures.push(`in place: ${error.message}`);
+    failures.push(`in place (${step}): ${error.message}`);
   } finally {
     await context.close();
   }
@@ -2180,8 +2282,170 @@ async function walkPlaceholders(browser, baseURL, password) {
   return failures;
 }
 
-// 14. The stream control is an explicit selector with a current-stream
-// indicator, and a one-stream camera shows why there is no choice.
+// 13b. The pane overlay is pictorial and compact. Three stream glyphs, one
+// camera glyph, accessible names and a check state replace the select stack,
+// and the shown overlay stays within the area budget at sixteen panes.
+async function walkCompactPaneControls(browser, baseURL, password) {
+  const failures = [];
+  await mkdir(SCREENSHOT_DIR, { recursive: true });
+  for (const width of WIDTHS.filter((candidate) => candidate.width === 360 || candidate.width === 1280)) {
+    const { context, page } = await openWall(browser, baseURL, password, {
+      viewport: width,
+      layout: 16,
+      cameras: ["front_door", "driveway", "side_gate", "back_garden"],
+      hasTouch: width.width === 360,
+    });
+    try {
+      await page.waitForFunction(
+        () => document.querySelectorAll("[data-live-pane]:not([hidden])").length === 16,
+        null,
+        { timeout: 10000 },
+      );
+      await page.locator('[data-live-pane="1"]').scrollIntoViewIfNeeded();
+      await selectPane(page, 1);
+      const compact = await page.evaluate(() => {
+        const paneElement = document.querySelector('[data-live-pane="1"]');
+        const overlay = paneElement.querySelector("[data-live-pane-overlay]");
+        const paneBox = paneElement.getBoundingClientRect();
+        const overlayBox = overlay.getBoundingClientRect();
+        const choices = Array.from(overlay.querySelectorAll("label.live-quality-choice"));
+        const checked = overlay.querySelector(
+          "[data-live-quality-group] input[data-live-quality-choice]:checked",
+        );
+        const camera = overlay.querySelector("[data-live-camera-select]");
+        return {
+          paneArea: paneBox.width * paneBox.height,
+          overlayArea: overlayBox.width * overlayBox.height,
+          paneHeight: paneBox.height,
+          overlayHeight: overlayBox.height,
+          glyphs: overlay.querySelectorAll("label.live-quality-choice .live-quality-glyph").length,
+          cameraGlyph: Boolean(overlay.querySelector(".live-camera-form, [data-live-camera-form] .live-camera-glyph svg")),
+          names: choices.map((choice) => choice.textContent.trim()),
+          checked: checked ? checked.value : "",
+          checkShown: checked
+            ? getComputedStyle(checked.closest("label").querySelector(".live-quality-check"))
+                .display !== "none"
+            : false,
+          cameraName: camera?.labels?.[0]?.textContent.trim() || "",
+          current: overlay.querySelector("[data-live-current-stream]")?.textContent.trim(),
+        };
+      });
+      const ratio = compact.overlayArea / compact.paneArea;
+      if (ratio > OVERLAY_AREA_BUDGET) {
+        failures.push(
+          `compact controls at ${width.width}x${width.height}: overlay takes ${(ratio * 100).toFixed(1)}% of the pane (${Math.round(compact.overlayHeight)} of ${Math.round(compact.paneHeight)}px), budget ${(OVERLAY_AREA_BUDGET * 100).toFixed(0)}%`,
+        );
+      }
+      if (compact.glyphs !== 3) {
+        failures.push(`compact controls at ${width.width}x${width.height}: ${compact.glyphs} stream glyphs, want 3`);
+      }
+      if (!compact.cameraGlyph) {
+        failures.push(`compact controls at ${width.width}x${width.height}: no camera glyph`);
+      }
+      for (const name of ["Main stream", "Sub stream", "Snapshots"]) {
+        if (!compact.names.includes(name)) {
+          failures.push(`compact controls at ${width.width}x${width.height}: no accessible name ${name}`);
+        }
+      }
+      if (!compact.checked || !compact.checkShown) {
+        failures.push(`compact controls at ${width.width}x${width.height}: the selected glyph has no check state`);
+      }
+      if (!compact.cameraName.includes("Camera for")) {
+        failures.push(`compact controls at ${width.width}x${width.height}: the camera icon has no accessible name (${compact.cameraName})`);
+      }
+      if (!compact.current.includes("Current stream:")) {
+        failures.push(`compact controls at ${width.width}x${width.height}: the pane line is ${compact.current}`);
+      }
+      await page.evaluate(() => window.BitternLiveWall.hideWallOverlay());
+      await page.screenshot({
+        path: path.join(
+          SCREENSHOT_DIR,
+          `live-wall-compact-16-${width.width}x${width.height}.png`,
+        ),
+        fullPage: false,
+      });
+    } catch (error) {
+      failures.push(`compact controls at ${width.width}x${width.height}: ${error.message}`);
+    } finally {
+      await context.close();
+    }
+  }
+  return failures;
+}
+
+// 13c. Clicking the video dismisses that pane's overlay and the wall overlay
+// without navigating and without stopping playback.
+async function walkClickDismiss(browser, baseURL, password) {
+  const failures = [];
+  const { context, page } = await openWall(browser, baseURL, password, {
+    viewport: { width: 1280, height: 800 },
+    layout: 4,
+    cameras: ["front_door", "driveway", "side_gate", "back_garden"],
+  });
+  try {
+    await waitForPlayingCount(page, 4);
+    const start = await page.evaluate(() => {
+      window.__dismissMarker = "keep";
+      window.__dismissPlayer = document.querySelector('[data-live-pane="1"] [data-live-player]');
+      return { url: document.location.href };
+    });
+    let navigations = 0;
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) navigations += 1;
+    });
+    await selectPane(page, 1);
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-live-pane="1"] [data-live-pane-overlay]')
+          ?.getAttribute("data-live-pane-overlay-state") === "shown" &&
+        document.querySelector("[data-live-grid]").getAttribute("data-live-overlay") === "shown",
+      null,
+      { timeout: 5000 },
+    );
+    await page.locator('[data-live-pane="1"] video').click();
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-live-pane="1"] [data-live-pane-overlay]')
+          ?.getAttribute("data-live-pane-overlay-state") === "hidden" &&
+        document.querySelector("[data-live-grid]").getAttribute("data-live-overlay") === "hidden",
+      null,
+      { timeout: 5000 },
+    );
+    const after = await page.evaluate(() => {
+      const player = document.querySelector('[data-live-pane="1"] [data-live-player]');
+      return {
+        url: document.location.href,
+        marker: window.__dismissMarker,
+        samePlayer: window.__dismissPlayer === player,
+        state: player.getAttribute("data-player-state"),
+        active: player.getAttribute("data-player-active"),
+      };
+    });
+    if (after.url !== start.url) failures.push(`dismiss: the click navigated to ${after.url}`);
+    if (after.marker !== "keep" || !after.samePlayer) {
+      failures.push("dismiss: the click reloaded or replaced the player");
+    }
+    if (after.state !== "playing" || after.active !== "true") {
+      failures.push(`dismiss: the player is ${after.state} after the click`);
+    }
+    if (navigations !== 0) failures.push("dismiss: the click caused a navigation");
+    await page.screenshot({
+      path: path.join(SCREENSHOT_DIR, "live-wall-click-dismiss-1280x800.png"),
+      fullPage: false,
+    });
+  } catch (error) {
+    failures.push(`dismiss: ${error.message}`);
+  } finally {
+    await context.close();
+  }
+  return failures;
+}
+
+// 14. The stream control is an icon radio group with a current-stream word.
+// The selected choice changes its border and check glyph, not only its colour,
+// and a one-stream camera says why there is no choice.
 async function walkStreamSelector(browser, baseURL, password) {
   const failures = [];
   const { context, page } = await openWall(browser, baseURL, password, {
@@ -2201,27 +2465,44 @@ async function walkStreamSelector(browser, baseURL, password) {
     );
     const first = await page.evaluate(() => {
       const pane = document.querySelector('[data-live-pane="1"]');
-      const select = pane.querySelector("[data-live-quality-select]");
+      const group = pane.querySelector("[data-live-quality-group]");
+      const choices = Array.from(group.querySelectorAll("label.live-quality-choice"));
+      const checked = group.querySelector("input[data-live-quality-choice]:checked");
+      const checkedLabel = checked.closest("label");
+      const uncheckedLabel = choices.find((choice) => choice !== checkedLabel);
       return {
-        value: select.value,
-        selected: select.selectedOptions[0]?.textContent.trim(),
+        value: checked.value,
+        selected: checkedLabel.textContent.trim(),
         current: pane.querySelector("[data-live-current-stream]")?.textContent.trim(),
-        options: Array.from(select.options).map((option) => option.textContent.trim()),
-        disabled: select.disabled,
+        options: choices.map((choice) => choice.textContent.trim()),
+        glyphs: group.querySelectorAll("label.live-quality-choice svg.live-quality-glyph").length,
+        selectedBorder: parseFloat(getComputedStyle(checkedLabel).borderTopWidth),
+        unselectedBorder: parseFloat(getComputedStyle(uncheckedLabel).borderTopWidth),
+        checkShown: getComputedStyle(checkedLabel.querySelector(".live-quality-check")).display !== "none",
+        checkHidden:
+          getComputedStyle(uncheckedLabel.querySelector(".live-quality-check")).display === "none",
+        disabled: Array.from(group.querySelectorAll("input")).every((input) => input.disabled),
       };
     });
     if (first.disabled) failures.push(`stream selector: ${first.current}`);
     if (first.value !== "sub") failures.push(`stream selector: selected ${first.value}, want sub`);
     if (first.selected !== "Sub stream") {
-      failures.push(`stream selector: the selected option is ${first.selected}`);
+      failures.push(`stream selector: the selected choice is ${first.selected}`);
     }
     if (!first.current.includes("Current stream: Sub stream")) {
       failures.push(`stream selector: the current indicator is ${first.current}`);
     }
     if (!first.options.includes("Main stream") || !first.options.includes("Snapshots")) {
-      failures.push(`stream selector: options are ${first.options.join(", ")}`);
+      failures.push(`stream selector: choices are ${first.options.join(", ")}`);
     }
-    await page.selectOption('[data-live-pane="1"] [data-live-quality-select]', "main");
+    if (first.glyphs !== 3) failures.push(`stream selector: ${first.glyphs} glyphs, want 3`);
+    if (first.selectedBorder <= first.unselectedBorder) {
+      failures.push("stream selector: the selected choice has no non-colour border change");
+    }
+    if (!first.checkShown || !first.checkHidden) {
+      failures.push("stream selector: the selected choice has no check glyph");
+    }
+    await chooseQuality(page, 1, "main");
     await page.waitForFunction(
       () =>
         document
@@ -2230,21 +2511,24 @@ async function walkStreamSelector(browser, baseURL, password) {
       null,
       { timeout: 5000 },
     );
-    const changed = await page.evaluate(() => ({
-      selected: document
-        .querySelector('[data-live-pane="1"] [data-live-quality-select]')
-        .selectedOptions[0]?.textContent.trim(),
-      current: document
-        .querySelector('[data-live-pane="1"] [data-live-current-stream]')
-        ?.textContent.trim(),
-    }));
-    if (changed.selected !== "Main stream") {
-      failures.push(`stream selector: after the change the selected option is ${changed.selected}`);
+    const changed = await page.evaluate(() => {
+      const pane = document.querySelector('[data-live-pane="1"]');
+      const checked = pane.querySelector(
+        "[data-live-quality-group] input[data-live-quality-choice]:checked",
+      );
+      return {
+        value: checked.value,
+        selected: checked.closest("label").textContent.trim(),
+        current: pane.querySelector("[data-live-current-stream]")?.textContent.trim(),
+      };
+    });
+    if (changed.value !== "main" || changed.selected !== "Main stream") {
+      failures.push(`stream selector: after the change the choice is ${changed.value} ${changed.selected}`);
     }
     if (!changed.current.includes("Current stream: Main stream")) {
       failures.push(`stream selector: after the change the indicator is ${changed.current}`);
     }
-    // A one-stream camera shows one option and the reason.
+    // A one-stream camera shows one glyph and the reason, not three choices.
     await selectPane(page, 3);
     await page.waitForFunction(
       () =>
@@ -2256,21 +2540,18 @@ async function walkStreamSelector(browser, baseURL, password) {
     );
     const single = await page.evaluate(() => {
       const pane = document.querySelector('[data-live-pane="3"]');
-      const select = pane.querySelector("[data-live-quality-select]");
       return {
-        disabled: select.disabled,
-        options: Array.from(select.options)
-          .filter((option) => !option.hidden)
-          .map((option) => option.textContent.trim()),
+        groupHidden: pane.querySelector("[data-live-quality-group]")?.hidden,
+        singleVisible: Boolean(
+          pane.querySelector("[data-live-quality-single]")?.getClientRects().length,
+        ),
         current: pane.querySelector("[data-live-current-stream]")?.textContent.trim(),
         reason: pane.querySelector("[data-live-one-stream]")?.textContent.trim(),
       };
     });
-    if (!single.disabled) failures.push("stream selector: a one-stream camera offers a choice");
-    if (single.options.length !== 1 || single.options[0] !== "One stream") {
-      failures.push(`stream selector: one-stream options are ${single.options.join(", ")}`);
-    }
-    if (!single.current.includes("One stream") || !single.current.includes("second stream")) {
+    if (!single.groupHidden) failures.push("stream selector: a one-stream camera offers a choice");
+    if (!single.singleVisible) failures.push("stream selector: the one-stream glyph is missing");
+    if (!single.current.includes("One stream")) {
       failures.push(`stream selector: the one-stream indicator is ${single.current}`);
     }
     if (!single.reason?.includes("second stream")) {
@@ -2301,6 +2582,8 @@ export async function runLivePlayerChecks({ browser, baseURL, adminPassword }) {
   failures.push(...(await walkInPlaceControls(browser, baseURL, adminPassword)));
   failures.push(...(await walkLayoutPicker(browser, baseURL, adminPassword)));
   failures.push(...(await walkPlaceholders(browser, baseURL, adminPassword)));
+  failures.push(...(await walkCompactPaneControls(browser, baseURL, adminPassword)));
+  failures.push(...(await walkClickDismiss(browser, baseURL, adminPassword)));
   failures.push(...(await walkStreamSelector(browser, baseURL, adminPassword)));
   for (const resolution of [
     { width: 1920, height: 1080 },

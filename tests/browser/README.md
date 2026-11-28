@@ -93,11 +93,12 @@ decoded, then captures and measures that state as `cameras-picture-taken-<width>
 ## Live wall checks
 
 `tests/browser/live.mjs` runs after the route walk on its own daemon with a fixed four-camera
-inventory. Two cameras report distinct main and sub profiles, so the per-pane stream selector has a
-real choice; the other two report one stream and must show one option and the reason. The wall checks
+inventory. Two cameras report distinct main and sub profiles, so the per-pane stream glyph group has a
+real choice; the other two report one stream and must show one glyph and the reason. The wall checks
 also read the layout icons, a layout, quality and camera change in place, the full-screen hint,
-refusal, Escape and swipe exits, the sixteen-pane placeholder wall with two cameras, and the shown and
-hidden pane overlay. The checks stub `WebSocket`, `MediaSource`, the media element and
+refusal, Escape and swipe exits, the sixteen-pane placeholder wall with two cameras, the compact pane
+overlay at 360 and 1280, the video-click dismissal, and the shown and hidden overlay for every layout
+at every width. The checks stub `WebSocket`, `MediaSource`, the media element and
 `getVideoPlaybackQuality()`, so every player state and a synthetic frame-drop sequence can be walked
 without a camera or go2rtc.
 
@@ -111,8 +112,10 @@ The wall checks are:
 | Check | What it proves | Artefacts |
 | --- | --- | --- |
 | Class prior | `data-device-prior` is 4 below 44rem, 8 from 44rem, and 16 at 80rem and above, and the capacity starts at the prior | Four widths plus 900px |
-| Six layouts at four widths | The server pane count, the panes fill the wall, no page or container overflow, and the pane rectangles are adjacent within the one pixel gap with no overlap, measured in normal and full screen | `live-wall-<layout>-<width>.png` and `live-wall-<layout>-full-<width>.png`, 48 images |
-| Overlay | Hidden and inert on boot, `pointer-events: none` and click-through, revealed by pointer movement, a key press, a tap and focus, hidden after three seconds, focus suspending the hide, Tab to the quality control and Shift+Tab to the last control | `live-wall-overlay-360x800.png`, `live-wall-overlay-1280x800.png`, `live-wall-overlay-hidden-1280x800.png` |
+| Six layouts at four widths | The server pane count, the panes fill the wall, no page or container overflow, and the pane rectangles are adjacent within the one pixel gap with no overlap, measured in normal and full screen. The shown and hidden overlay is captured for each layout. | `live-wall-<layout>-overlay-<width>.png`, `live-wall-<layout>-<width>.png` and `live-wall-<layout>-full-<width>.png` |
+| Overlay | Hidden and inert on boot, `pointer-events: none` and click-through, revealed by pointer movement, a key press, a tap and focus, hidden after three seconds, focus suspending the hide, Tab to the first stream glyph and Shift+Tab to the last control | `live-wall-overlay-360x800.png`, `live-wall-overlay-1280x800.png`, `live-wall-overlay-hidden-1280x800.png` |
+| Compact controls | Three stream glyphs with accessible names, a camera glyph with an accessible name, a selected check glyph and a non-colour border, and a shown overlay no larger than 30 percent of a sixteen-pane cell at 360 and 1280 | `live-wall-compact-16-360x800.png`, `live-wall-compact-16-1280x800.png` |
+| Click dismissal | A shown pane and wall overlay, a click on the video, both hidden, the same player still playing, and the URL unchanged | `live-wall-click-dismiss-1280x800.png` |
 | No JavaScript | The overlay is visible, the layout picker is seven submit buttons with one pressed, and the pane control is a real form | none |
 | Manual quality | A manual main choice survives a demotion-pressure sequence, a camera status poll and a layout change | none |
 | Capacity hysteresis | The shipped model from a synthetic sequence: two windows of evidence before the first demotion, one pane per twenty seconds, a deterministic result, promotion only after 300 quiet seconds plus the 60 second window, no action in the 0.5 to 2 percent dead band, and manual panes never demoted | none |
@@ -148,7 +151,8 @@ The viewport list is provisional under [OQ-26](../../docs/open-questions.md) and
 
 The manifest has 38 screens from 20 routes, so each run checks 152 route-width screens and writes
 152 default full-page screenshots, plus an `-expanded` copy for each screen with a closed
-disclosure. The `landing` field on the wizard, live and status entries records which device state
+disclosure. Four fresh daemons add one status install-in-progress screenshot per width, so the
+review set is 156 images. The `landing` field on the wizard, live and status entries records which device state
 treats that screen as its default; the routing checks above use the same three states. Fifteen status variants cover the five overall states and the update card: factory
 baseline with an offered update, up to date, update available, installing, failed, rolled back,
 offline, rate limited, and a failed check. The `live` `nine-tiles` variant sets the saved layout
@@ -156,8 +160,10 @@ cookie and reloads, so the nine-pane wall and its empty-pane controls appear at 
 `live-refresh` variant opens Technical details, focuses
 its summary, marks a table scroll region, and waits for two real update-card polls. It then aborts
 the fragment request, asserts the disclosure, focus, scroll, and card content are unchanged, and
-writes `status-live-reconnect-<width>x<height>.png` with the reconnecting notice visible. The
-rollback confirmation has a target and a no-target variant.
+writes `status-live-reconnect-<width>x<height>.png` with the reconnecting notice visible. A separate
+fresh daemon per width starts an install and asserts the URL, a page marker, the navigation count and
+the progress card, then writes `status-update-install-<width>x<height>.png`. The rollback
+confirmation has a target and a no-target variant.
 Each form factor has two sizes so a layout that only breaks at one end of
 its range is caught: two phone widths for the narrow end and two desktop widths for the wide end.
 The 360 width is the BIT-020 scope floor and the 390 width is the current acceptance width.

@@ -85,6 +85,7 @@ need an ADR. When in doubt, write a short one.
 | 0036 | [Update bundles deliver subsystem changes through the fixed helper](./0036-update-bundles-deliver-subsystem-changes.md) | Accepted | 2026-11-26 | Bundle declares units and migrations; helper applies them with snapshot rollback. |
 | 0037 | [The NVR grid, per-pane stream quality, and full screen](./0037-nvr-grid-per-pane-quality-and-full-screen.md) | Accepted; controls, layout change and full-screen exit superseded in part by 0038 | 2026-11-27 | Six layouts, no pane chrome, per-pane quality, capacity demotion, layout full screen. |
 | 0038 | [Live wall controls act in place, per pane](./0038-live-wall-controls-act-in-place.md) | Accepted | 2026-11-27 | In-place layout, per-pane overlays, icon picker, placeholders, named exits, stream selector. |
+| 0039 | [Compact pictorial pane controls, click dismissal and in-place status actions](./0039-compact-pane-controls-and-in-place-status-actions.md) | Accepted | 2026-11-28 | Glyph pane controls, click dismissal, update check and install in place. |
 
 ## Related documents
 

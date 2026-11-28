@@ -374,6 +374,49 @@ func TestLiveGridPageResolvesTheStoredLayout(t *testing.T) {
 	}
 }
 
+func TestLivePaneControlsArePictorialAndCompact(t *testing.T) {
+	configPath, secretsPath := writeLiveProfilesFixture(t)
+	server, client := newTestServer(t, Options{
+		ConfigPath:  configPath,
+		SecretsPath: secretsPath,
+		MockPreview: true,
+	})
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/ui/live", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.AddCookie(&http.Cookie{
+		Name:  liveLayoutCookieName,
+		Value: url.Values{"v": {"2"}, "p": {"4"}, "t": {"front_door", "driveway"}}.Encode(),
+	})
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body := readBody(t, response)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("live wall status = %d", response.StatusCode)
+	}
+	assertContains(t, body,
+		`data-live-quality-group="true"`,
+		`data-live-quality-choice="true"`,
+		`class="live-quality-glyph"`,
+		`data-live-camera-select="true"`,
+		`class="live-camera-glyph"`,
+		`data-live-current-stream-value="true"`,
+		`Main stream`,
+		`Sub stream`,
+		`Snapshots`,
+	)
+	if strings.Contains(body, `data-live-quality-select`) || strings.Contains(body, `<select name="quality"`) {
+		t.Fatal("the pane still renders a text quality selector")
+	}
+	if strings.Count(body, `data-live-quality-choice="true"`) < 6 {
+		t.Fatal("the two occupied panes do not each carry three stream choices")
+	}
+}
+
 func TestLiveGridWithoutCamerasOffersTheCameraStep(t *testing.T) {
 	configPath := writeApplierFixture(t)
 	server, client := newTestServer(t, Options{ConfigPath: configPath, MockPreview: true})
@@ -907,7 +950,7 @@ func TestLiveGridKeepsPaneControlsInTheirPane(t *testing.T) {
 		t.Fatalf("wall has %d pane overlays, want %d", strings.Count(body, `data-live-pane-overlay="true"`), liveMaxTiles)
 	}
 	wallOverlay := body[strings.Index(body, `data-live-overlay-panel="true"`):]
-	if strings.Contains(wallOverlay, `data-live-quality-select`) || strings.Contains(wallOverlay, `data-live-camera-select`) {
+	if strings.Contains(wallOverlay, `data-live-quality-group`) || strings.Contains(wallOverlay, `data-live-camera-select`) {
 		t.Fatal("the wall overlay contains a pane quality or camera control")
 	}
 	if !strings.Contains(body, `data-live-current-stream="true"`) {

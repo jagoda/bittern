@@ -132,7 +132,8 @@ func TestLivePageSelectsTheRequestedProfileWithoutReloadJavaScript(t *testing.T)
 		`data-profile-name="Sub stream"`,
 		`data-media-base="/ui/live/media/front_door/sub"`,
 		`data-profile-link="sub" aria-current="true"`,
-		`href="/ui/live/front_door?profile=main" data-profile-link="main"`,
+		`href="/ui/live/front_door?profile=main"`,
+		`data-profile-link="main"`,
 	)
 }
 

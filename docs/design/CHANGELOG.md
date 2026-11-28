@@ -1,7 +1,7 @@
 # Design system changelog
 
 - Date: 2026-11-27
-- Status: Accepted; v0.24 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
+- Status: Accepted; v0.25 current. The tokens, fact rows and component variants from v0.1 to v0.5 are
   implemented in `ui/static/bittern.css` and the templates; the v0.3 flow layer is binding from v0.6,
   when [ADR 0027](../adr/0027-flow-layer-above-patterns.md) was accepted with amendments P1 and P3.
 - Applies to: every change to a token, a component, a pattern, a flow, or a rule in
@@ -18,6 +18,27 @@ like at vN, and why is it different now".
 Versions are internal to the design documents. Bittern does not publish a package and has no
 second consumer, so there is no SemVer promise, no changeset tooling, and no codemod. A version is
 a date-stamped batch of class changes; the date is how it maps to an app release.
+
+## v0.25: 2026-11-28
+
+- Class: component and pattern implementation, corrected field behaviour
+- What changed: a pane overlay is now one short current-stream word, three 24 by 24 stream glyphs
+  with accessible names and a selected check glyph, and one 24 by 24 camera glyph. The shown overlay
+  stays within 30 percent of a sixteen-pane cell at 360 and 1280. A click that starts on a shown video
+  dismisses that pane's overlay and the wall overlay without touching playback, a click elsewhere on
+  the wall dismisses the wall overlay, and a click that starts hidden still reveals the controls. The
+  status update card's check and install forms answer in place with the whole card, so progress
+  appears where the action was and the page does not navigate. See
+  [patterns.md](patterns.md#live-view) LV5 and LV16, [patterns.md](patterns.md#status-page) S10 and
+  S14, and [components.md](components.md#live-player-island).
+- Why: the second real-hardware run found the per-pane text stack still too large to read as a
+  control on a sixteen-pane phone, a click on the picture did not clear the controls, and installing
+  from status reloaded the page and lost the card's place.
+- Evidence: [ADR 0039](../adr/0039-compact-pane-controls-and-in-place-status-actions.md) and
+  [the compact wall controls note](../notes/2026-11-28-compact-wall-controls.md). The browser check
+  reads the wall overlay shown and hidden for all six layouts at four widths, the compact sixteen-pane
+  overlay at 360 and 1280, the video click dismissal, and the status install card at four widths, and
+  passed with 0 failures.
 
 ## v0.24: 2026-11-27
 

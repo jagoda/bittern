@@ -157,9 +157,12 @@ The Updates card is the browser update surface. It names the running version, th
 on a kit baseline, the last check time and result, the verified offered version and update number,
 the current install or rollback step, a failed step and its plain reason, or the rolled-back
 running and last installed versions with the next-update rule. A failed, offline, or rate-limited
-check is never shown as up to date. Check, install, and rollback are POST forms with the
-administrator session and CSRF token. Install is absent without a verified newer version, rollback
-is absent without a saved previous version, and every action is absent while an operation runs.
+check is never shown as up to date. Check and install act in place through HTMX: the handler returns
+the whole update card, the URL stays the same, the page does not reload, and the preparing or
+downloading step and the progress region appear where the action was. Without JavaScript the same
+forms post and redirect to status. Rollback keeps its confirmation page and its POST redirect.
+Install is absent without a verified newer version, rollback is absent without a saved previous
+version, and every action is absent while an operation runs.
 Manual rollback has its own confirmation page and states that configuration and recordings are not
 reverted. `AgentUpdateService` calls the same `internal/update` functions as the CLI; the verified
 download runs in the background, then the fixed `bittern-update.service` owns the transaction and
@@ -335,9 +338,10 @@ Related: [UI skeleton note](../docs/notes/2026-11-14-ui-skeleton.md),
 ## Live view
 
 Live view follows [ADR 0034](../docs/adr/0034-live-view-owned-by-bittern.md) for the media path and
-the authentication boundary, and [ADR 0037](../docs/adr/0037-nvr-grid-per-pane-quality-and-full-screen.md)
-for the wall. `/ui/live` is the wall; `/ui/live/{camera}` is the same wall with one pane fixed to that
-camera and a link-based main and sub choice. The page reads the enabled cameras from
+the authentication boundary, [ADR 0037](../docs/adr/0037-nvr-grid-per-pane-quality-and-full-screen.md)
+for the wall, and [ADR 0039](../docs/adr/0039-compact-pane-controls-and-in-place-status-actions.md)
+for the compact glyph controls and click dismissal. `/ui/live` is the wall; `/ui/live/{camera}` is
+the same wall with one pane fixed to that camera and a link-based main and sub choice. The page reads the enabled cameras from
 `appliance.yaml`, and every player is a stable node outside every HTMX swap region. One camera state
 line for the selected pane polls every 15 seconds; the player is never inside that poll, because a
 swap would destroy playback, fullscreen and focus
@@ -397,12 +401,15 @@ in place. Both endpoints keep their ordinary form path for the no-JavaScript pag
 ### Per-pane quality
 
 Automatic quality is `main` in the one-pane layout and `sub` in every multi-pane layout. A pane's
-own overlay has an explicit labelled stream selector with Main stream, Sub stream and Snapshots. The selected option and the pane's "Current stream: ..." line name the quality that is
-playing. Choosing a live quality closes the current media connection and opens the same authenticated
-route with the other profile: the page does not reload and the player island is not swapped. A manual
-choice is stored per pane in the cookie and is never overridden by automation. A camera whose
-`distinct_qualities` is one stream shows a disabled selector with one option, `One stream`, and the
-reason that main and sub use the same picture.
+own overlay has a compact native radio group with one glyph for Main stream, Sub stream and Snapshots,
+the stream names in visually hidden text, a check glyph and a thicker border on the selected choice,
+and a short current-stream word. The camera chooser is one camera glyph over the native select. The
+shown overlay stays within 30 percent of a sixteen-pane cell at 360 and 1280, and the browser check
+measures it. Choosing a live quality closes the current media connection and opens the same
+authenticated route with the other profile: the page does not reload and the player island is not
+swapped. A manual choice is stored per pane in the cookie and is never overridden by automation. A
+camera whose `distinct_qualities` is one stream shows one glyph, `One stream`, and the reason that
+main and sub use the same picture.
 
 ### Capacity
 
@@ -420,13 +427,16 @@ a manual choice puts it above the tested capacity.
 
 ### Overlay and full screen
 
-Every occupied pane has its own control overlay. It holds that pane's current-stream line, its
-stream selector and its camera chooser; no quality or camera control for a pane sits in the wall
-overlay. The overlay is shown for the pane under the pointer or keyboard focus and hides with the
-wall's 3000 ms idle rule. Its hidden state is `data-live-pane-overlay-state="hidden"` with
+Every occupied pane has its own compact control overlay. It holds that pane's current-stream word,
+the three stream glyphs and the camera glyph; no quality or camera control for a pane sits in the
+wall overlay. The overlay is shown for the pane under the pointer or keyboard focus and hides with
+the wall's 3000 ms idle rule. Its hidden state is `data-live-pane-overlay-state="hidden"` with
 `opacity: 0`, `pointer-events: none`, `visibility: hidden` and the `inert` attribute, so it cannot
-take focus or intercept a click meant for the video. The camera name and a failure sentence are pane
-content outside the control overlay and fade with the same idle state.
+take focus or intercept a click meant for the video. A click that starts on a shown video dismisses
+that pane's overlay and the wall overlay without navigating or stopping playback; a click elsewhere
+on the wall dismisses the wall overlay, and a click that starts with the overlays hidden reveals
+them. The camera name and a failure sentence are pane content outside the control overlay and fade
+with the same idle state.
 
 The wall overlay carries only the layout picker, the full screen control and wall-level state and
 hints. The layout picker is a native radio group with one inline SVG per arrangement, including the
@@ -435,7 +445,8 @@ is the accessible label. The selected choice is the checked radio plus a thicker
 weight, so the state survives greyscale.
 
 An empty slot is a placeholder with one centered plus icon and `Choose camera`, not a visible form.
-Pressing it opens that pane's camera chooser. It has no player and opens no media session.
+Pressing it opens that pane's camera chooser. It has no player and opens no media session. Without
+JavaScript the chooser is a visible select and submit form.
 
 Full screen calls `requestFullscreen()` on the wall synchronously in the click handler, so the
 current layout fills the screen with no header, toolbar, border or padding and the same one pixel

@@ -260,6 +260,49 @@ func TestUpdateMutationsArePostsAndRedirectToStatus(t *testing.T) {
 	}
 }
 
+func TestUpdateMutationsAnswerInlineWithTheCard(t *testing.T) {
+	service := &fakeUpdateService{progress: UpdateProgress{Active: true, Kind: "install", Label: "Downloading the update"}}
+	document := MockStatusDocument("ready|available", testNow)
+	server, client := newTestServer(t, Options{
+		Status:      fixedStatusProvider{document: document},
+		Updates:     service,
+		MockPreview: true,
+	})
+	for _, path := range []string{
+		"/ui/status/updates/check",
+		"/ui/status/updates/install",
+	} {
+		form := url.Values{"csrf_token": {"test-token"}}
+		request, err := http.NewRequest(http.MethodPost, server.URL+path, strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("HX-Request", "true")
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := readBody(t, response)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("%s inline status: %d\n%s", path, response.StatusCode, body)
+		}
+		if location := response.Header.Get("Location"); location != "" {
+			t.Fatalf("%s inline redirected to %s", path, location)
+		}
+		assertContains(t, body,
+			`id="update-card"`,
+			`id="update-card-live"`,
+			"Preparing the update",
+			"Downloading the update",
+		)
+		assertNotContains(t, body, "<!DOCTYPE html>", "<main")
+	}
+	if service.checks != 1 || service.installs != 1 {
+		t.Fatalf("inline service calls = checks %d, installs %d", service.checks, service.installs)
+	}
+}
+
 func TestUpdateMutationsAreNotReachableByGET(t *testing.T) {
 	service := &fakeUpdateService{}
 	server, client := newTestServer(t, Options{Updates: service, MockPreview: true})

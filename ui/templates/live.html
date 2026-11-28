@@ -33,21 +33,42 @@
   {{end}}
   <p class="visually-hidden" role="status" aria-live="polite" data-player-announce="true"></p>
   <div class="live-pane-overlay" data-live-pane-overlay="true" data-live-pane-overlay-state="shown" role="group" aria-label="Controls for {{if .Occupied}}{{.CameraName}}{{else}}pane {{.Number}}{{end}}">
-    <p class="live-pane-current" data-live-current-stream="true">{{.CurrentStream}}</p>
+    <div class="live-pane-overlay-head">
+      <p class="live-pane-current" data-live-current-stream="true"><span class="visually-hidden" data-live-current-prefix="true"{{if not .Occupied}} hidden="hidden"{{end}}>Current stream: </span><span data-live-current-stream-value="true">{{if .Occupied}}{{if .OneStream}}One stream{{else}}{{liveQualityShort .Quality}}{{end}}{{else}}No camera assigned{{end}}</span><span class="visually-hidden" data-live-current-suffix="true"{{if or (not .Occupied) .OneStream}} hidden="hidden"{{end}}>{{liveQualitySuffix .Quality}}</span></p>
+      {{if .CameraLinks}}
+      <details class="live-camera-menu">
+        <summary class="live-camera-choice" aria-label="Choose a camera"><span class="live-camera-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2h6l2 2h3v10H4z" /><circle cx="12" cy="13" r="3" /></svg></span><span class="visually-hidden">Choose a camera</span></summary>
+        <ul>
+          {{range .CameraLinks}}<li><a href="{{.URL}}"{{if .Selected}} aria-current="true"{{end}}>{{.Name}}</a></li>{{end}}
+        </ul>
+      </details>
+      {{else if or .Occupied .Empty}}
+      <form method="post" action="{{.ChooseURL}}" class="live-pane-camera-form" data-live-camera-form="true">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}" />
+        <input type="hidden" name="pane" value="{{.Number}}" />
+        <input type="hidden" name="action" value="camera" />
+        <input type="hidden" name="next" value="{{if .FullURL}}{{.FullURL}}{{else}}/ui/live{{end}}" />
+        <label class="live-camera-choice">
+          <span class="live-camera-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2h6l2 2h3v10H4z" /><circle cx="12" cy="13" r="3" /></svg></span>
+          <span class="visually-hidden">Camera for {{if .Occupied}}{{.CameraName}}{{else}}pane {{.Number}}{{end}}</span>
+          <select name="camera" data-live-camera-select="true">
+            <option value="">No camera</option>
+            {{range .Cameras}}<option value="{{.ID}}"{{if .Selected}} selected="selected"{{end}}>{{.Name}}</option>{{end}}
+          </select>
+        </label>
+        <button type="submit" class="button secondary" data-live-inline-hide="true">Use this camera</button>
+      </form>
+      {{end}}
+    </div>
     {{if .ProfileChoices}}
       {{if .OneStream}}
-      <label class="live-field">Stream
-        <select name="quality" data-live-quality-select="true" disabled="disabled">
-          <option value="" selected="selected">One stream</option>
-        </select>
-      </label>
-      <p class="live-hint" data-live-one-stream="true">{{.OneStreamReason}}</p>
+      <span class="live-quality-single" data-live-quality-single="true"><span class="live-quality-icon" aria-hidden="true">{{liveQualityIcon "one"}}</span><span class="visually-hidden">One stream</span></span>
       {{else}}
       <div class="live-profiles" role="group" aria-label="Stream profile">
-        {{range .ProfileChoices}}<a href="{{.URL}}" data-profile-link="{{.Name}}"{{if .Selected}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}
+        {{range .ProfileChoices}}<a href="{{.URL}}" class="live-quality-choice" data-profile-link="{{.Name}}"{{if .Selected}} aria-current="true"{{end}}><span class="live-quality-icon" aria-hidden="true">{{liveQualityIcon .Name}}</span><span class="live-quality-check" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10" /></svg></span><span class="visually-hidden">{{.Label}}</span></a>{{end}}
       </div>
-      {{if .ProfileHint}}<p class="live-hint">{{.ProfileHint}}</p>{{end}}
       {{end}}
+      <p class="live-hint live-one-stream-reason" data-live-one-stream="true"{{if not .OneStream}} hidden="hidden"{{end}}>{{.OneStreamReason}}</p>
     {{else}}
     <div class="live-pane-quality-block" data-live-quality-block="true"{{if not .Occupied}} hidden="hidden"{{end}}>
       <form method="post" action="{{.ChooseURL}}" class="live-pane-quality-form" data-live-quality-form="true">
@@ -55,38 +76,14 @@
         <input type="hidden" name="pane" value="{{.Number}}" />
         <input type="hidden" name="action" value="quality" />
         <input type="hidden" name="next" value="{{if .FullURL}}{{.FullURL}}{{else}}/ui/live{{end}}" />
-        <label class="live-field">Stream
-          <select name="quality" data-live-quality-select="true"{{if .OneStream}} disabled="disabled"{{end}}>
-            <option value="" data-live-one-stream-option="true"{{if .OneStream}} selected="selected"{{else}} hidden="hidden"{{end}}>One stream</option>
-            {{range .Qualities}}<option value="{{.Value}}"{{if .Current}} selected="selected"{{end}}{{if $.OneStream}} hidden="hidden"{{end}}>{{.Label}}</option>{{end}}
-          </select>
-        </label>
-        {{if not .OneStream}}<button type="submit" class="button secondary" data-live-inline-hide="true">Set stream</button>{{end}}
-        <p class="live-hint" data-live-one-stream="true"{{if not .OneStream}} hidden="hidden"{{end}}>{{.OneStreamReason}}</p>
+        <div class="live-quality-choices" data-live-quality-group="true" role="group" aria-label="Stream"{{if .OneStream}} hidden="hidden"{{end}}>
+          {{range .Qualities}}<label class="live-quality-choice" for="live-quality-{{$.Number}}-{{.Value}}" title="{{.Label}}"><input class="visually-hidden" id="live-quality-{{$.Number}}-{{.Value}}" type="radio" name="quality" value="{{.Value}}" data-live-quality-choice="true"{{if .Current}} checked="checked"{{end}}{{if $.OneStream}} disabled="disabled"{{end}} /><span class="live-quality-icon" aria-hidden="true">{{liveQualityIcon .Value}}</span><span class="live-quality-check" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10" /></svg></span><span class="visually-hidden">{{.Label}}</span></label>{{end}}
+        </div>
+        <span class="live-quality-single" data-live-quality-single="true"{{if not .OneStream}} hidden="hidden"{{end}}><span class="live-quality-icon" aria-hidden="true">{{liveQualityIcon "one"}}</span><span class="visually-hidden">One stream</span></span>
+        <button type="submit" class="button secondary" data-live-inline-hide="true">Set stream</button>
+        <p class="live-hint live-one-stream-reason" data-live-one-stream="true"{{if not .OneStream}} hidden="hidden"{{end}}>{{.OneStreamReason}}</p>
       </form>
     </div>
-    {{end}}
-    {{if .CameraLinks}}
-    <nav class="live-camera-picker" aria-label="Choose a camera">
-      <p class="live-overlay-legend">Camera</p>
-      <ul>
-        {{range .CameraLinks}}<li><a href="{{.URL}}"{{if .Selected}} aria-current="true"{{end}}>{{.Name}}</a></li>{{end}}
-      </ul>
-    </nav>
-    {{else if or .Occupied .Empty}}
-    <form method="post" action="{{.ChooseURL}}" class="live-pane-camera-form" data-live-camera-form="true">
-      <input type="hidden" name="csrf_token" value="{{.CSRF}}" />
-      <input type="hidden" name="pane" value="{{.Number}}" />
-      <input type="hidden" name="action" value="camera" />
-      <input type="hidden" name="next" value="{{if .FullURL}}{{.FullURL}}{{else}}/ui/live{{end}}" />
-      <label class="live-field">Camera
-        <select name="camera" data-live-camera-select="true">
-          <option value="">No camera</option>
-          {{range .Cameras}}<option value="{{.ID}}"{{if .Selected}} selected="selected"{{end}}>{{.Name}}</option>{{end}}
-        </select>
-      </label>
-      <button type="submit" class="button secondary">Use this camera</button>
-    </form>
     {{end}}
   </div>
 </div>

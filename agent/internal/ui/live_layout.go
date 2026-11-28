@@ -552,6 +552,25 @@ func liveLayoutIcon(value string) template.HTML {
 	return template.HTML(`<svg class="live-layout-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">` + icon + `</svg>`)
 }
 
+// liveQualityIcon returns the compact glyph for a pane's stream choice. The
+// glyph is decorative; the label beside it carries the accessible name. The
+// check overlay is drawn by the template so a selected choice is legible
+// without colour.
+func liveQualityIcon(value string) template.HTML {
+	icon, ok := liveQualityIcons[value]
+	if !ok {
+		icon = liveQualityIcons["one"]
+	}
+	return template.HTML(`<svg class="live-quality-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">` + icon + `</svg>`)
+}
+
+var liveQualityIcons = map[string]string{
+	"main":     `<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M7 9h10M7 13h10M7 17h6"/>`,
+	"sub":      `<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M7 9h6M7 13h4M7 17h3"/>`,
+	"snapshot": `<path d="M4 8h3l2-2h6l2 2h3v10H4z"/><circle cx="12" cy="13" r="3"/>`,
+	"one":      `<circle cx="12" cy="12" r="8"/><path d="M8 12h8"/>`,
+}
+
 var liveLayoutIcons = map[string]string{
 	"auto": `<rect x="3" y="3" width="7" height="7" rx="0.5"/><rect x="14" y="3" width="7" height="7" rx="0.5"/><rect x="3" y="14" width="7" height="7" rx="0.5"/><rect x="14" y="14" width="7" height="7" rx="0.5" stroke-dasharray="2 2"/>`,
 	"1":    `<rect x="3" y="3" width="18" height="18" rx="0.5"/>`,
@@ -560,6 +579,33 @@ var liveLayoutIcons = map[string]string{
 	"8":    `<rect x="3" y="3" width="13.25" height="13.25" rx="0.5"/><rect x="17.25" y="3" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="7.75" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="12.5" width="3.75" height="3.75" rx="0.5"/><rect x="3" y="17.25" width="3.75" height="3.75" rx="0.5"/><rect x="7.75" y="17.25" width="3.75" height="3.75" rx="0.5"/><rect x="12.5" y="17.25" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="17.25" width="3.75" height="3.75" rx="0.5"/>`,
 	"9":    `<rect x="3" y="3" width="5" height="5" rx="0.5"/><rect x="9.5" y="3" width="5" height="5" rx="0.5"/><rect x="16" y="3" width="5" height="5" rx="0.5"/><rect x="3" y="9.5" width="5" height="5" rx="0.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="0.5"/><rect x="16" y="9.5" width="5" height="5" rx="0.5"/><rect x="3" y="16" width="5" height="5" rx="0.5"/><rect x="9.5" y="16" width="5" height="5" rx="0.5"/><rect x="16" y="16" width="5" height="5" rx="0.5"/>`,
 	"16":   `<rect x="3" y="3" width="3.75" height="3.75" rx="0.5"/><rect x="7.75" y="3" width="3.75" height="3.75" rx="0.5"/><rect x="12.5" y="3" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="3" width="3.75" height="3.75" rx="0.5"/><rect x="3" y="7.75" width="3.75" height="3.75" rx="0.5"/><rect x="7.75" y="7.75" width="3.75" height="3.75" rx="0.5"/><rect x="12.5" y="7.75" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="7.75" width="3.75" height="3.75" rx="0.5"/><rect x="3" y="12.5" width="3.75" height="3.75" rx="0.5"/><rect x="7.75" y="12.5" width="3.75" height="3.75" rx="0.5"/><rect x="12.5" y="12.5" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="12.5" width="3.75" height="3.75" rx="0.5"/><rect x="3" y="17.25" width="3.75" height="3.75" rx="0.5"/><rect x="7.75" y="17.25" width="3.75" height="3.75" rx="0.5"/><rect x="12.5" y="17.25" width="3.75" height="3.75" rx="0.5"/><rect x="17.25" y="17.25" width="3.75" height="3.75" rx="0.5"/>`,
+}
+
+// liveQualityShort is the compact visible word in a pane's current-stream
+// line. The hidden suffix completes the same sentence for assistive tech, so
+// the line fits a sixteen-pane phone without dropping the quality.
+func liveQualityShort(quality string) string {
+	switch quality {
+	case liveQualityMain:
+		return "Main"
+	case liveQualitySub:
+		return "Sub"
+	case liveQualitySnapshot:
+		return "Still"
+	default:
+		return "Automatic"
+	}
+}
+
+func liveQualitySuffix(quality string) string {
+	switch quality {
+	case liveQualityMain, liveQualitySub:
+		return " stream"
+	case liveQualitySnapshot:
+		return " picture"
+	default:
+		return ""
+	}
 }
 
 // liveQualityLabel is the owner-facing quality name in the overlay.

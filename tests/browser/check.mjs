@@ -300,6 +300,90 @@ async function runLiveRefreshCheck({ page, width, result }) {
   }
 }
 
+async function runUpdateInstallCheck({ page, width, baseURL, results }) {
+  const label = `${width.name} status install in place`;
+  const result = {
+    index: 1000,
+    label,
+    slug: "status-update-install",
+    width: width.name,
+    failures: [],
+    warnings: [],
+    screenshot: false,
+    expanded: false,
+  };
+  const screenshot = path.join(
+    SCREENSHOT_DIR,
+    `status-update-install-${width.width}x${width.height}.png`,
+  );
+  try {
+    await page.goto(`${baseURL}/ui/status?update=available`, {
+      waitUntil: "load",
+      timeout: 15_000,
+    });
+    await waitForPage(page);
+    const start = await page.evaluate(() => {
+      window.__installMarker = "keep";
+      return { url: document.location.href };
+    });
+    let navigations = 0;
+    const onNavigation = (frame) => {
+      if (frame === page.mainFrame()) navigations += 1;
+    };
+    page.on("framenavigated", onNavigation);
+    await page.getByRole("button", { name: "Install update" }).click();
+    await page.waitForFunction(
+      () => {
+        const card = document.getElementById("update-card");
+        return (
+          card &&
+          (card.textContent.includes("Preparing the update") ||
+            card.textContent.includes("Downloading the update"))
+        );
+      },
+      null,
+      { timeout: 15_000 },
+    );
+    const state = await page.evaluate(() => {
+      const card = document.getElementById("update-card");
+      return {
+        url: document.location.href,
+        marker: window.__installMarker,
+        text: card ? card.textContent.trim() : "",
+        running: Boolean(card && card.querySelector(".update-progress-live")),
+        installButton: Boolean(card && card.querySelector('button[type="submit"]')),
+      };
+    });
+    page.off("framenavigated", onNavigation);
+    if (state.url !== start.url) {
+      result.failures.push(`install navigated to ${state.url}`);
+    }
+    if (state.marker !== "keep") {
+      result.failures.push("install reloaded the page");
+    }
+    if (navigations !== 0) {
+      result.failures.push(`install caused ${navigations} navigation(s)`);
+    }
+    if (
+      !state.text.includes("Preparing the update") &&
+      !state.text.includes("Downloading the update")
+    ) {
+      result.failures.push("install did not show progress in the card");
+    }
+    if (!state.running) {
+      result.failures.push("install did not start the card's progress region");
+    }
+    if (state.installButton) {
+      result.failures.push("install left an install button while the update is running");
+    }
+    await page.screenshot({ path: screenshot, fullPage: true });
+    result.screenshot = true;
+  } catch (error) {
+    result.failures.push(`install check failed: ${error.message}`);
+  }
+  results.push(result);
+}
+
 async function runEntry({ page, entry, width, baseURL, results }) {
   const slug = slugFor(entry);
   const label = `${width.name} ${slug} (${entry.path})`;
@@ -633,6 +717,30 @@ async function main() {
       await context.close();
     }
 
+    // The install check changes the mock update service's progress for the
+    // whole daemon, so each width gets a fresh daemon. That also gives a real
+    // install-in-progress screenshot at every width instead of the first one
+    // leaving the later pages already installing.
+    for (const width of WIDTHS) {
+      const updateServer = await startBitternd({ binary });
+      const viewport = { width: width.width, height: width.height };
+      const context = await browser.newContext({ viewport });
+      try {
+        const page = await context.newPage();
+        await page.goto(`${updateServer.baseURL}/ui/setup`, { waitUntil: "load" });
+        await completeSetup(page, updateServer.setupToken, updateServer.adminPassword);
+        await runUpdateInstallCheck({
+          page,
+          width,
+          baseURL: updateServer.baseURL,
+          results,
+        });
+      } finally {
+        await context.close();
+        await updateServer.stop();
+      }
+    }
+
     const widthOrder = new Map(WIDTHS.map((width, index) => [width.name, index]));
     results.sort(
       (left, right) =>
@@ -697,12 +805,13 @@ async function main() {
       }
     }
 
+    const routeResults = results.filter((result) => result.slug !== "status-update-install");
     const screenshotCount = results.filter((result) => result.screenshot).length;
     const expandedCount = results.filter((result) => result.expanded).length;
     const expectedScreens = manifest.length * WIDTHS.length;
     console.log("");
     console.log(
-      `checked ${results.length} of ${expectedScreens} route-width screens, ` +
+      `checked ${routeResults.length} of ${expectedScreens} route-width screens, ` +
         `wrote ${screenshotCount} screenshots (${expandedCount} with expanded ` +
         `disclosures), ${manifestRoutes.length} routes at ${WIDTHS.length} widths`,
     );

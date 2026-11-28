@@ -1,7 +1,7 @@
 # Design system
 
 - Date: 2026-11-18; updated 2026-11-21
-- Status: Accepted on 2026-11-18 as design system v0.1; v0.24 current. The token layer, fact-row
+- Status: Accepted on 2026-11-18 as design system v0.1; v0.25 current. The token layer, fact-row
   rule and component variants are implemented in `ui/static/bittern.css` and the templates, and
   `make design-check` runs in `make check`; the v0.3 flow layer is binding from v0.6, and the
   audience and copy rules are binding from v0.7.

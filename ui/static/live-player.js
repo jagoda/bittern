@@ -90,6 +90,19 @@
     return "Automatic";
   }
 
+  function qualityShortLabel(quality) {
+    if (quality === "main") return "Main";
+    if (quality === "sub") return "Sub";
+    if (quality === "snapshot") return "Still";
+    return "Automatic";
+  }
+
+  function qualitySuffix(quality) {
+    if (quality === "main" || quality === "sub") return " stream";
+    if (quality === "snapshot") return " picture";
+    return "";
+  }
+
   // Pane is one pane slot of the wall. It owns one player island and one
   // overlay on that pane. The overlay holds the pane's stream selector and
   // camera chooser; a hidden overlay is inert and click-through.
@@ -103,11 +116,16 @@
     this.placeholder = root.querySelector("[data-live-placeholder]");
     this.nameElement = root.querySelector("[data-live-pane-name]");
     this.currentElement = root.querySelector("[data-live-current-stream]");
+    this.currentPrefix = root.querySelector("[data-live-current-prefix]");
+    this.currentValue = root.querySelector("[data-live-current-stream-value]");
+    this.currentSuffix = root.querySelector("[data-live-current-suffix]");
     this.noteElement = root.querySelector("[data-player-note]");
     this.announceElement = root.querySelector("[data-player-announce]");
     this.qualityBlock = root.querySelector("[data-live-quality-block]");
     this.qualityForm = root.querySelector("[data-live-quality-form]");
-    this.qualitySelect = root.querySelector("[data-live-quality-select]");
+    this.qualityGroup = root.querySelector("[data-live-quality-group]");
+    this.qualitySingle = root.querySelector("[data-live-quality-single]");
+    this.qualityInputs = root.querySelectorAll("[data-live-quality-choice]");
     this.oneStreamHint = root.querySelector("[data-live-one-stream]");
     this.cameraForm = root.querySelector("[data-live-camera-form]");
     this.cameraSelect = root.querySelector("[data-live-camera-select]");
@@ -176,42 +194,47 @@
     }, 30);
   };
 
-  // updateStreamUI is the current-stream indicator: the selector shows the
-  // option that is playing, and the text beside it says the same thing in
-  // words. A one-stream camera shows one option and the reason.
+  // updateStreamUI is the current-stream indicator and the icon state. The
+  // visible word is short enough for a phone pane; the hidden prefix and suffix
+  // complete the same sentence for assistive tech. The selected choice carries
+  // a check glyph and a thicker border, not colour alone.
   Pane.prototype.updateStreamUI = function () {
     if (this.qualityBlock) this.qualityBlock.hidden = !this.occupied;
-    var oneOption = this.root.querySelector("[data-live-one-stream-option]");
-    if (oneOption) oneOption.hidden = !this.oneStream;
-    each("option[value='main'], option[value='sub'], option[value='snapshot']", this.root, (option) => {
-      if (option.closest("[data-live-quality-select]")) option.hidden = this.oneStream;
+    var oneStream = this.oneStream;
+    if (this.qualityGroup) this.qualityGroup.hidden = oneStream || !this.occupied;
+    if (this.qualitySingle) this.qualitySingle.hidden = !oneStream || !this.occupied;
+    var shown = this.live === false ? "snapshot" : this.quality;
+    Array.prototype.forEach.call(this.qualityInputs, (input) => {
+      input.disabled = oneStream || !this.occupied;
+      input.checked = !oneStream && input.value === shown;
+    });
+    each("[data-profile-link]", this.root, (link) => {
+      if (!oneStream && link.getAttribute("data-profile-link") === shown) {
+        link.setAttribute("aria-current", "true");
+      } else {
+        link.removeAttribute("aria-current");
+      }
     });
     if (this.oneStreamHint) {
-      this.oneStreamHint.hidden = !this.oneStream;
+      this.oneStreamHint.hidden = !oneStream;
       this.oneStreamHint.textContent = ONE_STREAM_REASON;
     }
-    if (this.qualitySelect) {
-      this.qualitySelect.disabled = this.oneStream || !this.occupied;
-      if (this.oneStream) {
-        this.qualitySelect.value = "";
-      } else if (this.occupied) {
-        var shown = this.live === false ? "snapshot" : this.quality;
-        if (shown === "main" || shown === "sub" || shown === "snapshot") {
-          this.qualitySelect.value = shown;
-        }
-      }
-    }
     if (!this.currentElement) return;
+    if (this.currentPrefix) this.currentPrefix.hidden = !this.occupied;
+    if (this.currentSuffix) this.currentSuffix.hidden = true;
     if (!this.occupied) {
-      this.currentElement.textContent = "No camera assigned.";
+      if (this.currentValue) this.currentValue.textContent = "No camera assigned";
       return;
     }
-    if (this.oneStream) {
-      this.currentElement.textContent = ONE_STREAM_REASON;
+    if (oneStream) {
+      if (this.currentValue) this.currentValue.textContent = "One stream";
       return;
     }
-    var liveLabel = this.live === false ? "Snapshots" : qualityLabel(this.quality);
-    this.currentElement.textContent = "Current stream: " + liveLabel + ".";
+    if (this.currentValue) this.currentValue.textContent = qualityShortLabel(shown);
+    if (this.currentSuffix) {
+      this.currentSuffix.textContent = qualitySuffix(shown);
+      this.currentSuffix.hidden = false;
+    }
   };
 
   Pane.prototype.updateCameraUI = function () {
@@ -382,6 +405,8 @@
     this.noticeTimer = null;
     this.noticeShown = false;
     this.touchStart = null;
+    this.pointerDownHadOverlay = false;
+    this.pointerDownInOverlay = false;
   }
 
   LiveWall.prototype.init = function () {
@@ -398,8 +423,10 @@
       this.fullscreenButton.addEventListener("click", () => wall.requestFullscreen());
     }
     document.addEventListener("fullscreenchange", () => this.syncFullscreen());
+    this.root.setAttribute("data-live-enhanced", "true");
     document.addEventListener("keydown", (event) => this.onDocumentKeydown(event), true);
     this.root.addEventListener("keydown", (event) => this.onKeydown(event));
+    this.root.addEventListener("click", (event) => this.onClick(event));
     this.root.addEventListener("pointerdown", (event) => this.onPointerDown(event), true);
     this.root.addEventListener("pointerup", (event) => this.onPointerUp(event), true);
     this.root.addEventListener("pointermove", (event) => this.onPointerMove(event), true);
@@ -447,15 +474,21 @@
       });
     }
     this.panes.forEach((pane) => {
-      if (pane.qualitySelect) {
-        pane.qualitySelect.addEventListener("change", () => {
-          wall.setQuality(pane, pane.qualitySelect.value);
+      Array.prototype.forEach.call(pane.qualityInputs, (input) => {
+        input.addEventListener("change", () => {
+          if (input.checked) wall.setQuality(pane, input.value);
         });
-      }
+      });
       if (pane.qualityForm) {
         pane.qualityForm.addEventListener("submit", (event) => {
           event.preventDefault();
-          if (pane.qualitySelect) wall.setQuality(pane, pane.qualitySelect.value);
+          var checked = pane.qualityForm.querySelector("input[name='quality']:checked");
+          if (checked && !checked.disabled) wall.setQuality(pane, checked.value);
+        });
+      }
+      if (pane.cameraSelect) {
+        pane.cameraSelect.addEventListener("change", () => {
+          wall.assignCamera(pane, pane.cameraSelect.value);
         });
       }
       if (pane.cameraForm) {
@@ -480,14 +513,7 @@
     var pane = this.selected;
     if (!pane || !pane.player) return;
     var profile = link.getAttribute("data-profile-link");
-    pane.quality = profile;
-    pane.playerRoot.setAttribute("data-quality", profile);
-    each("[data-profile-link]", this.root, (candidate) => {
-      if (candidate === link) candidate.setAttribute("aria-current", "true");
-      else candidate.removeAttribute("aria-current");
-    });
-    pane.player.setQuality(profile);
-    pane.updateStreamUI();
+    this.setQuality(pane, profile);
     var href = link.getAttribute("href");
     if (href && window.history && window.history.replaceState) {
       window.history.replaceState(null, "", href);
@@ -691,6 +717,10 @@
     if (event.pointerType === "touch" || event.pointerType === "pen") {
       this.touchStart = { x: event.clientX, y: event.clientY };
     }
+    this.pointerDownHadOverlay = this.anyOverlayShown();
+    this.pointerDownInOverlay = Boolean(
+      event.target.closest && event.target.closest("[data-live-overlay-panel], [data-live-pane-overlay]"),
+    );
     var pane = this.paneForEvent(event);
     if (!pane) return;
     var inOverlay = Boolean(event.target.closest("[data-live-pane-overlay]"));
@@ -700,6 +730,33 @@
     if (!pane.occupied && !inOverlay) {
       if (pane.cameraSelect) window.setTimeout(() => pane.cameraSelect.focus(), 50);
     }
+  };
+
+  // A click that starts with an overlay already shown dismisses it. On a video
+  // the pane overlay and the wall overlay both close; anywhere else on the wall
+  // closes the wall overlay. An empty pane is opening its chooser, and a click
+  // that starts with the overlays hidden is a reveal, so neither dismisses.
+  LiveWall.prototype.onClick = function (event) {
+    if (this.pointerDownInOverlay) return;
+    if (event.target.closest && event.target.closest("[data-live-overlay-panel], [data-live-pane-overlay]")) {
+      return;
+    }
+    if (!this.pointerDownHadOverlay) return;
+    var pane = this.paneForEvent(event);
+    var video = event.target.closest ? event.target.closest("video, [data-player-snapshot]") : null;
+    if (video) {
+      this.hideAllOverlays();
+      return;
+    }
+    if (pane && !pane.occupied) return;
+    this.hideWallOverlay();
+  };
+
+  LiveWall.prototype.hideWallOverlay = function () {
+    if (!this.overlay) return;
+    this.overlay.setAttribute("inert", "");
+    this.overlayHidden = true;
+    this.root.setAttribute("data-live-overlay", "hidden");
   };
 
   // A touch swipe down of at least 120 CSS pixels exits full screen. It is the
@@ -934,6 +991,11 @@
   };
 
   LiveWall.prototype.focusFirstPaneControl = function (pane) {
+    var quality = pane.overlay ? pane.overlay.querySelector("input[data-live-quality-choice]:not([disabled])") : null;
+    if (quality) {
+      quality.focus();
+      return;
+    }
     var controls = this.focusableIn(pane.overlay);
     if (controls.length) controls[0].focus();
   };
@@ -1063,8 +1125,14 @@
 
   LiveWall.prototype.exitFullscreen = function () {
     if (!document.fullscreenElement) return;
+    var wall = this;
     var exiting = document.exitFullscreen();
-    if (exiting && exiting.catch) exiting.catch(() => {});
+    if (exiting && exiting.then) {
+      exiting
+        .then(() => wall.syncFullscreen())
+        .catch(() => wall.syncFullscreen());
+    }
+    window.setTimeout(() => wall.syncFullscreen(), 0);
   };
 
   LiveWall.prototype.syncFullscreen = function () {
