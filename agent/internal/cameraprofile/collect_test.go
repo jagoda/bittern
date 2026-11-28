@@ -242,6 +242,22 @@ func TestClassifyCollapsesDuplicateURIsAndRejectsUnusableProfiles(t *testing.T) 
 	if len(classification.Collapsed) != 1 || classification.Collapsed[0] != "B" {
 		t.Fatalf("collapsed = %v, want B", classification.Collapsed)
 	}
+	reasons := make(map[string]string)
+	for _, rejection := range classification.Rejected {
+		reasons[rejection.Token] = rejection.Reason
+	}
+	if reasons["B"] != "duplicate stream URI of A" {
+		t.Fatalf("B reason = %q, want a duplicate URI reason", reasons["B"])
+	}
+	if !strings.Contains(reasons["C"], "not an H.264 or H.265 encoding") {
+		t.Fatalf("C reason = %q", reasons["C"])
+	}
+	if reasons["D"] != RejectNoResolution {
+		t.Fatalf("D reason = %q", reasons["D"])
+	}
+	if reasons["E"] != RejectNoStreamURI {
+		t.Fatalf("E reason = %q", reasons["E"])
+	}
 }
 
 func TestClassifyNeverChoosesEqualOrLargerSub(t *testing.T) {
@@ -251,6 +267,166 @@ func TestClassifyNeverChoosesEqualOrLargerSub(t *testing.T) {
 	})
 	if classification.Main == nil || classification.Sub != nil {
 		t.Fatalf("classification = %+v, want a main and no equal-size sub", classification)
+	}
+}
+
+func TestCollectUsesTheMediaEndpointFromCapabilities(t *testing.T) {
+	// A camera can repeat the device service path in GetServices while its
+	// media operations live at the path GetCapabilities names. The device
+	// service and the clock answer, which is exactly the field report.
+	camera := &fakeCamera{
+		Media: 1, Auth: "wsse", Profiles: twoProfiles(),
+		Media1Path:             "/onvif/media_service",
+		ServicesMedia1Path:     "/onvif/device_service",
+		CapabilitiesMedia1Path: "/onvif/media_service",
+	}
+	server := newFakeCamera(t, camera)
+	defer server.Close()
+	result := Collect(context.Background(), testCamera(), secrets.CameraAccount{Username: "admin", Password: "s3cret"}, testOptions(server))
+	if result.State != StateOK {
+		t.Fatalf("state = %q detail = %q evidence = %v, want the capabilities media endpoint", result.State, result.Detail, result.Evidence)
+	}
+	if result.MediaService != "Media1" {
+		t.Fatalf("media service = %q, want Media1", result.MediaService)
+	}
+}
+
+func TestCollectFallsBackToCapabilitiesMedia1WhenMedia2Fails(t *testing.T) {
+	// GetServices advertises Media2 at its own path and repeats the device
+	// service path for Media1. Media2 fails, so the fallback must use the
+	// Media1 endpoint GetCapabilities names, never the device service.
+	camera := &fakeCamera{
+		Media: 3, Auth: "wsse", Profiles: twoProfiles(), FailMedia2: true,
+		Media1Path:             "/onvif/media_service",
+		Media2Path:             "/onvif/media2",
+		ServicesMedia1Path:     "/onvif/device_service",
+		ServicesMedia2Path:     "/onvif/media2",
+		CapabilitiesMedia1Path: "/onvif/media_service",
+	}
+	server := newFakeCamera(t, camera)
+	defer server.Close()
+	result := Collect(context.Background(), testCamera(), secrets.CameraAccount{Username: "admin", Password: "s3cret"}, testOptions(server))
+	if result.State != StateOK {
+		t.Fatalf("state = %q detail = %q evidence = %v, want the Media1 fallback", result.State, result.Detail, result.Evidence)
+	}
+	if result.MediaService != "Media1" {
+		t.Fatalf("media service = %q, want the Media1 fallback", result.MediaService)
+	}
+	found := false
+	for _, evidence := range result.Evidence {
+		if evidence == "media2-failed" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the fallback was not recorded: %v", result.Evidence)
+	}
+}
+
+func TestCollectReportsATLSOnlyStream(t *testing.T) {
+	camera := &fakeCamera{Media: 1, Auth: "wsse", Profiles: []fakeProfile{{
+		Token: "Profile_1", Name: "Main", Encoding: "H264", Width: 1920, Height: 1080,
+		Encoder: "enc-1", Stream: "rtsps://127.0.0.1:322/live",
+	}}}
+	server := newFakeCamera(t, camera)
+	defer server.Close()
+	result := Collect(context.Background(), testCamera(), secrets.CameraAccount{Username: "admin", Password: "s3cret"}, testOptions(server))
+	if result.State != StateRTSPSUnsupported {
+		t.Fatalf("state = %q detail = %q, want a TLS stream reason", result.State, result.Detail)
+	}
+	if strings.Contains(strings.ToLower(result.Detail), "could not reach") {
+		t.Fatalf("a TLS stream was described as unreachable: %q", result.Detail)
+	}
+	if !strings.Contains(strings.ToLower(result.Detail), "encrypted") {
+		t.Fatalf("detail does not name the TLS stream: %q", result.Detail)
+	}
+	if !strings.Contains(strings.ToLower(result.Action), "unencrypted") {
+		t.Fatalf("action does not name the fix: %q", result.Action)
+	}
+	if len(result.Reasons) != 1 || !strings.Contains(result.Reasons[0], "rtsps") {
+		t.Fatalf("reasons = %v, want the rtsps reason", result.Reasons)
+	}
+}
+
+func TestCollectReportsPerProfileRejectionReasons(t *testing.T) {
+	camera := &fakeCamera{Media: 1, Auth: "wsse", Profiles: []fakeProfile{
+		{Token: "Codec", Name: "JPEG", Encoding: "JPEG", Width: 1920, Height: 1080, Encoder: "enc-codec"},
+		{Token: "Main", Name: "No encoder", Encoding: "H264", Width: 1920, Height: 1080},
+		{Token: "NoStream", Name: "No stream", Encoding: "H264", Width: 640, Height: 360, Encoder: "enc-stream", NoStream: true},
+	}}
+	server := newFakeCamera(t, camera)
+	defer server.Close()
+	result := Collect(context.Background(), testCamera(), secrets.CameraAccount{Username: "admin", Password: "s3cret"}, testOptions(server))
+	if result.State != StateProfilesRejected {
+		t.Fatalf("state = %q detail = %q, want the per-profile rejection state", result.State, result.Detail)
+	}
+	for _, want := range []string{
+		"Main: missing encoder configuration",
+		"Codec: not an H.264 or H.265 encoding (JPEG)",
+		"NoStream: stream URI:",
+	} {
+		if !strings.Contains(result.Detail, want) {
+			t.Fatalf("detail = %q, want %q", result.Detail, want)
+		}
+	}
+	if len(result.Reasons) != 3 {
+		t.Fatalf("reasons = %v, want one per profile", result.Reasons)
+	}
+	if !strings.Contains(result.Action, "H.264 or H.265") {
+		t.Fatalf("action = %q, want the codec fix", result.Action)
+	}
+}
+
+func TestCollectReportsPerProfileNoStreamReasons(t *testing.T) {
+	camera := &fakeCamera{Media: 1, Auth: "wsse", Profiles: []fakeProfile{
+		{Token: "A", Name: "Main", Encoding: "H264", Width: 1920, Height: 1080, Encoder: "enc-a", NoStream: true},
+		{Token: "B", Name: "Sub", Encoding: "H264", Width: 640, Height: 360, Encoder: "enc-b", NoStream: true},
+	}}
+	server := newFakeCamera(t, camera)
+	defer server.Close()
+	result := Collect(context.Background(), testCamera(), secrets.CameraAccount{Username: "admin", Password: "s3cret"}, testOptions(server))
+	if result.State != StateNoStream {
+		t.Fatalf("state = %q detail = %q, want no-stream", result.State, result.Detail)
+	}
+	for _, want := range []string{"A: stream URI:", "B: stream URI:"} {
+		if !strings.Contains(result.Detail, want) {
+			t.Fatalf("detail = %q, want %q", result.Detail, want)
+		}
+	}
+}
+
+func TestMediaFailureAfterONVIFAnswerIsNotUnreachable(t *testing.T) {
+	camera := &fakeCamera{Media: 1, Auth: "wsse", Profiles: twoProfiles(), FailProfiles: true}
+	server := newFakeCamera(t, camera)
+	defer server.Close()
+	result := Collect(context.Background(), testCamera(), secrets.CameraAccount{Username: "admin", Password: "s3cret"}, testOptions(server))
+	if result.State != StateMediaUnavailable {
+		t.Fatalf("state = %q detail = %q, want media-unavailable", result.State, result.Detail)
+	}
+	if strings.Contains(strings.ToLower(result.Detail), "could not reach") {
+		t.Fatalf("a camera that answered ONVIF was described as unreachable: %q", result.Detail)
+	}
+	if strings.Contains(strings.ToLower(result.Action), "power") {
+		t.Fatalf("the action tells the owner to check power after an ONVIF answer: %q", result.Action)
+	}
+	if !strings.Contains(strings.ToLower(result.Detail), "answers onvif") {
+		t.Fatalf("detail does not start from the ONVIF answer: %q", result.Detail)
+	}
+}
+
+func TestUnreachableCopyOnlyWhenNothingAnswered(t *testing.T) {
+	server := newFakeCamera(t, &fakeCamera{Media: 1, Auth: "wsse", Profiles: twoProfiles()})
+	options := testOptions(server)
+	server.Close()
+	result := Collect(context.Background(), testCamera(), secrets.CameraAccount{Username: "admin", Password: "s3cret"}, options)
+	if result.State != StateUnreachable {
+		t.Fatalf("state = %q detail = %q, want unreachable", result.State, result.Detail)
+	}
+	if !strings.Contains(strings.ToLower(result.Detail), "at all") {
+		t.Fatalf("unreachable detail = %q, want the all-ways failure", result.Detail)
+	}
+	if !strings.Contains(strings.ToLower(result.Action), "power and network cable") {
+		t.Fatalf("unreachable action = %q, want the power and cable check", result.Action)
 	}
 }
 

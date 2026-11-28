@@ -17,6 +17,8 @@ func TestReduceRTSPURIKeepsOnlyAPathAndQuery(t *testing.T) {
 	}
 	if _, err := ReduceRTSPURI("rtsps://10.77.0.20:554/live", allowed, 554); err == nil {
 		t.Fatal("an RTSPS URI was accepted although the schema stores a path and the renderer builds rtsp")
+	} else if scheme, ok := SchemeOf(err); !ok || scheme != "rtsps" {
+		t.Fatalf("RTSPS error = %v, want the rtsps scheme", err)
 	}
 }
 

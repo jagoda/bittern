@@ -35,6 +35,9 @@ type DeviceOptions struct {
 	HTTPClient       *http.Client
 	Now              func() time.Time
 	AuthMethod       AuthMethod
+	// Trace receives one record per attempted operation. It is a diagnostic
+	// hook used by the camera probe command; normal callers leave it nil.
+	Trace func(TraceStep)
 }
 
 // Device is a camera's ONVIF Device service client. It is safe for one
@@ -54,6 +57,7 @@ type Device struct {
 	auth          AuthMethod
 	httpDate      time.Time
 	httpDateAt    time.Time
+	trace         func(TraceStep)
 }
 
 // NewDevice derives the standard device service endpoints from the stored
@@ -135,6 +139,7 @@ func newDevice(endpoints []*url.URL, allowed netip.Addr, credentials Credentials
 		maxOperations: maxOperations,
 		now:           now,
 		auth:          auth,
+		trace:         options.Trace,
 	}, nil
 }
 
@@ -299,6 +304,55 @@ func (d *Device) SetManualTime(ctx context.Context, zone string, utc time.Time) 
 	return err
 }
 
+// DeviceInformation is the identity a camera reports from
+// GetDeviceInformation. The serial number is evidence for one unit only and is
+// redacted from every maintainer report; it is never written to the camera
+// matrix or a status document.
+type DeviceInformation struct {
+	Manufacturer    string
+	Model           string
+	FirmwareVersion string
+	SerialNumber    string
+	HardwareID      string
+}
+
+// DeviceInformation reads the camera identity. It is an authenticated read;
+// some cameras answer it without an account, most do not.
+func (d *Device) DeviceInformation(ctx context.Context) (DeviceInformation, error) {
+	if err := d.ensureActive(ctx); err != nil {
+		return DeviceInformation{}, err
+	}
+	data, err := d.call(ctx, "device information", `<tds:GetDeviceInformation/>`, true)
+	if err != nil {
+		return DeviceInformation{}, err
+	}
+	var envelope deviceInformationEnvelope
+	if err := xml.Unmarshal(data, &envelope); err != nil || envelope.Body.GetDeviceInformationResponse == nil {
+		return DeviceInformation{}, operationError(KindRefused, "device information", "the camera did not return its device information")
+	}
+	response := envelope.Body.GetDeviceInformationResponse
+	return DeviceInformation{
+		Manufacturer:    strings.TrimSpace(response.Manufacturer),
+		Model:           strings.TrimSpace(response.Model),
+		FirmwareVersion: strings.TrimSpace(response.FirmwareVersion),
+		SerialNumber:    strings.TrimSpace(response.SerialNumber),
+		HardwareID:      strings.TrimSpace(response.HardwareID),
+	}, nil
+}
+
+type deviceInformationEnvelope struct {
+	Body struct {
+		GetDeviceInformationResponse *struct {
+			Manufacturer    string `xml:"Manufacturer"`
+			Model           string `xml:"Model"`
+			FirmwareVersion string `xml:"FirmwareVersion"`
+			SerialNumber    string `xml:"SerialNumber"`
+			HardwareID      string `xml:"HardwareId"`
+		} `xml:"GetDeviceInformationResponse"`
+		Fault *soapFault `xml:"Fault"`
+	} `xml:"Body"`
+}
+
 func (d *Device) ensureActive(ctx context.Context) error {
 	if d == nil {
 		return operationError(KindUnreachable, "ONVIF request", "no ONVIF client")
@@ -357,7 +411,7 @@ func (d *Device) callAt(ctx context.Context, endpoint *url.URL, operation, body 
 // callAtAction sends one SOAP request with an explicit operation action. Media
 // service operations use their own namespace, so the Device service action is
 // not assumed for them.
-func (d *Device) callAtAction(ctx context.Context, endpoint *url.URL, operation, action, body string, authenticated bool) ([]byte, error) {
+func (d *Device) callAtAction(ctx context.Context, endpoint *url.URL, operation, action, body string, authenticated bool) (data []byte, err error) {
 	if d.operations >= d.maxOperations {
 		return nil, operationError(KindRefused, operation, "the camera did not answer within the operation limit")
 	}
@@ -367,6 +421,20 @@ func (d *Device) callAtAction(ctx context.Context, endpoint *url.URL, operation,
 	if err != nil {
 		return nil, operationError(KindRefused, operation, err.Error())
 	}
+	step := TraceStep{
+		Operation:     operation,
+		Action:        action,
+		Endpoint:      validated.String(),
+		Authenticated: authenticated && d.credentials.Valid(),
+		AuthMethod:    d.auth,
+	}
+	started := time.Now()
+	defer func() {
+		step.Duration = time.Since(started)
+		step.Bytes = len(data)
+		step.Kind, step.Detail = traceError(err)
+		d.emitTrace(step)
+	}()
 	header := ""
 	if authenticated && d.credentials.Valid() {
 		created := d.authenticationTime()
@@ -400,6 +468,8 @@ func (d *Device) callAtAction(ctx context.Context, endpoint *url.URL, operation,
 	if err != nil {
 		return nil, err
 	}
+	step.Status = response.StatusCode
+	step.FaultCode, step.FaultReason = faultDetails(data)
 	if response.StatusCode == http.StatusUnauthorized && d.auth == AuthHTTPDigest && d.credentials.Valid() {
 		if challenge, ok := parseDigestChallenge(sortedHeaderValues(response)); ok {
 			_ = response.Body.Close()
@@ -414,6 +484,8 @@ func (d *Device) callAtAction(ctx context.Context, endpoint *url.URL, operation,
 			if err != nil {
 				return nil, err
 			}
+			step.Status = response.StatusCode
+			step.FaultCode, step.FaultReason = faultDetails(data)
 		}
 	}
 	defer response.Body.Close()
@@ -499,6 +571,8 @@ func operationName(operation string) string {
 		return "GetCapabilities"
 	case "service list":
 		return "GetServices"
+	case "device information":
+		return "GetDeviceInformation"
 	case "NTP setting":
 		return "SetNTP"
 	case "NTP mode setting", "time push":
@@ -613,19 +687,15 @@ type soapFault struct {
 }
 
 func parseFaultError(data []byte, operation string) error {
-	var envelope soapEnvelope
-	if err := xml.Unmarshal(data, &envelope); err != nil {
+	envelope, err := parseFaultEnvelope(data)
+	if err != nil {
 		return nil
 	}
 	fault := envelope.Body.Fault
 	if fault == nil {
 		return nil
 	}
-	reason := strings.TrimSpace(fault.Reason.Text)
-	code := strings.TrimSpace(fault.Code.Subcode.Value)
-	if code == "" {
-		code = strings.TrimSpace(fault.Code.Value)
-	}
+	code, reason := faultDetails(data)
 	lower := strings.ToLower(reason + " " + code)
 	if strings.Contains(lower, "timestamp") || strings.Contains(lower, "created") ||
 		strings.Contains(lower, "replay") || strings.Contains(lower, "clock") {
@@ -643,4 +713,12 @@ func parseFaultError(data []byte, operation string) error {
 		reason = reason[:200]
 	}
 	return operationError(KindRefused, operation, reason)
+}
+
+func parseFaultEnvelope(data []byte) (soapEnvelope, error) {
+	var envelope soapEnvelope
+	if err := xml.Unmarshal(data, &envelope); err != nil {
+		return soapEnvelope{}, err
+	}
+	return envelope, nil
 }

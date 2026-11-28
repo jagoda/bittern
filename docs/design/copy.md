@@ -168,7 +168,10 @@ Allowed behind "Technical details":
 - Protocol names: RTSP, ONVIF, WS-Discovery, ARP, DHCP, TLS.
 - Raw status values, error strings, exit codes, and log lines.
 - Per-check evidence such as discovery layers, render checks, and validation rows.
-- The exact command to run on the console, when the owner can finish without it.
+- The exact command to run on the console, when the owner can finish without it. When the camera
+  page reports a stream settings failure, the command is `sudo bittern camera probe <camera>`; it is
+  read-only, prints a redacted ONVIF trace, and is documented in the
+  [diagnosis runbook](../runbooks/camera-onvif-diagnosis.md).
 - Internal identifiers such as `camera_1` and status section keys.
 
 Never behind a disclosure:

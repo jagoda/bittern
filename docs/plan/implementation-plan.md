@@ -2010,6 +2010,14 @@ capability and reason in status, and never fails. The secrets file now holds one
 and apply builds one URL per profile. PTZ, events, imaging, the profile picker, the quirk table and
 the hardware matrix row are still open. No real camera has run this path.
 
+**Status 2026-11-28.** The media path is now diagnosed by instrument instead of by guess. The client
+always reads `GetCapabilities` and uses its `Media` endpoint before a `GetServices` path, keeps the
+Media2 then Media1 fallback, and the collector reports `rtsps-unsupported`, `profiles-rejected`,
+`media-unavailable` and per-profile rejection reasons instead of folding them into `unreachable`.
+`bittern camera probe` prints the redacted read-only trace, and the
+[camera ONVIF diagnosis runbook](../runbooks/camera-onvif-diagnosis.md) is the field procedure.
+TLS RTSP remains [OQ-51](../open-questions.md#oq-51).
+
 **Acceptance.**
 - The services and profiles a camera advertises are enumerated and shown with their evidence, and each
   profile that maps to a use case is selectable for stream, snapshot, PTZ, and events.

@@ -60,6 +60,16 @@ func IsUnreachable(err error) bool {
 	return errors.As(err, &operationError) && operationError.Kind == KindUnreachable
 }
 
+// ErrorKindOf returns the kind of an operation error, or KindUnreachable for an
+// error that is not one of this package's typed errors.
+func ErrorKindOf(err error) ErrorKind {
+	var operationError *Error
+	if errors.As(err, &operationError) {
+		return operationError.Kind
+	}
+	return KindUnreachable
+}
+
 // Clock is the camera time returned by GetSystemDateAndTime. UTCTime is the
 // value used for comparisons; an absent or unreadable UTC value leaves it zero.
 type Clock struct {

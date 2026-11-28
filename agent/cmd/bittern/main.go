@@ -42,6 +42,7 @@ const usage = `usage:
   bittern update cancel [--state-root DIR]
   bittern update helper
   bittern update apply-config --state-root DIR
+  bittern camera probe CAMERA [flags]
 `
 
 var (
@@ -93,6 +94,11 @@ func main() {
 	case "update":
 		if err := runUpdate(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "bittern update:", err)
+			os.Exit(1)
+		}
+	case "camera":
+		if err := runCamera(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "bittern camera:", err)
 			os.Exit(1)
 		}
 	default:

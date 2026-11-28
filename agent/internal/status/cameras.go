@@ -64,6 +64,9 @@ const (
 	CameraProfileNoMediaService   = "no-media-service"
 	CameraProfileNoProfile        = "no-profile"
 	CameraProfileNoStream         = "no-stream"
+	CameraProfileProfilesRejected = "profiles-rejected"
+	CameraProfileRTSPSUnsupported = "rtsps-unsupported"
+	CameraProfileMediaUnavailable = "media-unavailable"
 	CameraProfileUnreachable      = "unreachable"
 	CameraProfileClockUnavailable = "clock-unavailable"
 	CameraProfileMalformed        = "malformed"
@@ -74,21 +77,24 @@ const (
 // records capability and the reason for an absent sub profile. It never holds
 // a complete URI or a credential.
 type CameraProfileSection struct {
-	State        string     `json:"state"`
-	Detail       string     `json:"detail"`
-	Action       string     `json:"action,omitempty"`
-	MediaService string     `json:"media_service,omitempty"`
-	AuthMethod   string     `json:"auth_method,omitempty"`
-	Account      string     `json:"account,omitempty"`
-	ClockSource  string     `json:"clock_source,omitempty"`
-	MainToken    string     `json:"main_token,omitempty"`
-	SubToken     string     `json:"sub_token,omitempty"`
-	MainWidth    int        `json:"main_width,omitempty"`
-	MainHeight   int        `json:"main_height,omitempty"`
-	SubWidth     int        `json:"sub_width,omitempty"`
-	SubHeight    int        `json:"sub_height,omitempty"`
-	Quirks       []string   `json:"quirks,omitempty"`
-	CollectedAt  *time.Time `json:"collected_at,omitempty"`
+	State        string   `json:"state"`
+	Detail       string   `json:"detail"`
+	Action       string   `json:"action,omitempty"`
+	MediaService string   `json:"media_service,omitempty"`
+	AuthMethod   string   `json:"auth_method,omitempty"`
+	Account      string   `json:"account,omitempty"`
+	ClockSource  string   `json:"clock_source,omitempty"`
+	MainToken    string   `json:"main_token,omitempty"`
+	SubToken     string   `json:"sub_token,omitempty"`
+	MainWidth    int      `json:"main_width,omitempty"`
+	MainHeight   int      `json:"main_height,omitempty"`
+	SubWidth     int      `json:"sub_width,omitempty"`
+	SubHeight    int      `json:"sub_height,omitempty"`
+	Quirks       []string `json:"quirks,omitempty"`
+	// Reasons explains every profile the classifier rejected, one entry per
+	// profile. It is technical evidence for profiles-rejected and no-stream.
+	Reasons     []string   `json:"reasons,omitempty"`
+	CollectedAt *time.Time `json:"collected_at,omitempty"`
 }
 
 // CameraSection is one managed camera in the status document. It is assembled
@@ -157,6 +163,7 @@ type CameraProfileHealth struct {
 	SubWidth     int        `json:"sub_width,omitempty"`
 	SubHeight    int        `json:"sub_height,omitempty"`
 	Quirks       []string   `json:"quirks,omitempty"`
+	Reasons      []string   `json:"reasons,omitempty"`
 	CollectedAt  *time.Time `json:"collected_at,omitempty"`
 }
 
@@ -451,6 +458,7 @@ func cameraProfileSection(health *CameraProfileHealth) CameraProfileSection {
 			SubWidth:     health.SubWidth,
 			SubHeight:    health.SubHeight,
 			Quirks:       append([]string(nil), health.Quirks...),
+			Reasons:      append([]string(nil), health.Reasons...),
 			CollectedAt:  health.CollectedAt,
 		}
 	}

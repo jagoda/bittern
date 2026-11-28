@@ -75,6 +75,8 @@
         <dd><span class="state-badge state-{{cameraTimeClass .Time.State}}">{{cameraTimeLabel .Time.State}}</span> via {{cameraTimeMechanismLabel .Time.Mechanism}}</dd>
         <dt>Clock checked</dt>
         <dd>{{if .Time.CheckedAt}}{{localTimePtr .Time.CheckedAt $.Zone}}{{else}}Not checked yet{{end}}</dd>
+        {{if .Profiles.Reasons}}<dt>Stream profile reasons</dt>
+        <dd>{{join .Profiles.Reasons "; "}}</dd>{{end}}
         <dt>Last picture</dt>
         <dd>{{if .SnapshotAt}}{{localTimePtr .SnapshotAt $.Zone}}{{else}}Not tested yet{{end}}</dd>
         <dt>Hardware address</dt>

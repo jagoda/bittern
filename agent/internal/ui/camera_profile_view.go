@@ -72,8 +72,10 @@ func cameraProfileLabel(state string) string {
 		return "Sub stream unverified"
 	case status.CameraProfileONVIFDisabled, status.CameraProfileNoMediaService,
 		status.CameraProfileNoProfile, status.CameraProfileNoStream,
-		status.CameraProfileSignInRejected, status.CameraProfileClockUnavailable,
-		status.CameraProfileMalformed, status.CameraProfileUnreachable:
+		status.CameraProfileProfilesRejected, status.CameraProfileRTSPSUnsupported,
+		status.CameraProfileMediaUnavailable, status.CameraProfileSignInRejected,
+		status.CameraProfileClockUnavailable, status.CameraProfileMalformed,
+		status.CameraProfileUnreachable:
 		return "Stream settings unavailable"
 	default:
 		return "Stream profiles not read"

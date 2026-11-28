@@ -47,11 +47,56 @@ type fakeCamera struct {
 	ONVIFDisabled bool
 	BadProfiles   bool
 	FailMedia2    bool
+	FailProfiles  bool
+
+	// Paths let a test model a camera that repeats the device service path in
+	// GetServices while answering media at the path GetCapabilities names.
+	Media1Path             string
+	Media2Path             string
+	ServicesMedia1Path     string
+	ServicesMedia2Path     string
+	CapabilitiesMedia1Path string
+	CapabilitiesMedia2Path string
 
 	server      *httptest.Server
 	mu          sync.Mutex
 	digestCalls int
 	creations   []string
+}
+
+func (f *fakeCamera) media1Path() string {
+	if f.Media1Path != "" {
+		return f.Media1Path
+	}
+	return "/onvif/media1"
+}
+
+func (f *fakeCamera) media2Path() string {
+	if f.Media2Path != "" {
+		return f.Media2Path
+	}
+	return "/onvif/media2"
+}
+
+func (f *fakeCamera) servicesMedia1Path() string {
+	if f.ServicesMedia1Path != "" {
+		return f.ServicesMedia1Path
+	}
+	return "/onvif/media1"
+}
+
+func (f *fakeCamera) servicesMedia2Path() string {
+	if f.ServicesMedia2Path != "" {
+		return f.ServicesMedia2Path
+	}
+	return "/onvif/media2"
+}
+
+func (f *fakeCamera) capabilitiesMedia1Path() string {
+	if f.CapabilitiesMedia1Path != "" {
+		return f.CapabilitiesMedia1Path
+	}
+	return "/onvif/media1"
 }
 
 func newFakeCamera(t *testing.T, camera *fakeCamera) *httptest.Server {
@@ -101,11 +146,29 @@ func (f *fakeCamera) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/soap+xml")
-	media2 := strings.Contains(r.URL.Path, "media2")
+	media2 := strings.Contains(action, "ver20/media")
+	if isMediaOperation(operation) {
+		expected := f.media1Path()
+		if media2 {
+			expected = f.media2Path()
+		}
+		if r.URL.Path != expected {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+	}
 	switch operation {
 	case "GetProfiles":
+		if f.FailProfiles {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		if f.BadProfiles {
 			_, _ = io.WriteString(w, `<?xml version="1.0"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><broken`)
+			return
+		}
+		if media2 && f.FailMedia2 {
+			_, _ = io.WriteString(w, faultXML("ActionNotSupported", "the fake camera has no Media2 profiles"))
 			return
 		}
 		_, _ = io.WriteString(w, f.profilesXML(media2))
@@ -119,6 +182,14 @@ func (f *fakeCamera) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, faultXML("ActionNotSupported", "the fake camera does not implement "+operation))
 	}
+}
+
+func isMediaOperation(operation string) bool {
+	switch operation {
+	case "GetProfiles", "GetStreamUri", "GetSnapshotUri", "GetVideoEncoderConfigurations":
+		return true
+	}
+	return false
 }
 
 func operationFromAction(action, body string) string {
@@ -265,11 +336,11 @@ func (f *fakeCamera) servicesXML() string {
 		f.server.URL + `/onvif/device_service</tds:XAddr></tds:Service>`)
 	if f.Media == 1 || f.Media == 3 {
 		services.WriteString(`<tds:Service><tds:Namespace>http://www.onvif.org/ver10/media/wsdl</tds:Namespace><tds:XAddr>` +
-			f.server.URL + `/onvif/media1</tds:XAddr></tds:Service>`)
+			f.server.URL + f.servicesMedia1Path() + `</tds:XAddr></tds:Service>`)
 	}
 	if f.Media == 2 || f.Media == 3 {
 		services.WriteString(`<tds:Service><tds:Namespace>http://www.onvif.org/ver20/media/wsdl</tds:Namespace><tds:XAddr>` +
-			f.server.URL + `/onvif/media2</tds:XAddr></tds:Service>`)
+			f.server.URL + f.servicesMedia2Path() + `</tds:XAddr></tds:Service>`)
 	}
 	return `<?xml version="1.0"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl">` +
 		`<s:Body><tds:GetServicesResponse>` + services.String() + `</tds:GetServicesResponse></s:Body></s:Envelope>`
@@ -277,10 +348,13 @@ func (f *fakeCamera) servicesXML() string {
 
 func (f *fakeCamera) capabilitiesXML() string {
 	media := ""
-	if f.Media == 1 || f.Media == 3 {
-		media = `<trt:Media><trt:XAddr>` + f.server.URL + `/onvif/media1</trt:XAddr></trt:Media>`
+	if f.Media == 1 || f.Media == 3 || f.CapabilitiesMedia1Path != "" {
+		media = `<trt:Media><trt:XAddr>` + f.server.URL + f.capabilitiesMedia1Path() + `</trt:XAddr></trt:Media>`
 	}
-	return `<?xml version="1.0"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:trt="http://www.onvif.org/ver10/media/wsdl">` +
+	if f.CapabilitiesMedia2Path != "" {
+		media += `<tt:Media2><tt:XAddr>` + f.server.URL + f.CapabilitiesMedia2Path + `</tt:XAddr></tt:Media2>`
+	}
+	return `<?xml version="1.0"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">` +
 		`<s:Body><tds:GetCapabilitiesResponse><tds:Capabilities>` + media +
 		`</tds:Capabilities></tds:GetCapabilitiesResponse></s:Body></s:Envelope>`
 }

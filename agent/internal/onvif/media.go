@@ -38,6 +38,19 @@ type Service struct {
 	Endpoint  *url.URL
 }
 
+// AdvertisedService is one service endpoint a camera advertised, with the raw
+// XAddr exactly as it appeared. Endpoint is set only when the XAddr passed the
+// camera-address rule; Problem records why it was refused otherwise. It is a
+// diagnostic record, never a followed redirect.
+type AdvertisedService struct {
+	Name      string
+	Namespace string
+	Version   ServiceVersion
+	XAddr     string
+	Endpoint  *url.URL
+	Problem   string
+}
+
 // Services is the discovered service set. A nil entry means the camera did not
 // advertise that service. It is a capability record, not a claim about support.
 type Services struct {
@@ -45,13 +58,31 @@ type Services struct {
 	Media1 *url.URL
 	Media2 *url.URL
 	PTZ    *url.URL
-	// Incomplete records that GetServices was absent or malformed and the
-	// media endpoint came from GetCapabilities instead.
+	// AdvertisedMedia1 and AdvertisedMedia2 are the endpoints GetServices
+	// named. They are kept beside the resolved endpoints so a probe can show
+	// both and a non-default path is never mistaken for the device service.
+	AdvertisedMedia1 *url.URL
+	AdvertisedMedia2 *url.URL
+	// CapabilitiesMedia1 is the endpoint GetCapabilities advertised for Media.
+	// ONVIF has no Media2 child in every schema, so CapabilitiesMedia2 is nil
+	// on most cameras.
+	CapabilitiesMedia1 *url.URL
+	CapabilitiesMedia2 *url.URL
+	// Incomplete records that GetServices was absent or malformed, or named no
+	// media service, and at least one media endpoint came from GetCapabilities.
 	Incomplete bool
+	// ServiceListError and CapabilitiesError keep the failing call's safe
+	// detail. A probe reports them; a normal collection still proceeds when one
+	// of the two discovery sources answered.
+	ServiceListError  string
+	CapabilitiesError string
 }
 
 // MediaService returns the selected media service. Media2 is preferred when
-// both are advertised (ADR 0037 and the ONVIF compatibility strategy).
+// both are advertised (ADR 0037 and the ONVIF compatibility strategy). The
+// resolved endpoints put GetCapabilities first, because a camera may echo the
+// device service path in GetServices while its media operations live at a
+// different path.
 func (s Services) MediaService() (ServiceVersion, *url.URL, bool) {
 	if s.Media2 != nil {
 		return Media2, s.Media2, true
@@ -62,122 +93,245 @@ func (s Services) MediaService() (ServiceVersion, *url.URL, bool) {
 	return 0, nil, false
 }
 
-// DiscoverServices reads GetServices without authentication and falls back to
-// GetCapabilities/Media/XAddr when the camera omits or malforms GetServices.
-// An XAddr with another host, user information or a non-HTTP scheme is
-// discarded, never followed.
+// DiscoverServices reads GetServices and GetCapabilities and resolves the
+// media endpoints. GetCapabilities is always read, not only as a fallback: a
+// camera that advertises the device service path for media in GetServices but
+// the real media path in GetCapabilities is common enough to be the rule. An
+// XAddr with another host, user information or a non-HTTP scheme is discarded,
+// never followed.
 func (d *Device) DiscoverServices(ctx context.Context) (Services, error) {
 	if err := d.ensureActive(ctx); err != nil {
 		return Services{}, err
 	}
 	services := Services{}
+	var serviceErr error
+	serviceList := []AdvertisedService{}
 	body := `<tds:GetServices><tds:IncludeCapability>false</tds:IncludeCapability></tds:GetServices>`
-	data, err := d.call(ctx, "service list", body, false)
-	if err == nil {
-		var envelope servicesEnvelope
-		if xml.Unmarshal(data, &envelope) == nil && envelope.Body.GetServicesResponse != nil {
-			for _, service := range envelope.Body.GetServicesResponse.Services {
-				namespace := strings.TrimSpace(service.Namespace)
-				if service.XAddr == "" {
-					continue
+	if data, err := d.call(ctx, "service list", body, false); err == nil {
+		serviceList = serviceListAdvertisement(data, d.allowed)
+	} else {
+		serviceErr = err
+		services.ServiceListError = ErrorDetail(err)
+	}
+	for _, service := range serviceList {
+		switch service.Namespace {
+		case deviceNamespace:
+			services.Device = service.Endpoint
+		case media1Namespace:
+			services.AdvertisedMedia1 = service.Endpoint
+		case media2Namespace:
+			services.AdvertisedMedia2 = service.Endpoint
+		case ptzNamespace:
+			services.PTZ = service.Endpoint
+		}
+	}
+
+	capabilities, capErr := d.CapabilityServices(ctx)
+	if capErr != nil {
+		services.CapabilitiesError = ErrorDetail(capErr)
+	} else {
+		for _, capability := range capabilities {
+			switch localName(capability.Name) {
+			case "Device":
+				if services.Device == nil {
+					services.Device = capability.Endpoint
 				}
-				endpoint, endpointErr := ValidateEndpoint(service.XAddr, d.allowed)
-				if endpointErr != nil {
-					continue
-				}
-				switch namespace {
-				case deviceNamespace:
-					services.Device = endpoint
-				case media1Namespace:
-					services.Media1 = endpoint
-				case media2Namespace:
-					services.Media2 = endpoint
-				case ptzNamespace:
-					services.PTZ = endpoint
+			case "Media":
+				services.CapabilitiesMedia1 = capability.Endpoint
+			case "Media2":
+				services.CapabilitiesMedia2 = capability.Endpoint
+			case "PTZ":
+				if services.PTZ == nil {
+					services.PTZ = capability.Endpoint
 				}
 			}
 		}
 	}
-	if services.Media1 == nil && services.Media2 == nil {
-		services.Incomplete = true
-		capabilities, capErr := d.capabilities(ctx)
-		if capErr == nil {
-			if capabilities.DeviceXAddr != nil {
-				services.Device = capabilities.DeviceXAddr
-			}
-			if capabilities.MediaXAddr != nil {
-				services.Media1 = capabilities.MediaXAddr
-			}
-			if capabilities.PTZXAddr != nil {
-				services.PTZ = capabilities.PTZXAddr
-			}
-		} else if err == nil {
-			err = capErr
-		}
+
+	// GetCapabilities wins for the media endpoint. GetServices remains the
+	// fallback when the capabilities response omits the service.
+	services.Media1 = services.CapabilitiesMedia1
+	if services.Media1 == nil {
+		services.Media1 = services.AdvertisedMedia1
 	}
+	services.Media2 = services.CapabilitiesMedia2
+	if services.Media2 == nil {
+		services.Media2 = services.AdvertisedMedia2
+	}
+	services.Incomplete = serviceErr != nil || (services.AdvertisedMedia1 == nil && services.AdvertisedMedia2 == nil)
+
 	if services.Media1 == nil && services.Media2 == nil {
-		if err != nil {
-			return services, err
+		if serviceErr != nil {
+			return services, serviceErr
+		}
+		if capErr != nil {
+			return services, capErr
 		}
 		return services, operationError(KindRefused, "service list", "the camera does not advertise a media service")
 	}
 	return services, nil
 }
 
+// CapabilityServices reads GetCapabilities without authentication and returns
+// every service endpoint it advertises, in the camera's order. The raw XAddr is
+// preserved for the maintainer report.
+func (d *Device) CapabilityServices(ctx context.Context) ([]AdvertisedService, error) {
+	return d.capabilityServices(ctx, false)
+}
+
+func (d *Device) capabilityServices(ctx context.Context, authenticated bool) ([]AdvertisedService, error) {
+	if err := d.ensureActive(ctx); err != nil {
+		return nil, err
+	}
+	data, err := d.callAtAction(ctx, d.active, "capabilities list", deviceAction+"GetCapabilities", `<tds:GetCapabilities/>`, authenticated)
+	if err != nil {
+		return nil, err
+	}
+	services := capabilityAdvertisement(data, d.allowed)
+	if services == nil {
+		return nil, operationError(KindRefused, "capabilities list", "the camera did not return its capabilities")
+	}
+	return services, nil
+}
+
+// ServiceList reads GetServices without authentication and returns every
+// advertised service entry. It is the diagnostic counterpart to the discovery
+// merge, kept separate so a probe can print exactly what answered.
+func (d *Device) ServiceList(ctx context.Context) ([]AdvertisedService, error) {
+	if err := d.ensureActive(ctx); err != nil {
+		return nil, err
+	}
+	body := `<tds:GetServices><tds:IncludeCapability>false</tds:IncludeCapability></tds:GetServices>`
+	data, err := d.call(ctx, "service list", body, false)
+	if err != nil {
+		return nil, err
+	}
+	return serviceListAdvertisement(data, d.allowed), nil
+}
+
+// serviceListAdvertisement decodes GetServices. An invalid XAddr is kept with
+// its raw value and Problem so the probe can show why it was discarded.
 type servicesEnvelope struct {
 	Body struct {
 		GetServicesResponse *struct {
 			Services []struct {
 				Namespace string `xml:"Namespace"`
 				XAddr     string `xml:"XAddr"`
+				Version   struct {
+					Major int `xml:"Major"`
+					Minor int `xml:"Minor"`
+				} `xml:"Version"`
 			} `xml:"Service"`
 		} `xml:"GetServicesResponse"`
-		GetCapabilitiesResponse *capabilitiesFullResponse `xml:"GetCapabilitiesResponse"`
-		Fault                   *soapFault                `xml:"Fault"`
+		Fault *soapFault `xml:"Fault"`
 	} `xml:"Body"`
 }
 
-type capabilitiesFullResponse struct {
-	Capabilities struct {
-		Device struct {
-			XAddr string `xml:"XAddr"`
-		} `xml:"Device"`
-		Media struct {
-			XAddr string `xml:"XAddr"`
-		} `xml:"Media"`
-		PTZ struct {
-			XAddr string `xml:"XAddr"`
-		} `xml:"PTZ"`
-	} `xml:"Capabilities"`
-}
-
-type capabilityEndpoints struct {
-	DeviceXAddr *url.URL
-	MediaXAddr  *url.URL
-	PTZXAddr    *url.URL
-}
-
-func (d *Device) capabilities(ctx context.Context) (capabilityEndpoints, error) {
-	data, err := d.call(ctx, "capabilities list", `<tds:GetCapabilities/>`, false)
-	if err != nil {
-		return capabilityEndpoints{}, err
-	}
+func serviceListAdvertisement(data []byte, allowed netip.Addr) []AdvertisedService {
 	var envelope servicesEnvelope
-	if err := xml.Unmarshal(data, &envelope); err != nil || envelope.Body.GetCapabilitiesResponse == nil {
-		return capabilityEndpoints{}, operationError(KindRefused, "capabilities list", "the camera did not return its capabilities")
+	if xml.Unmarshal(data, &envelope) != nil || envelope.Body.GetServicesResponse == nil {
+		return nil
 	}
-	response := envelope.Body.GetCapabilitiesResponse
-	endpoints := capabilityEndpoints{}
-	if response.Capabilities.Device.XAddr != "" {
-		endpoints.DeviceXAddr, _ = ValidateEndpoint(response.Capabilities.Device.XAddr, d.allowed)
+	services := make([]AdvertisedService, 0, len(envelope.Body.GetServicesResponse.Services))
+	for _, service := range envelope.Body.GetServicesResponse.Services {
+		entry := AdvertisedService{Namespace: strings.TrimSpace(service.Namespace), XAddr: service.XAddr}
+		entry.Name = localName(entry.Namespace)
+		if entry.Namespace == media2Namespace {
+			entry.Version = Media2
+		}
+		if strings.TrimSpace(service.XAddr) == "" {
+			entry.Problem = "the camera did not advertise an address"
+			services = append(services, entry)
+			continue
+		}
+		endpoint, endpointErr := ValidateEndpoint(service.XAddr, allowed)
+		if endpointErr != nil {
+			entry.Problem = endpointErr.Error()
+		} else {
+			entry.Endpoint = endpoint
+		}
+		services = append(services, entry)
 	}
-	if response.Capabilities.Media.XAddr != "" {
-		endpoints.MediaXAddr, _ = ValidateEndpoint(response.Capabilities.Media.XAddr, d.allowed)
+	return services
+}
+
+// xmlNode is a namespace-agnostic view of one XML element. The camera's
+// namespace prefixes vary, so the capability walk matches local names.
+type xmlNode struct {
+	XMLName xml.Name
+	Content string    `xml:",chardata"`
+	Nodes   []xmlNode `xml:",any"`
+}
+
+// capabilityAdvertisement returns every service category under GetCapabilities
+// that carries an XAddr, including ones the client does not use, with the raw
+// address. It returns nil when the response is not a capabilities answer.
+func capabilityAdvertisement(data []byte, allowed netip.Addr) []AdvertisedService {
+	var root xmlNode
+	if xml.Unmarshal(data, &root) != nil {
+		return nil
 	}
-	if response.Capabilities.PTZ.XAddr != "" {
-		endpoints.PTZXAddr, _ = ValidateEndpoint(response.Capabilities.PTZ.XAddr, d.allowed)
+	response := findNode(root, "GetCapabilitiesResponse")
+	if response == nil {
+		return nil
 	}
-	return endpoints, nil
+	capabilities := findNode(*response, "Capabilities")
+	if capabilities == nil {
+		return nil
+	}
+	services := make([]AdvertisedService, 0, 8)
+	collectCapabilities(*capabilities, &services, "")
+	for index := range services {
+		if services[index].XAddr == "" {
+			services[index].Problem = "the camera did not advertise an address"
+			continue
+		}
+		endpoint, err := ValidateEndpoint(services[index].XAddr, allowed)
+		if err != nil {
+			services[index].Problem = err.Error()
+			continue
+		}
+		services[index].Endpoint = endpoint
+	}
+	return services
+}
+
+func collectCapabilities(node xmlNode, services *[]AdvertisedService, prefix string) {
+	for _, child := range node.Nodes {
+		name := child.XMLName.Local
+		if name == "Extension" || name == "Extensions" {
+			collectCapabilities(child, services, prefix+name+"/")
+			continue
+		}
+		xaddr := findNode(child, "XAddr")
+		if xaddr == nil {
+			continue
+		}
+		*services = append(*services, AdvertisedService{
+			Name:  prefix + name,
+			XAddr: strings.TrimSpace(xaddr.Content),
+		})
+	}
+}
+
+func findNode(node xmlNode, name string) *xmlNode {
+	for index := range node.Nodes {
+		if node.Nodes[index].XMLName.Local == name {
+			return &node.Nodes[index]
+		}
+		if found := findNode(node.Nodes[index], name); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func localName(namespace string) string {
+	namespace = strings.TrimSuffix(strings.TrimSpace(namespace), "/")
+	if index := strings.LastIndex(namespace, "/"); index >= 0 {
+		return namespace[index+1:]
+	}
+	return namespace
 }
 
 // SecurityCapabilities is the Device service authentication advertisement. It
@@ -243,6 +397,10 @@ type MediaProfile struct {
 	SourceToken  string
 	StreamURI    string
 	SnapshotURI  string
+	// StreamScheme is the scheme the camera used in its stream URI, lower
+	// case. It is recorded even when the URI is rejected, so a TLS-only camera
+	// reports a specific reason instead of a transport failure.
+	StreamScheme string
 	// StreamReason records why a URI is absent for this profile.
 	StreamReason   string
 	SnapshotReason string
@@ -547,6 +705,43 @@ func mediaURIResult(envelope mediaURIEnvelope) string {
 	return ""
 }
 
+// UnsupportedSchemeError is the typed failure for a stream URI whose scheme
+// the schema cannot carry. The collector uses it to report a TLS-only camera
+// as its own reason rather than as an unreachable camera.
+type UnsupportedSchemeError struct {
+	Scheme string
+}
+
+func (e *UnsupportedSchemeError) Error() string {
+	if e == nil {
+		return "the camera returned a stream URI with an unsupported scheme"
+	}
+	if e.Scheme == "rtsps" {
+		return "the camera returned a TLS RTSP (rtsps) stream URI, which Bittern does not store"
+	}
+	return "the camera returned a stream URI with the " + e.Scheme + " scheme, which Bittern does not store"
+}
+
+// StreamScheme returns the lower-case scheme of a camera URI without parsing
+// the rest of it. An unreadable URI returns an empty scheme.
+func StreamScheme(raw string) string {
+	raw = strings.TrimSpace(raw)
+	index := strings.Index(raw, "://")
+	if index <= 0 {
+		return ""
+	}
+	return strings.ToLower(raw[:index])
+}
+
+// SchemeOf returns the scheme carried by an UnsupportedSchemeError.
+func SchemeOf(err error) (string, bool) {
+	var schemeError *UnsupportedSchemeError
+	if errors.As(err, &schemeError) {
+		return schemeError.Scheme, true
+	}
+	return "", false
+}
+
 // ReduceRTSPURI validates a camera-returned RTSP URI and returns the path and
 // query the schema stores. It rejects another host, user information, a
 // fragment, a non-RTSP scheme, a port that differs from the configured RTSP
@@ -557,7 +752,7 @@ func ReduceRTSPURI(raw string, allowed netip.Addr, rtspPort int) (string, error)
 		return "", errors.New("the camera returned an unreadable stream URI")
 	}
 	if parsed.Scheme != "rtsp" {
-		return "", errors.New("the camera returned a stream URI with an unsupported scheme")
+		return "", &UnsupportedSchemeError{Scheme: strings.ToLower(parsed.Scheme)}
 	}
 	if parsed.User != nil {
 		return "", errors.New("the camera returned a stream URI with user information")

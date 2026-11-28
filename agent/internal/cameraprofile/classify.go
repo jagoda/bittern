@@ -30,6 +30,37 @@ type Classification struct {
 	// by an earlier profile. They are evidence of duplicate profiles, not
 	// separate streams.
 	Collapsed []string
+	// Rejected records every profile that did not become a stream and the
+	// reason, in token order. A camera that rejects all of them reports these
+	// reasons instead of a transport failure.
+	Rejected []ProfileRejection
+}
+
+// ProfileRejection is one advertised profile and why it is not usable. Token
+// and Reason contain no credential and no complete URI.
+type ProfileRejection struct {
+	Token  string
+	Reason string
+}
+
+const (
+	RejectMissingToken    = "missing profile token"
+	RejectMissingEncoder  = "missing encoder configuration"
+	RejectNoEncoding      = "no encoding reported"
+	RejectUnusableCodec   = "not an H.264 or H.265 encoding"
+	RejectNoResolution    = "no usable resolution reported"
+	RejectResolutionLarge = "resolution is larger than the schema allows"
+	RejectNoStreamURI     = "no stream URI returned"
+	RejectTokenTooLong    = "profile token is longer than the schema allows"
+)
+
+// RejectionText describes one rejected profile without a URI or a secret.
+func (r ProfileRejection) String() string {
+	token := strings.TrimSpace(r.Token)
+	if token == "" {
+		token = "a profile with no token"
+	}
+	return token + ": " + r.Reason
 }
 
 // Classify applies the ADR 0037 mapping to advertised profiles:
@@ -52,26 +83,36 @@ func Classify(profiles []onvif.MediaProfile) Classification {
 	ordered := append([]onvif.MediaProfile(nil), profiles...)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Token < ordered[j].Token })
 	eligible := make([]onvif.MediaProfile, 0, len(ordered))
+	classification := Classification{}
 	for _, profile := range ordered {
-		if eligibleProfile(profile) {
-			eligible = append(eligible, profile)
+		if reason := ineligibleReason(profile); reason != "" {
+			classification.Rejected = append(classification.Rejected, ProfileRejection{
+				Token:  profile.Token,
+				Reason: reason,
+			})
+			continue
 		}
+		eligible = append(eligible, profile)
 	}
-	classification := Classification{Eligible: len(eligible)}
+	classification.Eligible = len(eligible)
 	if len(eligible) == 0 {
 		return classification
 	}
 
 	// The stream URI is the identity. Keep the first profile by token for each
 	// URI; a shared encoder token must not collapse two different URIs.
-	seenURIs := make(map[string]bool, len(eligible))
+	seenURIs := make(map[string]string, len(eligible))
 	streams := make([]onvif.MediaProfile, 0, len(eligible))
 	for _, profile := range eligible {
-		if seenURIs[profile.StreamURI] {
+		if firstToken, seen := seenURIs[profile.StreamURI]; seen {
 			classification.Collapsed = append(classification.Collapsed, profile.Token)
+			classification.Rejected = append(classification.Rejected, ProfileRejection{
+				Token:  profile.Token,
+				Reason: "duplicate stream URI of " + firstToken,
+			})
 			continue
 		}
-		seenURIs[profile.StreamURI] = true
+		seenURIs[profile.StreamURI] = profile.Token
 		streams = append(streams, profile)
 	}
 	sort.SliceStable(streams, func(i, j int) bool {
@@ -96,25 +137,44 @@ func Classify(profiles []onvif.MediaProfile) Classification {
 }
 
 func eligibleProfile(profile onvif.MediaProfile) bool {
-	if strings.TrimSpace(profile.Token) == "" || strings.TrimSpace(profile.EncoderToken) == "" {
-		return false
+	return ineligibleReason(profile) == ""
+}
+
+// ineligibleReason returns the first reason a profile cannot become a stream.
+// The order matches the checks the classifier always applied; the reason is new
+// so a rejected profile is explained instead of silently dropped.
+func ineligibleReason(profile onvif.MediaProfile) string {
+	if strings.TrimSpace(profile.Token) == "" {
+		return RejectMissingToken
 	}
-	if len([]rune(profile.Token)) > 128 || len([]rune(profile.EncoderToken)) > 128 {
-		return false
+	if len([]rune(profile.Token)) > 128 {
+		return RejectTokenTooLong
 	}
-	if profile.Width > 16384 || profile.Height > 16384 {
-		return false
+	if strings.TrimSpace(profile.EncoderToken) == "" {
+		return RejectMissingEncoder
+	}
+	if len([]rune(profile.EncoderToken)) > 128 {
+		return RejectMissingEncoder
+	}
+	if strings.TrimSpace(profile.Encoding) == "" {
+		return RejectNoEncoding
 	}
 	if _, ok := profile.NormalizedEncoding(); !ok {
-		return false
+		return RejectUnusableCodec + " (" + strings.TrimSpace(profile.Encoding) + ")"
 	}
-	if profile.WidthHeight() <= 0 {
-		return false
+	if profile.Width <= 0 || profile.Height <= 0 {
+		return RejectNoResolution
+	}
+	if profile.Width > 16384 || profile.Height > 16384 {
+		return RejectResolutionLarge
 	}
 	if profile.StreamURI == "" {
-		return false
+		if strings.TrimSpace(profile.StreamReason) != "" {
+			return strings.TrimSpace(profile.StreamReason)
+		}
+		return RejectNoStreamURI
 	}
-	return true
+	return ""
 }
 
 func lessProfile(left, right onvif.MediaProfile) bool {

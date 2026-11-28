@@ -27,12 +27,15 @@ func TestCameraProfileVocabularyHasAnOwnerAction(t *testing.T) {
 		{CameraProfileSubUnverified, "could not verify", "subtype=1"},
 		{CameraProfileONVIFDisabled, "does not answer ONVIF", "Turn on ONVIF"},
 		{CameraProfileSignInRejected, "refused the sign-in", "sign-in"},
-		{CameraProfileNoMediaService, "does not offer", "stream settings"},
-		{CameraProfileNoProfile, "did not list", "stream settings"},
-		{CameraProfileNoStream, "did not return", "stream settings"},
+		{CameraProfileNoMediaService, "does not offer", "media or ONVIF profile service"},
+		{CameraProfileNoProfile, "did not list", "H.264 or H.265"},
+		{CameraProfileNoStream, "no usable stream address", "stream address"},
+		{CameraProfileProfilesRejected, "none is usable", "H.264 or H.265"},
+		{CameraProfileRTSPSUnsupported, "encrypted", "unencrypted"},
+		{CameraProfileMediaUnavailable, "answers ONVIF", "stream settings service"},
 		{CameraProfileUnreachable, "could not reach", "power"},
 		{CameraProfileClockUnavailable, "clock", "clock"},
-		{CameraProfileMalformed, "could not read", "stream settings"},
+		{CameraProfileMalformed, "could not read", "firmware"},
 		{CameraProfileNotProbed, "not read", ""},
 	}
 	for _, testCase := range cases {
@@ -62,6 +65,9 @@ func TestOneStreamReasonsAreSpecificAndDistinct(t *testing.T) {
 		CameraProfileOneProfile,
 		CameraProfileProfilesShareURI,
 		CameraProfileSubUnverified,
+		CameraProfileProfilesRejected,
+		CameraProfileRTSPSUnsupported,
+		CameraProfileMediaUnavailable,
 	}
 	seen := make(map[string]bool, len(states))
 	for _, state := range states {
@@ -77,6 +83,19 @@ func TestOneStreamReasonsAreSpecificAndDistinct(t *testing.T) {
 			t.Fatalf("%s repeats another state's reason: %q", state, section.Detail)
 		}
 		seen[section.Detail] = true
+	}
+}
+
+func TestCameraProfileSectionCarriesPerProfileReasons(t *testing.T) {
+	section := cameraProfileSection(&CameraProfileHealth{
+		State:   CameraProfileProfilesRejected,
+		Reasons: []string{"Main: missing encoder configuration", "Sub: no stream URI returned"},
+	})
+	if len(section.Reasons) != 2 || section.Reasons[0] != "Main: missing encoder configuration" {
+		t.Fatalf("reasons = %v", section.Reasons)
+	}
+	if !strings.Contains(section.Detail, "none is usable") {
+		t.Fatalf("detail = %q", section.Detail)
 	}
 }
 

@@ -38,6 +38,9 @@ instead of copying that evidence.
 - A quirk needs an id, evidence and a test. A quirk candidate is not a quirk and is not applied.
 - Do not put credentials, complete stream URLs with user information, serial numbers, MAC addresses,
   or site identifiers in this file. Profile tokens and model names are allowed.
+- Read a row with `sudo bittern camera probe <camera>`. The command is read-only, prints the redacted
+  call trace, and is documented in [the diagnosis runbook](../runbooks/camera-onvif-diagnosis.md).
+  A probe output is not evidence until the model and firmware are recorded beside it.
 - Update a row in the same change that fixes or documents its quirk, and link the test, fixture or
   field run that proves the row.
 
@@ -79,12 +82,16 @@ assumption. A vendor document is not evidence that a specific unit answered a sp
 
 ## How to fill a row
 
-1. Record the vendor, model, firmware and hardware id from an authenticated `GetDeviceInformation`.
-   If the call fails, the row stays `unknown` for identity and cannot link a quirk.
+1. Run `sudo bittern camera probe <camera>` and keep its redacted report with the run record. Record
+   the vendor, model, firmware and hardware id from the report's `GetDeviceInformation` step. If the
+   call fails, the row stays `unknown` for identity and cannot link a quirk. Do not copy the serial
+   number.
 2. Record every service from `GetServices`, and every `XAddr` from `GetCapabilities`. Mark a service
-   present only when it answered; do not infer it from the model.
+   present only when it answered; do not infer it from the model. The media calls must use the
+   `GetCapabilities` `Media` URL; a `GetServices` media URL that repeats the device service path is a
+   camera defect to record, not the endpoint to follow.
 3. Record the media service that was authoritative. If both were advertised, record both and say
-   which produced the stream URI.
+   which produced the stream URI. Record the resolved media URL, not only the device service URL.
 4. Record the authentication method and the account type. Never the credential, the nonce or the
    `Authorization` header.
 5. Record each eligible profile with its token, encoding, resolution, frame rate limit and bitrate
@@ -131,6 +138,11 @@ class are implemented as protocol rules. Reolink's port 8000 is a documented def
 steps, not client adjustments.
 
 ## What the matrix does not decide
+
+A camera that returns only `rtsps://` stream URIs is recorded with the stored reason
+`rtsps-unsupported`. The schema stores a path, not a scheme or a TLS port, and the renderer builds
+`rtsp://`; the stream is not usable through the manual floor either. [OQ-51](../open-questions.md#oq-51)
+records the work to carry TLS RTSP and is not a licence to half-implement it.
 
 OQ-10 remains open. This file does not decide the support policy, the minimum firmware, or whether a
 model is sold with the appliance. It records evidence so those decisions can be made without relying

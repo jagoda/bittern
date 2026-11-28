@@ -1454,6 +1454,12 @@ func TestCameraListShowsManagedFieldsAndActions(t *testing.T) {
 			Recording: status.SectionOK,
 			LastSeen:  &seen,
 			Detail:    "Frigate returned a picture",
+			Profiles: status.CameraProfileSection{
+				State:   status.CameraProfileProfilesRejected,
+				Detail:  "ONVIF listed profiles for this camera, but none is usable, so Bittern has one stream.",
+				Action:  "Turn on an H.264 or H.265 video profile in the camera's own settings, then run setup again.",
+				Reasons: []string{"Main: missing encoder configuration", "Sub: no stream URI returned"},
+			},
 		}},
 	}}}
 	server, client := newTestServer(t, Options{Status: fixedStatus{document: document}})
@@ -1476,6 +1482,8 @@ func TestCameraListShowsManagedFieldsAndActions(t *testing.T) {
 		"Picture received",
 		"Recording",
 		"14 Nov 2026, 12:00 UTC",
+		"Stream profile reasons",
+		"Main: missing encoder configuration; Sub: no stream URI returned",
 		"Enabled",
 		"/ui/cameras/front_door/edit",
 		"/ui/cameras/front_door/snapshot",
