@@ -231,7 +231,8 @@ func classifyRecovery(status RecoveryStatus, request Request, journal *Journal) 
 		status.Detail = "the update service is running"
 		return status
 	}
-	if status.Failure != nil && configFailureRule(status.Failure.Rule) {
+	if status.Failure != nil && (status.Request || status.Journal) &&
+		failureIsRelevant(status.Failure, request, journal) && configFailureRule(status.Failure.Rule) {
 		status.State = RecoveryHelperFailure
 		status.Action = RecoveryActionActiveBundle
 		status.Reason = status.Failure.Rule
@@ -280,6 +281,31 @@ func classifyRecovery(status RecoveryStatus, request Request, journal *Journal) 
 	status.State = RecoveryNone
 	status.Action = RecoveryActionNone
 	return status
+}
+
+// failureIsRelevant rejects a durable failure record that predates the request
+// or journal it would explain. A record left by an earlier request must not
+// relabel a newer one. An unparseable timestamp is kept as relevant so a
+// malformed record is not silently ignored.
+func failureIsRelevant(failure *HelperFailure, request Request, journal *Journal) bool {
+	if failure == nil {
+		return false
+	}
+	recorded, err := time.Parse(time.RFC3339, failure.RecordedAt)
+	if err != nil {
+		return true
+	}
+	if request.RequestID != "" {
+		if requested, parseErr := time.Parse(time.RFC3339, request.RequestedAt); parseErr == nil && recorded.Before(requested) {
+			return false
+		}
+	}
+	if journal != nil && journal.CreatedAt != "" {
+		if created, parseErr := time.Parse(time.RFC3339, journal.CreatedAt); parseErr == nil && recorded.Before(created) {
+			return false
+		}
+	}
+	return true
 }
 
 func configFailureRule(rule string) bool {
@@ -333,6 +359,12 @@ func Recover(ctx context.Context, options RecoveryOptions, action RecoveryAction
 		}
 		return verifyRecovery(options, action, status, beforeHistory), nil
 	case RecoveryActionActiveBundle:
+		if !status.Request && !status.Journal {
+			_ = lock.Release()
+			return RecoveryResult{Status: RecoveryFailed, Action: action, State: status.State, Reason: "recovery.no-input",
+					Detail: "there is no saved update to run"},
+				errorf("recovery.no-input", "there is no saved update request or journal to run")
+		}
 		choice, err := options.ResolveHelper()
 		if err != nil {
 			_ = lock.Release()
@@ -697,10 +729,15 @@ func systemctlUnitState(unit string) (RecoveryUnitState, error) {
 }
 
 func systemctlAction(args ...string) error {
-	command := exec.Command("/usr/bin/systemctl", args...)
-	command.Stdout = io.Discard
-	command.Stderr = io.Discard
-	return command.Run()
+	output, err := exec.Command("/usr/bin/systemctl", args...).CombinedOutput()
+	if err != nil {
+		detail := strings.TrimSpace(string(output))
+		if detail == "" {
+			return err
+		}
+		return fmt.Errorf("%v: %s", err, detail)
+	}
+	return nil
 }
 
 // startTransientHelper starts the verified helper in its own transient unit so

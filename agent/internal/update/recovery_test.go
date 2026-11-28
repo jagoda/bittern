@@ -436,3 +436,34 @@ func TestRecordHelperOutcomeKeepsTheClassifiedReason(t *testing.T) {
 		t.Fatalf("failure = %+v, want removed after a commit", failure)
 	}
 }
+
+func TestRecoveryIgnoresAFailureRecordFromAnEarlierRequest(t *testing.T) {
+	env := newTestEnv(t)
+	writeRecoveryRequest(t, env)
+	request, err := ReadRequest(env.options.paths().request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(HelperFailurePath(env.stateRoot), HelperFailure{
+		SchemaVersion: helperFailureSchemaVersion,
+		Rule:          "config.schema-newer",
+		Message:       "an earlier helper could not read the settings",
+		RecordedAt:    "2026-11-21T12:00:00Z",
+	}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	options := recoveryOptions(env.stateRoot)
+	options.UnitState = func() (RecoveryUnitState, error) {
+		return RecoveryUnitState{Known: true, Failed: true}, nil
+	}
+	status := DetectRecovery(options)
+	if request.RequestedAt <= "2026-11-21T12:00:00Z" {
+		t.Fatalf("test request is not newer than the stale record: %s", request.RequestedAt)
+	}
+	if status.State != RecoveryRequestFailed || status.Action != RecoveryActionActiveBundle {
+		t.Fatalf("status = %+v, want request-failed/active-bundle without the stale reason", status)
+	}
+	if status.Failure != nil && status.Reason == status.Failure.Rule {
+		t.Fatalf("the stale failure rule was used: %+v", status)
+	}
+}
