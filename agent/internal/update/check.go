@@ -47,6 +47,7 @@ type CheckCandidate struct {
 	ManifestURL    string `json:"manifest_url,omitempty"`
 	SignatureURL   string `json:"signature_url,omitempty"`
 	PayloadURL     string `json:"payload_url,omitempty"`
+	PayloadSize    int64  `json:"payload_size,omitempty"`
 }
 
 // Check is the persisted channel check fact. It contains no secret and no raw
@@ -84,6 +85,8 @@ type CheckOptions struct {
 	Force            bool
 	AllowHTTP        bool
 	UID              func() int
+	// FreeSpace is a test seam for the preflight. Nil reads the real filesystem.
+	FreeSpace func(string) (uint64, error)
 }
 
 func normalizeCheckOptions(options CheckOptions) CheckOptions {

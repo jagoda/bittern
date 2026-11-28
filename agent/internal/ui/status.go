@@ -121,7 +121,7 @@ func applyMockUpdate(document *status.Document, hint string, now time.Time) {
 			AvailableVersion:    &availableVersion,
 			AvailableGeneration: &availableGeneration,
 		}
-	case "available":
+	case "available", "start-stale-request", "start-incoming-leftover", "start-busy", "start-helper", "start-space", "start-request-write", "start-source-read":
 		availableVersion := "0.1.2"
 		availableGeneration := int64(2)
 		document.Sections.Updates.AvailableVersion = &availableVersion

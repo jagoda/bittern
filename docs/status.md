@@ -342,6 +342,14 @@ greater than the committed generation. After a baseline revert,
 baseline build version, `committed_generation` stays at the newer value, and
 `last_operation.baseline` is true.
 
+A failure before the helper writes a journal is owned by the start path, not by
+the status document. The UI holds one typed `update.StartError` kind, shows one
+plain sentence and one next action, and puts the failing step and the redacted
+reason in Technical details. The kinds are `start.stale-request`,
+`start.incoming-leftover`, `start.busy`, `start.helper`, `start.space`,
+`start.request-write`, `start.source-read`, and `start.download`. They never
+change the committed state or the last operation record.
+
 The channel check record is schema 1 at mode 0644. It contains the channel, the
 check time, the result, a redacted reason, and the verified candidate version,
 generation, tag, manifest digest, key id, and source commit. A failure record

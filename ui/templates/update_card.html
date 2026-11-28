@@ -58,6 +58,7 @@
   <div class="alert" role="alert">
     <h3>{{.UpdateCard.FailureHeading}}</h3>
     <p>{{.UpdateCard.FailureReason}}</p>
+    {{if .UpdateCard.FailureAction}}<p>{{.UpdateCard.FailureAction}}</p>{{end}}
   </div>
   {{end}}
   {{if .UpdateCard.RolledBack}}

@@ -149,21 +149,22 @@ The viewport list is provisional under [OQ-26](../../docs/open-questions.md) and
 | desktop | 1280 by 800 |
 | desktop-wide | 1920 by 1080 |
 
-The manifest has 38 screens from 20 routes, so each run checks 152 route-width screens and writes
-152 default full-page screenshots, plus an `-expanded` copy for each screen with a closed
+The manifest has 45 screens from 20 routes, so each run checks 180 route-width screens and writes
+180 default full-page screenshots, plus an `-expanded` copy for each screen with a closed
 disclosure. Four fresh daemons add one status install-in-progress screenshot per width, so the
-review set is 156 images. The `landing` field on the wizard, live and status entries records which device state
-treats that screen as its default; the routing checks above use the same three states. Fifteen status variants cover the five overall states and the update card: factory
+review set is 184 images. The `landing` field on the wizard, live and status entries records which device state
+treats that screen as its default; the routing checks above use the same three states. Twenty-two status variants cover the five overall states and the update card: factory
 baseline with an offered update, up to date, update available, installing, failed, rolled back,
-offline, rate limited, and a failed check. The `live` `nine-tiles` variant sets the saved layout
+offline, rate limited, a failed check, and the seven typed update start failures. The `live` `nine-tiles` variant sets the saved layout
 cookie and reloads, so the nine-pane wall and its empty-pane controls appear at every width. The
 `live-refresh` variant opens Technical details, focuses
 its summary, marks a table scroll region, and waits for two real update-card polls. It then aborts
 the fragment request, asserts the disclosure, focus, scroll, and card content are unchanged, and
 writes `status-live-reconnect-<width>x<height>.png` with the reconnecting notice visible. A separate
-fresh daemon per width starts an install and asserts the URL, a page marker, the navigation count and
-the progress card, then writes `status-update-install-<width>x<height>.png`. The rollback
-confirmation has a target and a no-target variant.
+fresh daemon per width clicks Check for updates and then Install update, asserting the URL, a page
+marker, the navigation count, one card with no page-level structure inside it, and the progress card.
+It writes `status-update-install-<width>x<height>.png`. The rollback confirmation has a target and a
+no-target variant.
 Each form factor has two sizes so a layout that only breaks at one end of
 its range is caught: two phone widths for the narrow end and two desktop widths for the wide end.
 The 360 width is the BIT-020 scope floor and the 390 width is the current acceptance width.
@@ -215,7 +216,7 @@ the floor, so a control that matches both a 44 role and the floor gets 44. The s
 A failure names the role and the measured size, for example `a "Refresh now" is 99x32, below the
 44x44 navigation target`. A control in the floor role between 24 and 43 warns instead, so an inline
 prose link stays visible as advisory without failing the run. The current templates have no inline
-prose links, so a clean run reports 0 failures and 0 warnings across the 152 route-width screens; the
+prose links, so a clean run reports 0 failures and 0 warnings across the 180 route-width screens; the
 state links and every back link are in a 44 role.
 
 `routes.json` covers every `Responsive` row in `agent/internal/ui/routes.go`, plus all five status

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"bittern.invalid/agent/internal/auth"
 	"bittern.invalid/agent/internal/status"
+	"bittern.invalid/agent/internal/update"
 )
 
 type fakeUpdateService struct {
@@ -341,5 +343,99 @@ func assertNotContains(t *testing.T, body string, values ...string) {
 		if strings.Contains(body, value) {
 			t.Errorf("page contains %q", value)
 		}
+	}
+}
+
+func TestUpdateStartFailuresNameTheStepReasonAndAction(t *testing.T) {
+	cases := []struct {
+		kind    string
+		primary string
+		step    string
+		action  string
+	}{
+		{
+			kind:    update.StartStaleRequest,
+			primary: "Bittern found an update request from an earlier attempt and could not clear it.",
+			step:    "clearing the previous update request",
+			action:  "Check for updates again to replace the request, then try again. If it still fails, restart the appliance.",
+		},
+		{
+			kind:    update.StartIncomingLeftover,
+			primary: "Bittern found a leftover download from an earlier attempt and could not remove it.",
+			step:    "clearing an earlier download",
+			action:  "Restart the appliance to clear the leftover download, then try again. If it still fails, contact support with the technical details.",
+		},
+		{
+			kind:    update.StartBusy,
+			primary: "Another update or configuration change is already running.",
+			step:    "checking for another operation",
+			action:  "Wait for it to finish, then try again.",
+		},
+		{
+			kind:    update.StartHelper,
+			primary: "Bittern could not start the update on the appliance.",
+			step:    "starting the update service",
+			action:  "Restart the appliance and try again. If it still fails, contact support with the technical details.",
+		},
+		{
+			kind:    update.StartSpace,
+			primary: "The appliance does not have enough free space for this update.",
+			step:    "checking free space",
+			action:  "Free space on the appliance, then try again.",
+		},
+		{
+			kind:    update.StartRequestWrite,
+			primary: "Bittern could not save the update request.",
+			step:    "saving the update request",
+			action:  "Restart the appliance and try again. If it still fails, contact support with the technical details.",
+		},
+		{
+			kind:    update.StartSourceRead,
+			primary: "Bittern could not read the downloaded update.",
+			step:    "reading the downloaded update",
+			action:  "Check for updates again to download a fresh copy, then try again.",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.kind, func(t *testing.T) {
+			cause := errors.New("raw reason for " + testCase.kind)
+			err := update.NewStartError(testCase.kind, cause, "reason %s password=hunter2", testCase.kind)
+			progress := startFailureProgress(err)
+			if progress.Failure != testCase.primary {
+				t.Fatalf("primary = %q, want %q", progress.Failure, testCase.primary)
+			}
+			if progress.FailureAction != testCase.action {
+				t.Fatalf("action = %q, want %q", progress.FailureAction, testCase.action)
+			}
+			if progress.FailureStep != testCase.step {
+				t.Fatalf("step = %q, want %q", progress.FailureStep, testCase.step)
+			}
+			if !strings.Contains(progress.FailureDetail, testCase.kind) {
+				t.Fatalf("detail = %q, want the typed reason %s", progress.FailureDetail, testCase.kind)
+			}
+			if strings.Contains(progress.FailureDetail, "hunter2") || !strings.Contains(progress.FailureDetail, "[REDACTED]") {
+				t.Fatalf("detail was not redacted: %q", progress.FailureDetail)
+			}
+
+			server, client := newTestServer(t, Options{
+				Status:      fixedStatusProvider{document: MockStatusDocument("ready|available", testNow)},
+				Updates:     &fakeUpdateService{progress: progress},
+				MockPreview: true,
+			})
+			pageStatus, body := getPage(t, client, server.URL+"/ui/status")
+			if pageStatus != http.StatusOK {
+				t.Fatalf("status page: %d", pageStatus)
+			}
+			assertContains(t, body,
+				testCase.primary,
+				testCase.action,
+				"Technical details",
+				"Update start failing step",
+				testCase.step,
+				"Update start reported reason",
+				testCase.kind,
+				"[REDACTED]",
+			)
+		})
 	}
 }

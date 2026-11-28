@@ -392,7 +392,7 @@ func (h *handler) showStatus(w http.ResponseWriter, r *http.Request) {
 		UpdateFragmentURL: BasePath + "/status/updates/fragment" + query,
 		StatusQuery:       query,
 		StatusRefresh:     h.statusRefresh(document),
-		UpdateCard:        h.updateCard(document),
+		UpdateCard:        h.updateCardFor(r, document),
 		MockPreview:       h.preview,
 		StateOptions:      mockStateOptions(document.State),
 	})
@@ -406,7 +406,7 @@ func (h *handler) showStatusFragment(w http.ResponseWriter, r *http.Request) {
 		UpdateFragmentURL: BasePath + "/status/updates/fragment" + query,
 		StatusQuery:       query,
 		StatusRefresh:     h.statusRefresh(document),
-		UpdateCard:        h.updateCard(document),
+		UpdateCard:        h.updateCardFor(r, document),
 		MockPreview:       h.preview,
 		StateOptions:      mockStateOptions(document.State),
 	})
@@ -418,7 +418,7 @@ func (h *handler) showUpdateFragment(w http.ResponseWriter, r *http.Request) {
 		Status:        document,
 		StatusQuery:   h.statusQuery(r, document.State),
 		StatusRefresh: h.statusRefresh(document),
-		UpdateCard:    h.updateCard(document),
+		UpdateCard:    h.updateCardFor(r, document),
 		MockPreview:   h.preview,
 	})
 }

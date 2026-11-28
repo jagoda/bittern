@@ -300,6 +300,36 @@ async function runLiveRefreshCheck({ page, width, result }) {
   }
 }
 
+async function checkInPlaceCard(page, label, result) {
+  const state = await page.evaluate(() => {
+    const card = document.getElementById("update-card");
+    const outside = document.getElementById("status-summary-heading");
+    const nested = card
+      ? card.querySelectorAll(
+          "body, head, main, #status-panel, .status-grid, .page-shell, h1, .lede",
+        )
+      : [];
+    return {
+      cards: document.querySelectorAll("#update-card").length,
+      nestedPage: nested.length,
+      outsideMarker: outside ? outside.dataset.inPlaceMarker : "",
+      actions: Boolean(card && card.querySelector("#update-card-actions")),
+    };
+  });
+  if (state.cards !== 1) {
+    result.failures.push(`${label} left ${state.cards} update cards`);
+  }
+  if (state.nestedPage !== 0) {
+    result.failures.push(`${label} put page-level structure inside the update card`);
+  }
+  if (state.outsideMarker !== "keep") {
+    result.failures.push(`${label} replaced the marker outside the update card`);
+  }
+  if (!state.actions) {
+    result.failures.push(`${label} lost the update card actions region`);
+  }
+}
+
 async function runUpdateInstallCheck({ page, width, baseURL, results }) {
   const label = `${width.name} status install in place`;
   const result = {
@@ -324,6 +354,20 @@ async function runUpdateInstallCheck({ page, width, baseURL, results }) {
     await waitForPage(page);
     const start = await page.evaluate(() => {
       window.__installMarker = "keep";
+      const marker = document.getElementById("status-summary-heading");
+      if (marker) {
+        marker.dataset.inPlaceMarker = "keep";
+      }
+      window.__updateCheckDone = false;
+      document.body.addEventListener("htmx:afterRequest", (event) => {
+        const responseURL =
+          event.detail.xhr && event.detail.xhr.responseURL
+            ? event.detail.xhr.responseURL
+            : "";
+        if (responseURL.includes("/ui/status/updates/check")) {
+          window.__updateCheckDone = true;
+        }
+      });
       return { url: document.location.href };
     });
     let navigations = 0;
@@ -331,6 +375,11 @@ async function runUpdateInstallCheck({ page, width, baseURL, results }) {
       if (frame === page.mainFrame()) navigations += 1;
     };
     page.on("framenavigated", onNavigation);
+    await page.getByRole("button", { name: "Check for updates" }).click();
+    await page.waitForFunction(() => window.__updateCheckDone, null, {
+      timeout: 15_000,
+    });
+    await checkInPlaceCard(page, "check for updates", result);
     await page.getByRole("button", { name: "Install update" }).click();
     await page.waitForFunction(
       () => {
@@ -376,6 +425,7 @@ async function runUpdateInstallCheck({ page, width, baseURL, results }) {
     if (state.installButton) {
       result.failures.push("install left an install button while the update is running");
     }
+    await checkInPlaceCard(page, "install", result);
     await page.screenshot({ path: screenshot, fullPage: true });
     result.screenshot = true;
   } catch (error) {

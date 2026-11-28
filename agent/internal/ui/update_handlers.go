@@ -13,35 +13,54 @@ func (h *handler) checkForUpdate(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), updateActionTimeout)
 	defer cancel()
 	_ = h.updates.Check(ctx)
-	if updateRequestIsInline(r) {
-		h.renderUpdateCard(w, r)
-		return
-	}
-	http.Redirect(w, r, h.statusURL(r), http.StatusSeeOther)
+	h.respondUpdateAction(w, r)
 }
 
 func (h *handler) startUpdateInstall(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), updateActionTimeout)
 	defer cancel()
 	_ = h.updates.StartInstall(ctx)
+	h.respondUpdateAction(w, r)
+}
+
+// respondUpdateAction is the only response path for an update card action that
+// acts in place. An HX request can receive the card fragment and nothing else;
+// a normal form post keeps the POST-redirect-GET path to the full status page.
+// A new in-place action cannot accidentally render the status page into the
+// card because the fragment branch has no page template.
+func (h *handler) respondUpdateAction(w http.ResponseWriter, r *http.Request) {
 	if updateRequestIsInline(r) {
-		h.renderUpdateCard(w, r)
+		h.renderUpdateCardFragment(w, r)
 		return
 	}
 	http.Redirect(w, r, h.statusURL(r), http.StatusSeeOther)
 }
 
-// renderUpdateCard answers an in-place install or check with the whole card, so
-// progress appears where the action was and the page does not navigate. The
-// ordinary POST path still redirects to status for a browser without HTMX.
-func (h *handler) renderUpdateCard(w http.ResponseWriter, r *http.Request) {
+// respondUpdateNavigation keeps an action that navigates, such as the rollback
+// confirmation, out of an in-place swap. An HX client is told to load the full
+// status page; a normal form post follows the same redirect.
+func (h *handler) respondUpdateNavigation(w http.ResponseWriter, r *http.Request) {
+	target := h.statusURL(r)
+	if isHXRequest(r) {
+		w.Header().Set("HX-Redirect", target)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// renderUpdateCardFragment answers an in-place action with the card only, so
+// progress appears where the action was and the page does not navigate.
+func (h *handler) renderUpdateCardFragment(w http.ResponseWriter, r *http.Request) {
 	document := h.buildStatus(r)
+	query := h.statusQuery(r, document.State)
 	h.render(w, r, http.StatusOK, "update-card", pageData{
-		Status:        document,
-		StatusQuery:   h.statusQuery(r, document.State),
-		StatusRefresh: h.statusRefresh(document),
-		UpdateCard:    h.updateCard(document),
-		MockPreview:   h.preview,
+		Status:            document,
+		UpdateFragmentURL: BasePath + "/status/updates/fragment" + query,
+		StatusQuery:       query,
+		StatusRefresh:     h.statusRefresh(document),
+		UpdateCard:        h.updateCardFor(r, document),
+		MockPreview:       h.preview,
 	})
 }
 
@@ -55,7 +74,7 @@ func (h *handler) showUpdateRollback(w http.ResponseWriter, r *http.Request) {
 		Title:        "Roll back update",
 		Status:       document,
 		StatusQuery:  h.statusQuery(r, document.State),
-		UpdateCard:   h.updateCard(document),
+		UpdateCard:   h.updateCardFor(r, document),
 		MockPreview:  h.preview,
 		StateOptions: mockStateOptions(document.State),
 	})
@@ -63,7 +82,7 @@ func (h *handler) showUpdateRollback(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) startUpdateRollback(w http.ResponseWriter, r *http.Request) {
 	document := h.buildStatus(r)
-	view := h.updateCard(document)
+	view := h.updateCardFor(r, document)
 	if !view.CanRollback {
 		http.Redirect(w, r, h.statusURL(r), http.StatusSeeOther)
 		return
@@ -71,5 +90,5 @@ func (h *handler) startUpdateRollback(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), updateActionTimeout)
 	defer cancel()
 	_ = h.updates.StartRollback(ctx)
-	http.Redirect(w, r, h.statusURL(r), http.StatusSeeOther)
+	h.respondUpdateNavigation(w, r)
 }

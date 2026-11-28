@@ -3,6 +3,8 @@ package update
 import (
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"bittern.invalid/agent/internal/oplock"
@@ -29,22 +31,41 @@ func PrepareHandoff(stateRoot, sourcePath string, now time.Time) (Handoff, error
 	p := options.paths()
 	cleaned, err := validateSourceDirectory(sourcePath)
 	if err != nil {
-		return Handoff{}, err
+		return Handoff{}, NewStartError(StartSourceRead, err, "%v", err)
 	}
 	lock, err := oplock.Acquire(p.lock)
 	if err != nil {
-		return Handoff{}, err
+		return Handoff{}, startLockError(err)
 	}
 	defer func() { _ = lock.Release() }()
 
 	journal, err := readJournal(p.journal)
 	if err != nil {
-		return Handoff{}, err
+		return Handoff{}, NewStartError(StartStaleRequest, err, "read the active update journal: %v", err)
 	}
 	request, requestErr := ReadRequest(p.request)
 	requestPresent := requestErr == nil
 	if requestErr != nil && !errors.Is(requestErr, os.ErrNotExist) {
-		return Handoff{}, requestErr
+		return Handoff{}, NewStartError(StartStaleRequest, requestErr, "read the pending update request: %v", requestErr)
+	}
+
+	if journal == nil {
+		if requestPresent && request.SourcePath != cleaned {
+			if !staleRequestIsIncoming(stateRoot, request) {
+				cause := errorf("request.conflict", "the pending request %s names source %s, not %s; cancel it before starting %s", p.request, request.SourcePath, cleaned, cleaned)
+				return Handoff{}, NewStartError(StartStaleRequest, cause, "%s", cause.Message)
+			}
+			if err := cleanIncomingExcept(stateRoot, cleaned); err != nil {
+				return Handoff{}, err
+			}
+			if err := RemoveRequest(p.request); err != nil {
+				return Handoff{}, NewStartError(StartStaleRequest, err, "remove the stale update request %s: %v", p.request, err)
+			}
+			requestPresent = false
+		}
+		if err := cleanIncomingExcept(stateRoot, cleaned); err != nil {
+			return Handoff{}, err
+		}
 	}
 
 	if journal != nil {
@@ -52,20 +73,21 @@ func PrepareHandoff(stateRoot, sourcePath string, now time.Time) (Handoff, error
 			return Handoff{}, errorf("request.source-unknown", "the active journal %s does not record its source path; resolve it before starting a new request", journal.OperationID)
 		}
 		if journal.SourcePath != cleaned {
-			return Handoff{}, errorf("request.busy", "an update operation %s is active from %s; finish it before starting %s", journal.OperationID, journal.SourcePath, cleaned)
+			cause := errorf("request.busy", "an update operation %s is active from %s; finish it before starting %s", journal.OperationID, journal.SourcePath, cleaned)
+			return Handoff{}, NewStartError(StartBusy, cause, "%s", cause.Message)
 		}
 		if requestPresent {
 			if request.SourcePath != cleaned {
 				// The journal source is authoritative. A request record that
 				// disagrees with it is a stale trigger, not a second source.
 				if err := RemoveRequest(p.request); err != nil {
-					return Handoff{}, err
+					return Handoff{}, NewStartError(StartStaleRequest, err, "remove the stale update request %s: %v", p.request, err)
 				}
 				request, err = NewRequest(cleaned, now)
 				if err != nil {
-					return Handoff{}, err
+					return Handoff{}, NewStartError(StartSourceRead, err, "%v", err)
 				}
-				if err := WriteRequest(p.request, request); err != nil {
+				if err := writeHandoffRequest(p.request, request); err != nil {
 					return Handoff{}, err
 				}
 				return Handoff{Request: request, Interrupted: true, OperationID: journal.OperationID, WroteRequest: true}, nil
@@ -74,9 +96,9 @@ func PrepareHandoff(stateRoot, sourcePath string, now time.Time) (Handoff, error
 		}
 		request, err = NewRequest(cleaned, now)
 		if err != nil {
-			return Handoff{}, err
+			return Handoff{}, NewStartError(StartSourceRead, err, "%v", err)
 		}
-		if err := WriteRequest(p.request, request); err != nil {
+		if err := writeHandoffRequest(p.request, request); err != nil {
 			return Handoff{}, err
 		}
 		return Handoff{Request: request, Interrupted: true, OperationID: journal.OperationID, WroteRequest: true}, nil
@@ -84,18 +106,32 @@ func PrepareHandoff(stateRoot, sourcePath string, now time.Time) (Handoff, error
 
 	if requestPresent {
 		if request.SourcePath != cleaned {
-			return Handoff{}, errorf("request.conflict", "the pending request %s names source %s, not %s; cancel it before starting %s", p.request, request.SourcePath, cleaned, cleaned)
+			cause := errorf("request.conflict", "the pending request %s names source %s, not %s; cancel it before starting %s", p.request, request.SourcePath, cleaned, cleaned)
+			return Handoff{}, NewStartError(StartStaleRequest, cause, "%s", cause.Message)
 		}
 		return Handoff{Request: request}, nil
 	}
 	request, err = NewRequest(cleaned, now)
 	if err != nil {
-		return Handoff{}, err
+		return Handoff{}, NewStartError(StartSourceRead, err, "%v", err)
 	}
-	if err := WriteRequest(p.request, request); err != nil {
+	if err := writeHandoffRequest(p.request, request); err != nil {
 		return Handoff{}, err
 	}
 	return Handoff{Request: request, WroteRequest: true}, nil
+}
+
+func staleRequestIsIncoming(stateRoot string, request Request) bool {
+	return request.Source == RequestSourceLocalFile &&
+		IsIncomingSource(stateRoot, request.SourcePath) &&
+		strings.HasPrefix(filepath.Base(request.SourcePath), incomingCandidatePrefix)
+}
+
+func writeHandoffRequest(path string, request Request) error {
+	if err := WriteRequest(path, request); err != nil {
+		return NewStartError(StartRequestWrite, err, "write the update request %s: %v", path, err)
+	}
+	return nil
 }
 
 // CancelRequest removes a pending request that has no journal. It refuses while

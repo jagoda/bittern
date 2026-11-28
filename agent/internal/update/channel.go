@@ -158,6 +158,7 @@ func discoverCandidate(client *http.Client, options CheckOptions, channel string
 		ManifestURL:    manifestAsset.BrowserDownloadURL,
 		SignatureURL:   signatureAsset.BrowserDownloadURL,
 		PayloadURL:     payloadAsset.BrowserDownloadURL,
+		PayloadSize:    manifest.Payload.Size,
 	}
 	return candidate, CheckUpdateAvailable, "", nil
 }
@@ -354,6 +355,11 @@ func FetchCandidate(options CheckOptions, candidate CheckCandidate) (string, err
 	if candidate.Generation <= 0 || candidate.Tag == "" || candidate.ManifestURL == "" || candidate.SignatureURL == "" || candidate.PayloadURL == "" {
 		return "", errorf("channel.candidate", "the check result has no complete candidate")
 	}
+	if candidate.PayloadSize > 0 {
+		if err := PreflightDownloadWith(options.StateRoot, candidate.PayloadSize, options.FreeSpace); err != nil {
+			return "", err
+		}
+	}
 	cfg, _, err := loadConfig(options.ConfigPath)
 	if err != nil {
 		return "", err
@@ -399,6 +405,9 @@ func FetchCandidate(options CheckOptions, candidate CheckCandidate) (string, err
 		return "", err
 	}
 	if err := validatePayloadFilename(manifest.Payload.Filename); err != nil {
+		return "", err
+	}
+	if err := PreflightDownloadWith(options.StateRoot, manifest.Payload.Size, options.FreeSpace); err != nil {
 		return "", err
 	}
 	if manifest.Payload.Size <= 0 || manifest.Payload.Size > checkPayloadLimit {
@@ -465,7 +474,5 @@ func IsIncomingSource(stateRoot, sourcePath string) bool {
 }
 
 func removeIncomingSource(stateRoot, sourcePath string) {
-	if IsIncomingSource(stateRoot, sourcePath) {
-		_ = os.RemoveAll(sourcePath)
-	}
+	_ = RemoveIncomingSource(stateRoot, sourcePath)
 }

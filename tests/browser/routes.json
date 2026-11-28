@@ -212,6 +212,48 @@
     "variant": "update-check-failed"
   },
   {
+    "route": "status",
+    "path": "/ui/status?update=start-stale-request",
+    "flow": "auth",
+    "variant": "update-start-stale-request"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=start-incoming-leftover",
+    "flow": "auth",
+    "variant": "update-start-incoming-leftover"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=start-busy",
+    "flow": "auth",
+    "variant": "update-start-busy"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=start-helper",
+    "flow": "auth",
+    "variant": "update-start-helper"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=start-space",
+    "flow": "auth",
+    "variant": "update-start-space"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=start-request-write",
+    "flow": "auth",
+    "variant": "update-start-request-write"
+  },
+  {
+    "route": "status",
+    "path": "/ui/status?update=start-source-read",
+    "flow": "auth",
+    "variant": "update-start-source-read"
+  },
+  {
     "route": "update-rollback",
     "path": "/ui/status/updates/rollback",
     "flow": "auth"

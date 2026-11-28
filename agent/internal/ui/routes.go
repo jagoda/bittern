@@ -16,6 +16,9 @@ type route struct {
 	// desktop widths. Redirects, actions, fragments, and static files are not
 	// full pages.
 	Responsive bool
+	// InPlace is true when the action updates the status update card without a
+	// navigation. Its HX response must be the card fragment only.
+	InPlace bool
 	// Status is the response status the route's route-test request returns.
 	Status  int
 	Handler func(*handler) http.Handler
@@ -211,11 +214,11 @@ var uiRoutes = []route{
 	},
 	{
 		Name: "updates-check", Method: http.MethodPost, Pattern: "/ui/status/updates/check",
-		Auth: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).checkForUpdate),
+		Auth: true, InPlace: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).checkForUpdate),
 	},
 	{
 		Name: "updates-install", Method: http.MethodPost, Pattern: "/ui/status/updates/install",
-		Auth: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).startUpdateInstall),
+		Auth: true, InPlace: true, Status: http.StatusSeeOther, Handler: routeHandler((*handler).startUpdateInstall),
 	},
 	{
 		Name: "update-rollback", Method: http.MethodGet, Pattern: "/ui/status/updates/rollback",

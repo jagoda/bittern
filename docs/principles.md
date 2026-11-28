@@ -33,6 +33,7 @@ tracker.
 | UX-12 | A passing geometric check is not proof a screen looks right | Level 2 hardware run, BIT-020 |
 | UX-13 | Read every changed screen's full-page screenshots before human review | Level 2 hardware run, BIT-033 |
 | UX-14 (candidate) | Live updates must not disturb state the user owns | Live refresh bench report, BIT-044 |
+| UX-15 | An in-place control must not replace the page with itself | Status install field report, 2026-11-28 |
 | EN-1 | A bug fix carries the regression test that reproduces it | GK41 bug ledger, ADR 0012 |
 | EN-2 | Tests assert structure and values, not user-facing copy, because copy is expected to change | QEMU adoption fixture note, BIT-035 |
 | EN-3 | A regression test starts from the state that failed in the field, and says so | Reboot failures, field parity |
@@ -110,16 +111,18 @@ does not apply gets a one-line reason in the review.
 
 ### UX-2 A failure names the step, the effect, and the next action
 
-- Date: 2026-11-15
+- Date: 2026-11-15, revised 2026-11-28
 - Rule: Every probe, operation, and error ends in a named state with the failing step, the effect,
   and the next action. Do not reduce a failure to a bare badge, a generic error, or a page with no
-  next step.
+  next step. An error the owner cannot act on is a defect in the product, not in the owner. Put the
+  technical reason in Technical details and give the primary copy one action the owner can take.
 - Evidence: [camera wizard UX findings](notes/2026-11-15-camera-wizard-ux-findings.md) findings 1 and
   5 record an ambiguous failed layer and a blocking apply with no current step. The
   [GK41 hardware run](notes/2026-11-15-gk41-hardware-run.md) records "Apply progress invisible" in
-  the bug ledger. [BIT-014](plan/implementation-plan.md#bit-014-long-running-operation-progress)
-  owns the operation state, and the [status contract](status.md) defines the overall and section
-  states.
+  the bug ledger. The [update start finding](notes/2026-11-28-update-start-diagnosability.md) records
+  a field failure whose only copy was "The update could not start", with no cause or next action.
+  [BIT-014](plan/implementation-plan.md#bit-014-long-running-operation-progress) owns the operation
+  state, and the [status contract](status.md) defines the overall and section states.
 - Do: "Apply failed at `health: lan0-address`. The previous generation is running. Check the link and
   retry."
 - Don't: Show `failed` with no step, or hold a review request open for minutes with no state.
@@ -352,6 +355,26 @@ does not apply gets a one-line reason in the review.
 - Check: The [UX review checklist](#ux-review-checklist) asks for the screenshots to be read at every
   width before human review, and [tests/browser/README.md](../tests/browser/README.md) names the
   screenshots as the implementing agent's review artifact.
+
+### UX-15 An in-place control must not replace the page with itself
+
+- Date: 2026-11-28
+- Rule: A control that acts in place may replace only its own smallest surface. An HTMX action must
+  answer with that fragment and never with the full page, and a full-page response must fail the
+  browser check instead of appearing inside the control's container.
+- Evidence: [the update start and in-place finding](notes/2026-11-28-update-start-diagnosability.md)
+  records a field report where installing an update filled only the update card and then rendered
+  the status page inside it. [ADR 0039](adr/0039-compact-pane-controls-and-in-place-status-actions.md)
+  requires check and install to act in the card without a navigation. [Pattern S14](design/patterns.md#status-page)
+  now requires the fragment-only response.
+- Do: Centralise the in-place response so every action returns the card fragment for an HX request
+  and the full page only through the normal POST-redirect-GET path.
+- Don't: Let each handler choose its own template and rely on review to notice that one returns the
+  page shell.
+- Check: The server tests in [update_action_test.go](../agent/internal/ui/update_action_test.go)
+  assert the fragment for every route marked in place and the full page for a normal post. The
+  status install browser check asserts the card has no page-level structure and the marker outside
+  the card is unchanged at four widths.
 
 ### UX-14 Live updates must not disturb state the user owns
 

@@ -2,13 +2,15 @@ package ui
 
 import (
 	"context"
-	"os"
+	"errors"
+	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"bittern.invalid/agent/internal/redact"
 	"bittern.invalid/agent/internal/status"
 	"bittern.invalid/agent/internal/timezone"
 	"bittern.invalid/agent/internal/update"
@@ -35,13 +37,16 @@ type UpdateService interface {
 // helper writes its journal, or a plain failure when the request could not be
 // started. Once the journal exists the status document carries the step.
 type UpdateProgress struct {
-	Active       bool
-	Kind         string
-	Label        string
-	Failed       bool
-	Failure      string
-	CheckFailed  bool
-	CheckMessage string
+	Active        bool
+	Kind          string
+	Label         string
+	Failed        bool
+	Failure       string
+	FailureAction string
+	FailureDetail string
+	FailureStep   string
+	CheckFailed   bool
+	CheckMessage  string
 }
 
 // UnavailableUpdateService is the safe default for a handler without the
@@ -105,6 +110,7 @@ type AgentUpdateService struct {
 	ConfigPath string
 	Now        func() time.Time
 	Systemctl  func(args ...string) error
+	FreeSpace  func(path string) (uint64, error)
 
 	mu       sync.Mutex
 	progress UpdateProgress
@@ -198,19 +204,33 @@ func (s *AgentUpdateService) install() {
 		s.failPreparation("The offered version is not newer than the installed version. Check for updates again.")
 		return
 	}
+	if err := update.PrepareStart(s.StateRoot); err != nil {
+		s.failStart(err)
+		return
+	}
+	if check.Available.PayloadSize > 0 {
+		if err := update.PreflightDownloadWith(s.StateRoot, check.Available.PayloadSize, s.FreeSpace); err != nil {
+			s.failStart(err)
+			return
+		}
+	}
 	s.setProgress(UpdateProgress{Active: true, Kind: "install", Label: "Downloading the update"})
 	source, err := update.FetchCandidate(options, *check.Available)
 	if err != nil {
-		s.failPreparation("Bittern could not download the update. Check the connection and try again.")
+		var startErr *update.StartError
+		if !errors.As(err, &startErr) {
+			err = update.NewStartError(update.StartDownload, err, "%v", err)
+		}
+		s.failStart(err)
 		return
 	}
 	handoff, err := update.PrepareHandoff(s.StateRoot, source, s.now())
 	if err != nil {
-		if update.IsIncomingSource(s.StateRoot, source) {
-			_ = update.RemoveRequest(update.RequestPath(s.StateRoot))
-			_ = removeIncomingSource(s.StateRoot, source)
-		}
-		s.failPreparation(updateStartFailure(err))
+		// PrepareHandoff writes only as its last step, so an error cannot leave a
+		// request from this attempt. Do not remove a request that may belong to
+		// an active journal or another queued action.
+		_ = update.RemoveIncomingSource(s.StateRoot, source)
+		s.failStart(err)
 		return
 	}
 	if err := s.systemctl("start", "--no-block", updateUnit); err != nil {
@@ -218,9 +238,9 @@ func (s *AgentUpdateService) install() {
 			_ = update.RemoveRequest(update.RequestPath(s.StateRoot))
 		}
 		if update.IsIncomingSource(s.StateRoot, source) {
-			_ = removeIncomingSource(s.StateRoot, source)
+			_ = update.RemoveIncomingSource(s.StateRoot, source)
 		}
-		s.failPreparation("Bittern could not start the update. Try again.")
+		s.failStart(update.NewStartError(update.StartHelper, err, "start %s: %v", updateUnit, err))
 		return
 	}
 	s.setProgress(UpdateProgress{})
@@ -241,49 +261,107 @@ func (s *AgentUpdateService) StartRollback(_ context.Context) error {
 func (s *AgentUpdateService) rollback() {
 	handoff, err := update.PrepareRollbackHandoff(s.StateRoot, updateRollbackReason, s.now())
 	if err != nil {
-		s.failPreparation(updateStartFailure(err))
+		s.failStart(err)
 		return
 	}
 	if err := s.systemctl("start", "--no-block", updateUnit); err != nil {
 		if handoff.WroteRequest {
 			_ = update.RemoveRequest(update.RequestPath(s.StateRoot))
 		}
-		s.failPreparation("Bittern could not start the rollback. Try again.")
+		s.failStart(update.NewStartError(update.StartHelper, err, "start %s: %v", updateUnit, err))
 		return
 	}
 	s.setProgress(UpdateProgress{})
 }
 
 func (s *AgentUpdateService) failPreparation(message string) {
-	s.setProgress(UpdateProgress{Failed: true, Failure: message})
+	s.setProgress(UpdateProgress{
+		Failed:        true,
+		Failure:       message,
+		FailureAction: "Try again.",
+		FailureStep:   "starting the update",
+	})
+}
+
+type updateStartCopy struct {
+	Step    string
+	Primary string
+	Action  string
+}
+
+var updateStartCopies = map[string]updateStartCopy{
+	update.StartStaleRequest: {
+		Step:    "clearing the previous update request",
+		Primary: "Bittern found an update request from an earlier attempt and could not clear it.",
+		Action:  "Check for updates again to replace the request, then try again. If it still fails, restart the appliance.",
+	},
+	update.StartIncomingLeftover: {
+		Step:    "clearing an earlier download",
+		Primary: "Bittern found a leftover download from an earlier attempt and could not remove it.",
+		Action:  "Restart the appliance to clear the leftover download, then try again. If it still fails, contact support with the technical details.",
+	},
+	update.StartBusy: {
+		Step:    "checking for another operation",
+		Primary: "Another update or configuration change is already running.",
+		Action:  "Wait for it to finish, then try again.",
+	},
+	update.StartHelper: {
+		Step:    "starting the update service",
+		Primary: "Bittern could not start the update on the appliance.",
+		Action:  "Restart the appliance and try again. If it still fails, contact support with the technical details.",
+	},
+	update.StartSpace: {
+		Step:    "checking free space",
+		Primary: "The appliance does not have enough free space for this update.",
+		Action:  "Free space on the appliance, then try again.",
+	},
+	update.StartRequestWrite: {
+		Step:    "saving the update request",
+		Primary: "Bittern could not save the update request.",
+		Action:  "Restart the appliance and try again. If it still fails, contact support with the technical details.",
+	},
+	update.StartSourceRead: {
+		Step:    "reading the downloaded update",
+		Primary: "Bittern could not read the downloaded update.",
+		Action:  "Check for updates again to download a fresh copy, then try again.",
+	},
+	update.StartDownload: {
+		Step:    "downloading the update",
+		Primary: "Bittern could not download the update.",
+		Action:  "Check the connection and try again.",
+	},
+}
+
+func (s *AgentUpdateService) failStart(err error) {
+	s.setProgress(startFailureProgress(err))
+}
+
+func startFailureProgress(err error) UpdateProgress {
+	var startErr *update.StartError
+	if !errors.As(err, &startErr) {
+		startErr = update.NewStartError("start.unknown", err, "%v", err)
+	}
+	copy, ok := updateStartCopies[startErr.Kind]
+	if !ok {
+		copy = updateStartCopy{
+			Step:    "starting the update",
+			Primary: "Bittern could not start the update.",
+			Action:  "Try again. If it still fails, restart the appliance and contact support with the technical details.",
+		}
+	}
+	return UpdateProgress{
+		Failed:        true,
+		Failure:       copy.Primary,
+		FailureAction: copy.Action,
+		FailureStep:   copy.Step,
+		FailureDetail: redact.New().String(startErr.Error()),
+	}
 }
 
 func (s *AgentUpdateService) Progress() UpdateProgress {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.progress
-}
-
-func updateStartFailure(err error) string {
-	if err == nil {
-		return ""
-	}
-	message := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(message, "busy") || strings.Contains(message, "active"):
-		return "Another update or configuration change is running. Wait for it to finish, then try again."
-	case strings.Contains(message, "request"):
-		return "Bittern could not prepare the update request. Try again."
-	default:
-		return "Bittern could not start the update. Try again."
-	}
-}
-
-func removeIncomingSource(stateRoot, source string) error {
-	if update.IsIncomingSource(stateRoot, source) {
-		return os.RemoveAll(source)
-	}
-	return nil
 }
 
 // updateView is the template-facing update card. One state is always chosen:
@@ -319,6 +397,7 @@ type updateView struct {
 	FailedStep        string
 	FailureHeading    string
 	FailureReason     string
+	FailureAction     string
 	RolledBack        bool
 	NextUpdateRule    string
 	CanCheck          bool
@@ -328,18 +407,55 @@ type updateView struct {
 	RollbackLabel     string
 	RollbackTarget    string
 
-	TechnicalCurrent   string
-	TechnicalCommitted string
-	TechnicalRunning   string
-	TechnicalOffered   string
-	TechnicalCheck     string
-	TechnicalReason    string
-	TechnicalStep      string
-	TechnicalOperation string
+	TechnicalCurrent     string
+	TechnicalCommitted   string
+	TechnicalRunning     string
+	TechnicalOffered     string
+	TechnicalCheck       string
+	TechnicalReason      string
+	TechnicalStep        string
+	TechnicalOperation   string
+	TechnicalStartStep   string
+	TechnicalStartReason string
 }
 
 func (h *handler) updateCard(document status.Document) updateView {
 	return buildUpdateView(document, h.updates.Progress(), timezone.Load(h.timezoneName()))
+}
+
+// updateCardFor adds the preview-only start failure state to an otherwise real
+// progress value. The query hint never reaches production.
+func (h *handler) updateCardFor(r *http.Request, document status.Document) updateView {
+	progress := h.updates.Progress()
+	if h.preview {
+		if preview, ok := previewStartFailure(r.URL.Query().Get("update")); ok {
+			progress = startFailureProgress(preview)
+		}
+	}
+	return buildUpdateView(document, progress, timezone.Load(h.timezoneName()))
+}
+
+func previewStartFailure(hint string) (error, bool) {
+	kind := ""
+	switch hint {
+	case "start-stale-request":
+		kind = update.StartStaleRequest
+	case "start-incoming-leftover":
+		kind = update.StartIncomingLeftover
+	case "start-busy":
+		kind = update.StartBusy
+	case "start-helper":
+		kind = update.StartHelper
+	case "start-space":
+		kind = update.StartSpace
+	case "start-request-write":
+		kind = update.StartRequestWrite
+	case "start-source-read":
+		kind = update.StartSourceRead
+	default:
+		return nil, false
+	}
+	return update.NewStartError(kind, nil, "preview: %s", kind), true
 }
 
 func buildUpdateView(document status.Document, progress UpdateProgress, location *time.Location) updateView {
@@ -399,7 +515,13 @@ func buildUpdateView(document status.Document, progress UpdateProgress, location
 		view.Summary = progress.Failure
 		view.FailureHeading = "The update could not start"
 		view.FailureReason = progress.Failure
+		view.FailureAction = progress.FailureAction
+		view.FailedStep = progress.FailureStep
+		view.TechnicalStartStep = progress.FailureStep
+		view.TechnicalStartReason = progress.FailureDetail
 		view.CanCheck = true
+		view.CanInstall = installAvailable
+		view.InstallLabel = "Try update again"
 		return view
 	}
 	if updates.CurrentOperation != nil {

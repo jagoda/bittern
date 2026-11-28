@@ -142,9 +142,7 @@ func runUpdateInstallWith(args []string, cli *updateCLI) error {
 	}
 	handoff, err := update.PrepareHandoff(*stateRoot, source, cli.now())
 	if err != nil {
-		if update.IsIncomingSource(*stateRoot, source) {
-			_ = os.RemoveAll(source)
-		}
+		_ = update.RemoveIncomingSource(*stateRoot, source)
 		return err
 	}
 	switch {
@@ -159,9 +157,7 @@ func runUpdateInstallWith(args []string, cli *updateCLI) error {
 		if handoff.WroteRequest {
 			_ = update.RemoveRequest(update.RequestPath(*stateRoot))
 		}
-		if update.IsIncomingSource(*stateRoot, source) {
-			_ = os.RemoveAll(source)
-		}
+		_ = update.RemoveIncomingSource(*stateRoot, source)
 		return fmt.Errorf("start %s: %w", updateUnit, err)
 	}
 	if *noFollow {

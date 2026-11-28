@@ -337,6 +337,10 @@
     <dd><code>{{.UpdateCard.TechnicalStep}}</code></dd>{{end}}
     {{if .UpdateCard.TechnicalReason}}<dt>Last update reported reason</dt>
     <dd>{{.UpdateCard.TechnicalReason}}</dd>{{end}}
+    {{if .UpdateCard.TechnicalStartStep}}<dt>Update start failing step</dt>
+    <dd><code>{{.UpdateCard.TechnicalStartStep}}</code></dd>{{end}}
+    {{if .UpdateCard.TechnicalStartReason}}<dt>Update start reported reason</dt>
+    <dd>{{.UpdateCard.TechnicalStartReason}}</dd>{{end}}
     <dt>Reset state</dt>
     <dd><code>{{.Status.Sections.Reset.State}}</code></dd>
     <dt>Reset level</dt>
