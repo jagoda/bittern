@@ -479,10 +479,11 @@ async function signIn(page, adminPassword) {
 async function addCamera(page, baseURL, values) {
   try {
     await page.goto(`${baseURL}/ui/wizard/camera`, { waitUntil: "load" });
-    // The sign-in fields sit in a closed disclosure. Open it before filling,
-    // the same step a keyboard user takes.
+    // The sign-in fields sit in a closed disclosure. Open the one that owns
+    // them, the same step a keyboard user takes.
     await page
       .locator("details.advanced-settings")
+      .filter({ has: page.locator("#camera-username") })
       .evaluate((details) => { details.open = true; });
     await page.fill("#camera-name", values.name);
     await page.fill("#camera-address", values.address);
