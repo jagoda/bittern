@@ -114,9 +114,11 @@ pointer.
 
 ## What remains
 
-- The unit and launcher still arrive through the preparation kit or the image.
-  Bundle-delivered units are [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md)
-  work that is not implemented; until then a unit fix needs a kit install.
+- Unit delivery landed on 2026-11-28. A signed bundle may declare a bounded
+  `bittern-bundle-*` service or timer and the update transaction installs, enables, or disables it
+  with a snapshot and rollback. A helper or launcher unit fix is now deliverable as an app update
+  without a preparation kit reinstall. See
+  [the unit delivery note](2026-11-28-unit-delivery-manifest-v2.md).
 - The `migrate` step still runs the helper's migration code, not the candidate's
   `plan` entry point. A helper older than the document therefore records a
   no-op instead of delivering a newer migration. The candidate renderer can read

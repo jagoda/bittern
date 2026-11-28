@@ -122,6 +122,9 @@ func normalizeOptions(options Options) Options {
 	if options.StateRoot == "" {
 		options.StateRoot = defaultStateRoot
 	}
+	if options.LiveRoot == "" {
+		options.LiveRoot = "/"
+	}
 	if options.ConfigPath == "" {
 		options.ConfigPath = defaultConfigPath
 	}
@@ -151,6 +154,9 @@ func normalizeOptions(options Options) Options {
 	}
 	if options.ConfigApplier == nil {
 		options.ConfigApplier = ExecConfigApplier{}
+	}
+	if options.UnitVerifier == nil {
+		options.UnitVerifier = ExecUnitVerifier{}
 	}
 	return options
 }
@@ -340,6 +346,7 @@ func installSteps(view *config.HelperView) []Step {
 		{Key: StepPromote, Kind: kindPromote},
 		{Key: StepBackupConfig, Kind: kindBackupConfig},
 		{Key: StepBackupData, Kind: kindBackupData},
+		{Key: StepSnapshot, Kind: kindSnapshot},
 	}
 	if frigateConfigured(view) {
 		steps = append(steps, Step{Key: StepStopFrigate, Kind: kindStop, Unit: "bittern-frigate.service"})
@@ -347,6 +354,7 @@ func installSteps(view *config.HelperView) []Step {
 	steps = append(steps,
 		Step{Key: StepStopAgent, Kind: kindStop, Unit: "bitternd.service"},
 		Step{Key: StepActivate, Kind: kindActivate},
+		Step{Key: StepSubsystems, Kind: kindSubsystems},
 		Step{Key: StepMigrate, Kind: kindMigrate},
 	)
 	if frigateConfigured(view) {
@@ -375,6 +383,7 @@ func rollbackSteps(frigate bool) []Step {
 	steps = append(steps,
 		Step{Key: StepRollbackStopAgent, Kind: kindStop, Unit: "bitternd.service"},
 		Step{Key: StepRollbackPointer, Kind: kindRollbackPointer},
+		Step{Key: StepRollbackSubsystems, Kind: kindRollbackSubsystems},
 		Step{Key: StepRollbackConfig, Kind: kindRollbackConfig},
 		Step{Key: StepRollbackData, Kind: kindRollbackData},
 		Step{Key: StepRollbackStartAgent, Kind: kindStart, Unit: "bitternd.service", TimeoutSeconds: 60},
@@ -434,7 +443,7 @@ func resumeIndex(journal *Journal) (int, error) {
 
 func isLiveKind(kind string) bool {
 	switch kind {
-	case kindStop, kindStart, kindActivate, kindMigrate, kindEnsureImage, kindApplyConfig:
+	case kindStop, kindStart, kindActivate, kindSubsystems, kindMigrate, kindEnsureImage, kindApplyConfig:
 		return true
 	default:
 		return false
@@ -700,10 +709,14 @@ func (r *runner) executeStep(step Step) error {
 		return r.backupConfig()
 	case kindBackupData:
 		return r.backupData()
+	case kindSnapshot:
+		return r.snapshotSubsystems()
 	case kindStop:
 		return r.options.System.StopUnit(step.Unit)
 	case kindActivate:
 		return r.activate()
+	case kindSubsystems:
+		return r.applySubsystems()
 	case kindMigrate:
 		return r.migrate()
 	case kindEnsureImage:
@@ -731,6 +744,8 @@ func (r *runner) executeStep(step Step) error {
 		return r.rollbackVerifyPrevious()
 	case kindRollbackPointer:
 		return r.rollbackPointer()
+	case kindRollbackSubsystems:
+		return r.rollbackRestoreSubsystems()
 	case kindRollbackConfig:
 		return r.rollbackRestoreConfig()
 	case kindRollbackData:
@@ -850,6 +865,9 @@ func (r *runner) prune() error {
 		}
 	}
 	if err := removeAll(r.paths.stagingDir(r.journal.OperationID)); err != nil {
+		return err
+	}
+	if err := r.pruneSnapshots(); err != nil {
 		return err
 	}
 	return r.pruneBackups()

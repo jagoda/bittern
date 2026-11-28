@@ -25,7 +25,7 @@ const SchemaVersion = 1
 
 // UpdaterVersion is the update helper version this engine implements. It is
 // compared with a manifest's compatibility.updater_min.
-const UpdaterVersion int64 = 1
+const UpdaterVersion int64 = 2
 
 // ErrPowerLoss is returned by a test hook to model a process cut. The journal
 // is left exactly as the transaction had written it.
@@ -72,9 +72,11 @@ const (
 	StepPromote              = "promote"
 	StepBackupConfig         = "backup-config"
 	StepBackupData           = "backup-data"
+	StepSnapshot             = "snapshot"
 	StepStopFrigate          = "stop-frigate"
 	StepStopAgent            = "stop-agent"
 	StepActivate             = "activate"
+	StepSubsystems           = "subsystems"
 	StepMigrate              = "migrate"
 	StepEnsureImage          = "ensure-image"
 	StepApplyConfig          = "apply-config"
@@ -90,6 +92,7 @@ const (
 	StepRollbackStopFrigate  = "rollback-stop-frigate"
 	StepRollbackStopAgent    = "rollback-stop-agent"
 	StepRollbackPointer      = "rollback-pointer"
+	StepRollbackSubsystems   = "rollback-restore-subsystems"
 	StepRollbackConfig       = "rollback-restore-config"
 	StepRollbackData         = "rollback-restore-data"
 	StepRollbackStartAgent   = "rollback-start-agent"
@@ -114,35 +117,38 @@ const (
 // Step kinds. The key identifies the journal step, the kind selects the
 // action.
 const (
-	kindPreflight       = "preflight"
-	kindFetchManifest   = "fetch-manifest"
-	kindVerifyManifest  = "verify-manifest"
-	kindFetchPayload    = "fetch-payload"
-	kindVerifyPayload   = "verify-payload"
-	kindExtract         = "extract"
-	kindVerifyFiles     = "verify-files"
-	kindPromote         = "promote"
-	kindBackupConfig    = "backup-config"
-	kindBackupData      = "backup-data"
-	kindStop            = "stop"
-	kindStart           = "start"
-	kindActivate        = "activate"
-	kindMigrate         = "migrate"
-	kindEnsureImage     = "ensure-image"
-	kindApplyConfig     = "apply-config"
-	kindHealth          = "health"
-	kindCommit          = "commit"
-	kindPersistConfig   = "persist-config"
-	kindRecord          = "record"
-	kindPrune           = "prune"
-	kindFinish          = "finish"
-	kindRollbackVerify  = "rollback-verify-previous"
-	kindRollbackPointer = "rollback-pointer"
-	kindRollbackConfig  = "rollback-restore-config"
-	kindRollbackData    = "rollback-restore-data"
-	kindRollbackHealth  = "rollback-health"
-	kindRollbackRecord  = "rollback-record"
-	kindRollbackPrune   = "rollback-prune"
+	kindPreflight          = "preflight"
+	kindFetchManifest      = "fetch-manifest"
+	kindVerifyManifest     = "verify-manifest"
+	kindFetchPayload       = "fetch-payload"
+	kindVerifyPayload      = "verify-payload"
+	kindExtract            = "extract"
+	kindVerifyFiles        = "verify-files"
+	kindPromote            = "promote"
+	kindBackupConfig       = "backup-config"
+	kindBackupData         = "backup-data"
+	kindSnapshot           = "snapshot"
+	kindStop               = "stop"
+	kindStart              = "start"
+	kindActivate           = "activate"
+	kindSubsystems         = "subsystems"
+	kindMigrate            = "migrate"
+	kindEnsureImage        = "ensure-image"
+	kindApplyConfig        = "apply-config"
+	kindHealth             = "health"
+	kindCommit             = "commit"
+	kindPersistConfig      = "persist-config"
+	kindRecord             = "record"
+	kindPrune              = "prune"
+	kindFinish             = "finish"
+	kindRollbackVerify     = "rollback-verify-previous"
+	kindRollbackPointer    = "rollback-pointer"
+	kindRollbackSubsystems = "rollback-restore-subsystems"
+	kindRollbackConfig     = "rollback-restore-config"
+	kindRollbackData       = "rollback-restore-data"
+	kindRollbackHealth     = "rollback-health"
+	kindRollbackRecord     = "rollback-record"
+	kindRollbackPrune      = "rollback-prune"
 
 	kindManualPreflight = "manual-rollback-preflight"
 	kindManualVerify    = "manual-rollback-verify"
@@ -238,6 +244,28 @@ type UnitSystem interface {
 type UnitWaiter interface {
 	WaitUnitActive(unit string, timeout time.Duration) error
 }
+
+// UnitManager is the optional systemd surface the subsystems step uses. A
+// UnitSystem that does not implement it still has its unit files and
+// enablement links verified directly; production ExecSystem implements it so
+// daemon-reload and systemctl is-enabled are the real commands.
+type UnitManager interface {
+	DaemonReload() error
+	UnitEnabled(unit string) (bool, error)
+}
+
+// UnitVerifier accepts a staged unit file before it is written live. The
+// production verifier runs systemd-analyze verify; tests inject a structural
+// verifier when the host has no systemd tooling.
+type UnitVerifier interface {
+	VerifyUnit(name string, content []byte) error
+}
+
+// UnitVerifierFunc adapts a function to UnitVerifier.
+type UnitVerifierFunc func(name string, content []byte) error
+
+// VerifyUnit calls f.
+func (f UnitVerifierFunc) VerifyUnit(name string, content []byte) error { return f(name, content) }
 
 // Source is a bundle source. Slice one implements only a local directory.
 type Source interface {
@@ -495,6 +523,7 @@ type Result struct {
 // Options configures one update transaction.
 type Options struct {
 	StateRoot        string
+	LiveRoot         string
 	ConfigPath       string
 	FrigateConfig    string
 	Source           Source
@@ -514,6 +543,9 @@ type Options struct {
 	SecretsPath      string
 	Reason           string
 	BaselineBinary   string
+	UnitOwnerUID     int
+	UnitOwnerGID     int
+	UnitVerifier     UnitVerifier
 	ConfigApplier    ConfigApplier
 	BeforeStep       func(Step) error
 	AfterStep        func(Step) error

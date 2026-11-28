@@ -203,7 +203,7 @@ func TestUpdateRejectsSchemaTooOld(t *testing.T) {
 }
 
 func TestUpdateRejectsUpdaterTooOld(t *testing.T) {
-	runRejection(t, bundleSpec{generation: 1, mutate: func(m *release.Manifest) { m.Compatibility.UpdaterMin = 2 }}, "compatibility.updater")
+	runRejection(t, bundleSpec{generation: 1, mutate: func(m *release.Manifest) { m.Compatibility.UpdaterMin = UpdaterVersion + 1 }}, "compatibility.updater")
 }
 
 func TestUpdateRejectsPayloadSizeMismatch(t *testing.T) {

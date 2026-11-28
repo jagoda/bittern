@@ -255,6 +255,29 @@ func (s *ExecSystem) UnitActive(unit string) (bool, error) {
 	return false, fmt.Errorf("systemctl is-active %s: %s", unit, message)
 }
 
+// UnitEnabled reports whether systemd will start the unit at boot. The update
+// helper uses it to verify a bundle-declared unit after enabling or disabling
+// it; a unit that is not enabled is not an error.
+func (s *ExecSystem) UnitEnabled(unit string) (bool, error) {
+	if s.Offline {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.timeout())
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "systemctl", "is-enabled", unit).CombinedOutput()
+	state := strings.TrimSpace(string(output))
+	if err == nil {
+		return state == "enabled" || state == "enabled-runtime", nil
+	}
+	if _, ok := err.(*exec.ExitError); ok {
+		return false, nil
+	}
+	if state == "" {
+		state = err.Error()
+	}
+	return false, fmt.Errorf("systemctl is-enabled %s: %s", unit, state)
+}
+
 func (s *ExecSystem) DaemonReload() error {
 	if s.Offline {
 		return nil

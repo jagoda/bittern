@@ -34,7 +34,7 @@ func writeUpdateState(t *testing.T, stateRoot string, state update.State) {
 func writeRunningBundle(t *testing.T, stateRoot string, generation int64, version string) {
 	t.Helper()
 	manifest := &release.Manifest{
-		ManifestVersion: release.ManifestVersion,
+		ManifestVersion: release.ManifestVersionV1,
 		Kind:            release.KindAppBundle,
 		Product:         release.Product,
 		Version:         version,

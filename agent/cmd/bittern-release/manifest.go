@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,9 +29,10 @@ const manifestUsage = `usage: bittern-release manifest --payload ARCHIVE --versi
 Builds the canonical release manifest from a payload archive: the archive
 digest and size, and the regular-file list with size, SHA-256 and mode, sorted
 by path. Directories are not listed; the transaction creates parent directories.
-The archive may be a plain tar or a gzip-compressed tar. The output is written
-with the in-tree encoder and is byte-identical for the same inputs, so a second
-run is a no-op.
+The archive may be a plain tar or a gzip-compressed tar. A regular file at
+usr/lib/bittern/units/<name> adds a manifest version 2 unit entry; without one
+the manifest stays version 1. The output is written with the in-tree encoder
+and is byte-identical for the same inputs, so a second run is a no-op.
 
   --payload ARCHIVE          payload archive the manifest describes
   --version V                release version, printable ASCII
@@ -181,6 +183,11 @@ func runManifest(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
+// bundleUnitSourceDir is the build-tree convention for a bundle-declared unit.
+// The packer derives the manifest unit entry from this file, so a bundle build
+// cannot declare a unit whose digest or mode differs from the payload.
+const bundleUnitSourceDir = "usr/lib/bittern/units"
+
 // manifestSpec is the manifest metadata the caller supplies. The payload facts
 // and file list are read from the archive so the manifest and the payload
 // cannot disagree.
@@ -202,8 +209,24 @@ type manifestSpec struct {
 
 // buildManifest returns the validated manifest and its canonical bytes.
 func buildManifest(archive *payloadArchive, spec manifestSpec) (*release.Manifest, []byte, error) {
+	units, err := declaredUnits(archive)
+	if err != nil {
+		return nil, nil, err
+	}
+	if spec.Kind != release.KindAppBundle {
+		units = nil
+	}
+	version := int64(release.ManifestVersionV1)
+	var subsystems *release.Subsystems
+	if len(units) > 0 {
+		version = release.ManifestVersionV2
+		subsystems = &release.Subsystems{Units: units}
+		if spec.UpdaterMin < 2 {
+			spec.UpdaterMin = 2
+		}
+	}
 	manifest := &release.Manifest{
-		ManifestVersion: release.ManifestVersion,
+		ManifestVersion: version,
 		Kind:            spec.Kind,
 		Product:         release.Product,
 		Version:         spec.Version,
@@ -225,7 +248,8 @@ func buildManifest(archive *payloadArchive, spec manifestSpec) (*release.Manifes
 			Size:     archive.size,
 			SHA256:   archive.digest,
 		},
-		Files: archive.files,
+		Files:      archive.files,
+		Subsystems: subsystems,
 	}
 	canonical, err := manifest.Canonical()
 	if err != nil {
@@ -241,6 +265,7 @@ type payloadArchive struct {
 	size        int64
 	digest      string
 	files       []release.File
+	unitSources map[string][]byte
 	directories int64
 }
 
@@ -298,7 +323,7 @@ func readPayloadArchive(path string) (*payloadArchive, error) {
 		defer reader.Close()
 		stream = reader
 	}
-	files, directories, err := readTar(stream)
+	files, unitSources, directories, err := readTar(stream)
 	if err != nil {
 		return nil, fmt.Errorf("read the payload archive %s: %w", absolute, err)
 	}
@@ -321,13 +346,17 @@ func readPayloadArchive(path string) (*payloadArchive, error) {
 		size:        counter.count,
 		digest:      hex.EncodeToString(sum),
 		files:       files,
+		unitSources: unitSources,
 		directories: directories,
 	}, nil
 }
 
-// readTar collects the regular files from a tar stream, sorted by path.
-func readTar(reader io.Reader) ([]release.File, int64, error) {
+// readTar collects the regular files from a tar stream, sorted by path. It
+// keeps the bytes of a bundle-declared unit so the manifest can derive its
+// install action without a second archive read.
+func readTar(reader io.Reader) ([]release.File, map[string][]byte, int64, error) {
 	files := make([]release.File, 0)
+	unitSources := make(map[string][]byte)
 	directories := int64(0)
 	tarReader := tar.NewReader(reader)
 	for {
@@ -336,21 +365,22 @@ func readTar(reader io.Reader) ([]release.File, int64, error) {
 			break
 		}
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, 0, err
 		}
 		switch header.Typeflag {
 		case tar.TypeReg, tar.TypeRegA:
 			if header.Mode&^int64(0o777) != 0 {
-				return nil, 0, fmt.Errorf("the payload entry %s has mode %04o with setuid, setgid or sticky bits; only 0644-style modes are allowed",
+				return nil, nil, 0, fmt.Errorf("the payload entry %s has mode %04o with setuid, setgid or sticky bits; only 0644-style modes are allowed",
 					header.Name, header.Mode)
 			}
 			digest := sha256.New()
-			size, err := io.Copy(digest, tarReader)
+			var content bytes.Buffer
+			size, err := io.Copy(io.MultiWriter(digest, &content), tarReader)
 			if err != nil {
-				return nil, 0, err
+				return nil, nil, 0, err
 			}
 			if size != header.Size {
-				return nil, 0, fmt.Errorf("the payload entry %s is %d bytes, not the %d bytes its header declares",
+				return nil, nil, 0, fmt.Errorf("the payload entry %s is %d bytes, not the %d bytes its header declares",
 					header.Name, size, header.Size)
 			}
 			files = append(files, release.File{
@@ -359,16 +389,99 @@ func readTar(reader io.Reader) ([]release.File, int64, error) {
 				SHA256: hex.EncodeToString(digest.Sum(nil)),
 				Mode:   fmt.Sprintf("0%03o", header.Mode&0o777),
 			})
+			if pathpkg.Dir(header.Name) == bundleUnitSourceDir {
+				unitSources[header.Name] = content.Bytes()
+			}
 		case tar.TypeDir:
 			directories++
 		default:
-			return nil, 0, fmt.Errorf("the payload entry %s is not a regular file or directory; the manifest installs only regular files", header.Name)
+			return nil, nil, 0, fmt.Errorf("the payload entry %s is not a regular file or directory; the manifest installs only regular files", header.Name)
 		}
 	}
 	sort.Slice(files, func(left, right int) bool {
 		return files[left].Path < files[right].Path
 	})
-	return files, directories, nil
+	return files, unitSources, directories, nil
+}
+
+// declaredUnits turns the build-tree unit convention into manifest entries.
+// A unit in usr/lib/bittern/units is enabled when its [Install] section names
+// the one target the helper creates itself; a unit with no [Install] section or
+// no WantedBy is carried disabled. The helper still validates the same rules
+// again before it writes anything.
+func declaredUnits(archive *payloadArchive) ([]release.Unit, error) {
+	names := make([]string, 0, len(archive.unitSources))
+	for name := range archive.unitSources {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	units := make([]release.Unit, 0, len(names))
+	for _, source := range names {
+		file := release.File{}
+		for _, candidate := range archive.files {
+			if candidate.Path == source {
+				file = candidate
+				break
+			}
+		}
+		name := pathpkg.Base(source)
+		enabled, err := unitEnabled(name, string(archive.unitSources[source]))
+		if err != nil {
+			return nil, fmt.Errorf("unit %s: %w", source, err)
+		}
+		reload := true
+		units = append(units, release.Unit{
+			Name:    name,
+			Source:  source,
+			Path:    "/etc/systemd/system/" + name,
+			Mode:    file.Mode,
+			Owner:   "root:root",
+			SHA256:  file.SHA256,
+			Enabled: enabled,
+			Reload:  &reload,
+		})
+	}
+	return units, nil
+}
+
+func unitEnabled(name, content string) (bool, error) {
+	allowed := "multi-user.target"
+	if strings.HasSuffix(name, ".timer") {
+		allowed = "timers.target"
+	}
+	section := ""
+	enabled := false
+	for _, rawLine := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section = strings.ToLower(strings.TrimSpace(line[1 : len(line)-1]))
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if section != "install" {
+			continue
+		}
+		switch key {
+		case "Alias", "Also", "DefaultInstance":
+			return false, fmt.Errorf("[Install] contains %s, which a bundle unit may not use", key)
+		case "WantedBy":
+			for _, target := range strings.Fields(value) {
+				if target != allowed {
+					return false, fmt.Errorf("[Install] WantedBy=%s is not %s", target, allowed)
+				}
+				enabled = true
+			}
+		}
+	}
+	return enabled, nil
 }
 
 // writeManifest writes the canonical bytes atomically with mode 0644.

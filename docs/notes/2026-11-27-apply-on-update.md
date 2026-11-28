@@ -63,8 +63,9 @@ adds `TestStatusDocumentReportsApplyAndPendingMigration`. The QEMU update scenar
 
 ## What is not in this change
 
-- Unit delivery, the manifest v2 `subsystems` section, the dual-version verifier, and the v2
-  fixture. The `plan` and transaction-wide `snapshot` steps are also still open.
+- The `plan` step. Unit delivery, the transaction-wide `snapshot` step, the manifest v2
+  `subsystems` section, the dual-version verifier, and the v2 fixture landed on 2026-11-28 in
+  [the unit delivery note](2026-11-28-unit-delivery-manifest-v2.md).
 - The update's own `ensure-image` step still pulls the helper baseline's pin. The candidate apply's
   image step pulls the candidate pin before its Frigate check, so the running stack receives the
   candidate pin, but the two image steps are not yet merged into the ADR's `plan` step.
@@ -97,5 +98,6 @@ Two findings from the first guest run shaped the change:
 ## Next concrete step
 
 Remove the manual camera-save bridge from the live view beta runbook now that the apply-on-update
-test passes on a guest. The remaining ADR 0036 work is the manifest v2 section, unit delivery, the
-`plan` and transaction-wide `snapshot` steps, and the dual-version verifier.
+test passes on a guest. Unit delivery, the transaction-wide `snapshot` step, and manifest v2 landed on
+2026-11-28 in [the unit delivery note](2026-11-28-unit-delivery-manifest-v2.md). The remaining
+ADR 0036 work is the `plan` step and candidate migration code.

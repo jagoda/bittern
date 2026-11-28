@@ -3,10 +3,13 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -33,7 +36,10 @@ epoch. Directories are not archived; the transaction creates parent directories.
 The same tree and arguments produce byte-identical payload and manifest bytes.
 
 The manifest is built from the archive bytes, so payload.filename, size,
-sha256 and files describe exactly what the packer wrote. The packer never needs
+sha256 and files describe exactly what the packer wrote. A regular file at
+usr/lib/bittern/units/<name> is a declared bundle unit: the packer derives its
+live path, digest, mode, owner, enablement, and reload flag, and emits manifest
+version 2. Without a unit the manifest stays version 1. The packer never needs
 a private key: sign the manifest with the existing sign command as a separate
 step.
 
@@ -150,7 +156,7 @@ func runPack(args []string, stdout, stderr io.Writer) int {
 		SchemaMax:       *schemaMax,
 		UpdaterMin:      *updaterMin,
 	}
-	if err := validateTreeAsManifest(files, spec); err != nil {
+	if err := validateTreeAsManifest(absoluteTree, files, spec); err != nil {
 		return fail(stderr, "pack", "%v", err)
 	}
 	targetOut := absoluteOut
@@ -269,7 +275,7 @@ func collectTree(root string) ([]treeFile, error) {
 
 // validateTreeAsManifest applies the manifest path and mode rules before the
 // archive is written, so an unsafe tree cannot leave a payload behind.
-func validateTreeAsManifest(files []treeFile, spec manifestSpec) error {
+func validateTreeAsManifest(root string, files []treeFile, spec manifestSpec) error {
 	manifestFiles := make([]release.File, len(files))
 	for index, file := range files {
 		manifestFiles[index] = release.File{
@@ -279,8 +285,42 @@ func validateTreeAsManifest(files []treeFile, spec manifestSpec) error {
 			Mode:   fmt.Sprintf("0%03o", file.mode.Perm()),
 		}
 	}
+	units := make([]release.Unit, 0)
+	for index, file := range files {
+		if pathpkg.Dir(file.path) != bundleUnitSourceDir {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(file.path)))
+		if err != nil {
+			return fmt.Errorf("read the unit source %s: %w", file.path, err)
+		}
+		name := pathpkg.Base(file.path)
+		enabled, err := unitEnabled(name, string(content))
+		if err != nil {
+			return fmt.Errorf("unit %s: %w", file.path, err)
+		}
+		digest := sha256.Sum256(content)
+		manifestFiles[index].SHA256 = hex.EncodeToString(digest[:])
+		reload := true
+		units = append(units, release.Unit{
+			Name:    name,
+			Source:  file.path,
+			Path:    "/etc/systemd/system/" + name,
+			Mode:    fmt.Sprintf("0%03o", file.mode.Perm()),
+			Owner:   "root:root",
+			SHA256:  hex.EncodeToString(digest[:]),
+			Enabled: enabled,
+			Reload:  &reload,
+		})
+	}
+	version := int64(release.ManifestVersionV1)
+	var subsystems *release.Subsystems
+	if len(units) > 0 && spec.Kind == release.KindAppBundle {
+		version = release.ManifestVersionV2
+		subsystems = &release.Subsystems{Units: units}
+	}
 	provisional := &release.Manifest{
-		ManifestVersion: release.ManifestVersion,
+		ManifestVersion: version,
 		Kind:            spec.Kind,
 		Product:         release.Product,
 		Version:         spec.Version,
@@ -302,7 +342,8 @@ func validateTreeAsManifest(files []treeFile, spec manifestSpec) error {
 			Size:     0,
 			SHA256:   strings.Repeat("0", 64),
 		},
-		Files: manifestFiles,
+		Files:      manifestFiles,
+		Subsystems: subsystems,
 	}
 	if err := provisional.Validate(); err != nil {
 		return fmt.Errorf("the tree is not a valid application bundle: %w", err)

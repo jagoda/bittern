@@ -101,6 +101,22 @@ func (p paths) pendingMigration(operationID string) string {
 	return filepath.Join(p.pendingDir(), operationID+".json")
 }
 
+func (p paths) unitsRecord() string {
+	return filepath.Join(p.updateRoot, "units.json")
+}
+
+func (p paths) snapshotDir(operationID string) string {
+	return filepath.Join(p.updateRoot, operationID)
+}
+
+func (p paths) snapshotIndex(operationID string) string {
+	return filepath.Join(p.snapshotDir(operationID), "snapshot.json")
+}
+
+func (p paths) snapshotBlob(operationID, digest string) string {
+	return filepath.Join(p.snapshotDir(operationID), "snapshot-blob-"+digest)
+}
+
 func (p paths) applyConfigResult(operationID string) string {
 	return filepath.Join(p.updateRoot, operationID, "apply-config.json")
 }

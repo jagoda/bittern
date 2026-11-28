@@ -16,7 +16,7 @@ func TestManifestFieldRules(t *testing.T) {
 		mutate func(*Manifest)
 		rule   string
 	}{
-		{name: "manifest version", mutate: func(m *Manifest) { m.ManifestVersion = 2 }, rule: "manifest.version"},
+		{name: "manifest version", mutate: func(m *Manifest) { m.ManifestVersion = 3 }, rule: "manifest.version"},
 		{name: "kind", mutate: func(m *Manifest) { m.Kind = "bundle" }, rule: "manifest.kind"},
 		{name: "product", mutate: func(m *Manifest) { m.Product = "other" }, rule: "manifest.product"},
 		{name: "empty version", mutate: func(m *Manifest) { m.Version = "" }, rule: "manifest.version"},

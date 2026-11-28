@@ -178,6 +178,14 @@ func TestPackRejectsAnUnsafeTree(t *testing.T) {
 			},
 			want: "no regular files",
 		},
+		{
+			name: "unit target",
+			setup: func(t *testing.T, tree string) {
+				writeFile(t, filepath.Join(tree, "usr", "lib", "bittern", "units", "bittern-bundle-bad.service"),
+					[]byte("[Service]\nExecStart=/bin/true\n\n[Install]\nWantedBy=graphical.target\n"), 0o644)
+			},
+			want: "WantedBy",
+		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -288,4 +296,93 @@ func strconvOctal(mode int64) string {
 		digits[(value>>3)&0o7],
 		digits[value&0o7],
 	})
+}
+
+const packedUnitContent = `[Unit]
+Description=Bittern bundle example
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target
+`
+
+func TestPackCarriesDeclaredUnitsInManifestV2(t *testing.T) {
+	keyPath, trustDir, keyID := newReleaseKey(t)
+	tree := writeBundleTree(t)
+	source := "usr/lib/bittern/units/bittern-bundle-example.service"
+	writeFile(t, filepath.Join(tree, "usr", "lib", "bittern", "units", "bittern-bundle-example.service"), []byte(packedUnitContent), 0o644)
+	out := t.TempDir()
+	code, _, stderr := runCommand(t, "", packArgs(tree, out, keyID)...)
+	if code != exitOK {
+		t.Fatalf("pack exited %d: %s", code, stderr)
+	}
+	data := readFile(t, filepath.Join(out, "manifest.json"))
+	manifest, err := release.ParseManifest(data)
+	if err != nil {
+		t.Fatalf("the packed v2 manifest does not parse: %v", err)
+	}
+	if manifest.ManifestVersion != release.ManifestVersionV2 {
+		t.Fatalf("manifest_version = %d, want 2 when a unit is present", manifest.ManifestVersion)
+	}
+	if manifest.Compatibility.UpdaterMin != 2 {
+		t.Fatalf("updater_min = %d, want the v2 helper version 2", manifest.Compatibility.UpdaterMin)
+	}
+	if manifest.Subsystems == nil || len(manifest.Subsystems.Units) != 1 {
+		t.Fatalf("the packed manifest does not carry the unit: %+v", manifest.Subsystems)
+	}
+	unit := manifest.Subsystems.Units[0]
+	if unit.Name != "bittern-bundle-example.service" || unit.Source != source || unit.Path != "/etc/systemd/system/"+unit.Name {
+		t.Fatalf("unexpected packed unit: %+v", unit)
+	}
+	if !unit.Enabled || unit.Mode != "0644" || unit.Owner != "root:root" {
+		t.Fatalf("unexpected packed unit action: %+v", unit)
+	}
+	digest := sha256Hex([]byte(packedUnitContent))
+	if unit.SHA256 != digest {
+		t.Fatalf("unit digest = %s, want %s", unit.SHA256, digest)
+	}
+	found := false
+	for _, file := range manifest.Files {
+		if file.Path == source {
+			found = true
+			if file.SHA256 != digest || file.Mode != unit.Mode {
+				t.Fatalf("unit source file does not match the unit entry: %+v", file)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the unit source is not in the manifest files: %+v", manifest.Files)
+	}
+
+	// The signed manifest covers the unit because it is canonical manifest
+	// bytes; signing and verifying the packed manifest proves the path.
+	manifestPath := filepath.Join(out, "manifest.json")
+	code, _, stderr = runCommand(t, "", "sign", manifestPath, "--key", keyPath, "--yes")
+	if code != exitOK {
+		t.Fatalf("sign exited %d: %s", code, stderr)
+	}
+	code, _, stderr = runCommand(t, "", "verify", manifestPath, manifestPath+".sig", "--trust-dir", trustDir)
+	if code != exitOK {
+		t.Fatalf("verify rejected the v2 manifest with its unit: %d\n%s", code, stderr)
+	}
+}
+
+func TestPackKeepsManifestV1WithoutUnits(t *testing.T) {
+	_, _, keyID := newReleaseKey(t)
+	tree := writeBundleTree(t)
+	out := t.TempDir()
+	code, _, stderr := runCommand(t, "", packArgs(tree, out, keyID)...)
+	if code != exitOK {
+		t.Fatalf("pack exited %d: %s", code, stderr)
+	}
+	manifest, err := release.ParseManifest(readFile(t, filepath.Join(out, "manifest.json")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.ManifestVersion != release.ManifestVersionV1 || manifest.Subsystems != nil {
+		t.Fatalf("a bundle without units emitted version %d: %+v", manifest.ManifestVersion, manifest.Subsystems)
+	}
 }

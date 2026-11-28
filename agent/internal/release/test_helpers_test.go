@@ -10,13 +10,21 @@ import (
 	"testing"
 )
 
-const vectorDir = "../../../tests/fixtures/release/manifest-v1"
+const (
+	vectorDir   = "../../../tests/fixtures/release/manifest-v1"
+	vectorDirV2 = "../../../tests/fixtures/release/manifest-v2"
+)
 
 var testPayload = []byte("bittern-release-test-payload")
 
 func readVectorFile(t *testing.T, name string) []byte {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(vectorDir, name))
+	return readVectorFileAt(t, vectorDir, name)
+}
+
+func readVectorFileAt(t *testing.T, directory, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(directory, name))
 	if err != nil {
 		t.Fatalf("read vector %s: %v", name, err)
 	}
@@ -28,6 +36,15 @@ func vectorManifest(t *testing.T) *Manifest {
 	manifest, err := ParseManifest(readVectorFile(t, "manifest.json"))
 	if err != nil {
 		t.Fatalf("parse vector manifest: %v", err)
+	}
+	return manifest
+}
+
+func v2VectorManifest(t *testing.T) *Manifest {
+	t.Helper()
+	manifest, err := ParseManifest(readVectorFileAt(t, vectorDirV2, "manifest.json"))
+	if err != nil {
+		t.Fatalf("parse v2 vector manifest: %v", err)
 	}
 	return manifest
 }

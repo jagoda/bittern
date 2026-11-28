@@ -9,7 +9,8 @@
   `subsystems`, `apply-config`, and `persist-config` steps extend section 3, and the write boundary
   in sections 5, 7, 10, 12, and 15 is extended by the bounded subsystem allowlist. The rest of this
   note is unchanged and remains the slice zero and slice two record. Amended again on 2026-11-27 by
-  the apply-on-update and migration persistence implementation; section 3a is that delta.
+  the apply-on-update and migration persistence implementation; section 3a is that delta. Amended
+  again on 2026-11-28 by the unit delivery and manifest v2 implementation; section 3b is that delta.
 - Related: [ADR 0008](../adr/0008-updates-rollback-and-reset.md),
   [ADR 0029](../adr/0029-release-signing-and-key-custody.md),
   [ADR 0030](../adr/0030-ab-from-the-first-image.md),
@@ -223,14 +224,30 @@ than a silent half-update. A cut before `stop-frigate` is a rejection with no li
 
 ### 3a. Amendment 2026-11-27: apply-on-update and migration persistence
 
-This is the first half of [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md).
-It adds two steps to the install plan and changes `migrate`; it does not add the ADR's `plan`,
-`snapshot`, `subsystems`, unit delivery, or manifest v2 work.
+This was the first half of [ADR 0036](../adr/0036-update-bundles-deliver-subsystem-changes.md).
+It added two steps to the install plan and changed `migrate`. The 2026-11-28 amendment below adds the
+`snapshot`, `subsystems`, and `rollback-restore-subsystems` steps and manifest v2 unit delivery. The
+`plan` step remains open.
 
 | Step | Position | What it does |
 | --- | --- | --- |
 | `apply-config` | After `ensure-image`, before `start-agent` | Runs the candidate bundle's `usr/bin/bittern update apply-config`, which executes the same render, native-validate, and atomic-write pipeline a manual apply runs. The candidate binary is the renderer, so its embedded templates, defaults, target map, checkers, and pinned image are the candidate's. The step runs after activation and before commit, so a failure is a rollback. |
 | `persist-config` | After `commit`, before `record` | Restarts `bitternd.service` only when a durable pending migration exists for the committed generation, waits for the agent to consume it, and records `config-pending` when the wait ends without consumption. It never rolls a committed update back. |
+
+### 3b. Amendment 2026-11-28: unit delivery and manifest v2
+
+The install plan gains `snapshot` after `backup-data` and before `stop-frigate`, `subsystems` after
+`activate` and before `migrate`, and `rollback-restore-subsystems` after `rollback-pointer` and
+before `rollback-restore-config`. The manifest may carry version 2 with an optional `subsystems`
+section. See [the unit delivery note](2026-11-28-unit-delivery-manifest-v2.md).
+
+`snapshot` records the declared unit paths, the enablement links, the previous ownership record's
+unit paths, and `/var/lib/bittern/update/units.json` before any live change. `subsystems` writes only
+the allowlisted `/etc/systemd/system/bittern-bundle-*` files and their wants links, runs
+`systemctl daemon-reload`, enables or disables as declared, verifies the result, and writes the
+ownership record. Rollback restores the snapshot in reverse order and reloads systemd. A snapshot
+that cannot be read aborts before `live_touched`; a target that changed since the snapshot aborts the
+write.
 
 The `migrate` step now writes `/var/lib/bittern/update/pending/<operation-id>.json` instead of a file
 inside the operation directory. The record is written atomically with `fsync` and a directory

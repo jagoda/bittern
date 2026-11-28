@@ -44,6 +44,24 @@ func (s *ExecSystem) ProbeHealth(probe apply.Probe) apply.ProbeResult {
 	return s.runner().ProbeHealth(probe)
 }
 
+// DaemonReload asks systemd to read the unit files the subsystems step wrote.
+func (s *ExecSystem) DaemonReload() error {
+	if manager, ok := s.runner().(interface{ DaemonReload() error }); ok {
+		return manager.DaemonReload()
+	}
+	return errorf("system.unavailable", "the unit runner cannot run systemctl daemon-reload")
+}
+
+// UnitEnabled reports whether systemd will start the unit at boot. The
+// subsystems step compares it with the signed declaration after enabling or
+// disabling the unit.
+func (s *ExecSystem) UnitEnabled(unit string) (bool, error) {
+	if manager, ok := s.runner().(interface{ UnitEnabled(string) (bool, error) }); ok {
+		return manager.UnitEnabled(unit)
+	}
+	return false, errorf("system.unavailable", "the unit runner cannot run systemctl is-enabled")
+}
+
 // WaitUnitActive waits for a started unit to report active. It is the
 // UnitWaiter the engine uses after start-agent and start-frigate.
 func (s *ExecSystem) WaitUnitActive(unit string, timeout time.Duration) error {

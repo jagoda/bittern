@@ -8,9 +8,14 @@ import (
 	"time"
 )
 
-// Manifest format versions and field values defined by ADR 0029 section 3.
+// Manifest format versions and field values defined by ADR 0029 section 3 and
+// extended for app bundles by ADR 0036 section 5. ManifestVersion is the latest
+// field set. Release tooling emits ManifestVersionV1 unless a subsystem change
+// is present, so an older verifier keeps receiving the form it knows.
 const (
-	ManifestVersion = 1
+	ManifestVersionV1 = 1
+	ManifestVersionV2 = 2
+	ManifestVersion   = ManifestVersionV2
 
 	KindAppBundle = "app-bundle"
 	KindOSImage   = "os-image"
@@ -42,6 +47,7 @@ type Manifest struct {
 	Compatibility   Compatibility `json:"compatibility"`
 	Payload         Payload       `json:"payload"`
 	Files           []File        `json:"files"`
+	Subsystems      *Subsystems   `json:"subsystems,omitempty"`
 }
 
 // Signing names the key that signed the manifest. The key id is a selector,
@@ -75,6 +81,38 @@ type File struct {
 	Mode   string `json:"mode"`
 }
 
+// Subsystems is the optional ADR 0036 section 1 declaration. A v2 manifest may
+// omit it; when present it must declare at least one unit or migration.
+type Subsystems struct {
+	Units      []Unit      `json:"units,omitempty"`
+	Migrations []Migration `json:"migrations,omitempty"`
+}
+
+// Unit is one bundle-declared systemd unit. Path is the live destination under
+// /etc/systemd/system and Source is the payload file with the same digest and
+// mode. Reload selects whether a change triggers systemctl daemon-reload; a
+// missing value means true.
+type Unit struct {
+	Name    string `json:"name"`
+	Source  string `json:"source"`
+	Path    string `json:"path"`
+	Mode    string `json:"mode"`
+	Owner   string `json:"owner"`
+	SHA256  string `json:"sha256"`
+	Enabled bool   `json:"enabled"`
+	Reload  *bool  `json:"reload,omitempty"`
+}
+
+// Migration is one typed migration the candidate agent implements. The unit
+// delivery slice validates the declaration; the migration registry and
+// persistence path are the existing appliance.yaml migration.
+type Migration struct {
+	ID     string `json:"id"`
+	From   int64  `json:"from"`
+	To     int64  `json:"to"`
+	Target string `json:"target"`
+}
+
 var manifestFields = []string{
 	"manifest_version",
 	"kind",
@@ -89,6 +127,8 @@ var manifestFields = []string{
 	"payload",
 	"files",
 }
+
+var manifestOptionalFields = []string{"subsystems"}
 
 // ParseManifest parses and validates a manifest. The input must already be in
 // the canonical form; a document that only re-encodes to it is rejected.
@@ -113,8 +153,11 @@ func (m *Manifest) Validate() error {
 	if m == nil {
 		return errorAt("$", "manifest.missing", "the manifest is nil")
 	}
-	if m.ManifestVersion != ManifestVersion {
-		return errorAt("$.manifest_version", "manifest.version", "manifest_version %d is not %d", m.ManifestVersion, ManifestVersion)
+	if err := validateManifestVersion(m.ManifestVersion, m.Kind); err != nil {
+		return err
+	}
+	if m.ManifestVersion == ManifestVersionV1 && m.Subsystems != nil {
+		return errorAt("$.subsystems", "manifest.version-field", "manifest_version 1 does not define subsystems")
 	}
 	if m.Kind != KindAppBundle && m.Kind != KindOSImage {
 		return errorAt("$.kind", "manifest.kind", "kind %q is not %q or %q", m.Kind, KindAppBundle, KindOSImage)
@@ -146,7 +189,10 @@ func (m *Manifest) Validate() error {
 	if err := validatePayload(m.Payload); err != nil {
 		return err
 	}
-	return validateFiles(m.Files)
+	if err := validateFiles(m.Files); err != nil {
+		return err
+	}
+	return validateSubsystems(m.Subsystems, m.Files, m.Compatibility)
 }
 
 // Canonical returns the canonical bytes of a valid manifest. This is the only
@@ -165,7 +211,7 @@ func (m *Manifest) Canonical() ([]byte, error) {
 			"mode":   file.Mode,
 		}
 	}
-	return encodeValue(map[string]any{
+	value := map[string]any{
 		"manifest_version": m.ManifestVersion,
 		"kind":             m.Kind,
 		"product":          m.Product,
@@ -191,11 +237,47 @@ func (m *Manifest) Canonical() ([]byte, error) {
 			"sha256":   m.Payload.SHA256,
 		},
 		"files": files,
-	})
+	}
+	if m.Subsystems != nil {
+		units := make([]any, len(m.Subsystems.Units))
+		for index, unit := range m.Subsystems.Units {
+			encoded := map[string]any{
+				"name":    unit.Name,
+				"source":  unit.Source,
+				"path":    unit.Path,
+				"mode":    unit.Mode,
+				"owner":   unit.Owner,
+				"sha256":  unit.SHA256,
+				"enabled": unit.Enabled,
+			}
+			if unit.Reload != nil {
+				encoded["reload"] = *unit.Reload
+			}
+			units[index] = encoded
+		}
+		migrations := make([]any, len(m.Subsystems.Migrations))
+		for index, migration := range m.Subsystems.Migrations {
+			migrations[index] = map[string]any{
+				"id":     migration.ID,
+				"from":   migration.From,
+				"to":     migration.To,
+				"target": migration.Target,
+			}
+		}
+		subsystems := map[string]any{}
+		if len(units) > 0 {
+			subsystems["units"] = units
+		}
+		if len(migrations) > 0 {
+			subsystems["migrations"] = migrations
+		}
+		value["subsystems"] = subsystems
+	}
+	return encodeValue(value)
 }
 
 func decodeManifest(root map[string]any) (*Manifest, error) {
-	if err := checkObjectFields(root, "$", manifestFields); err != nil {
+	if err := checkObjectFieldsOptional(root, "$", manifestFields, manifestOptionalFields); err != nil {
 		return nil, err
 	}
 	manifest := &Manifest{}
@@ -311,6 +393,96 @@ func decodeManifest(root map[string]any) (*Manifest, error) {
 		}
 		manifest.Files = append(manifest.Files, file)
 	}
+	if rawSubsystems, present := root["subsystems"]; present {
+		subsystems, err := objectValue(rawSubsystems, "$.subsystems")
+		if err != nil {
+			return nil, err
+		}
+		if err := checkObjectFieldsOptional(subsystems, "$.subsystems", nil, []string{"units", "migrations"}); err != nil {
+			return nil, err
+		}
+		manifest.Subsystems = &Subsystems{}
+		if rawUnits, present := subsystems["units"]; present {
+			items, ok := rawUnits.([]any)
+			if !ok {
+				return nil, errorAt("$.subsystems.units", "manifest.type", "field %q is not an array", "units")
+			}
+			manifest.Subsystems.Units = make([]Unit, 0, len(items))
+			for index, item := range items {
+				unitPath := indexPath("$.subsystems.units", index)
+				object, err := objectValue(item, unitPath)
+				if err != nil {
+					return nil, err
+				}
+				if err := checkObjectFieldsOptional(object, unitPath, []string{
+					"name", "source", "path", "mode", "owner", "sha256", "enabled",
+				}, []string{"reload"}); err != nil {
+					return nil, err
+				}
+				var unit Unit
+				if unit.Name, err = stringField(object, unitPath, "name"); err != nil {
+					return nil, err
+				}
+				if unit.Source, err = stringField(object, unitPath, "source"); err != nil {
+					return nil, err
+				}
+				if unit.Path, err = stringField(object, unitPath, "path"); err != nil {
+					return nil, err
+				}
+				if unit.Mode, err = stringField(object, unitPath, "mode"); err != nil {
+					return nil, err
+				}
+				if unit.Owner, err = stringField(object, unitPath, "owner"); err != nil {
+					return nil, err
+				}
+				if unit.SHA256, err = stringField(object, unitPath, "sha256"); err != nil {
+					return nil, err
+				}
+				if unit.Enabled, err = boolField(object, unitPath, "enabled"); err != nil {
+					return nil, err
+				}
+				if rawReload, present := object["reload"]; present {
+					reload, ok := rawReload.(bool)
+					if !ok {
+						return nil, errorAt(childPath(unitPath, "reload"), "manifest.type", "field %q is not a boolean", "reload")
+					}
+					unit.Reload = &reload
+				}
+				manifest.Subsystems.Units = append(manifest.Subsystems.Units, unit)
+			}
+		}
+		if rawMigrations, present := subsystems["migrations"]; present {
+			items, ok := rawMigrations.([]any)
+			if !ok {
+				return nil, errorAt("$.subsystems.migrations", "manifest.type", "field %q is not an array", "migrations")
+			}
+			manifest.Subsystems.Migrations = make([]Migration, 0, len(items))
+			for index, item := range items {
+				migrationPath := indexPath("$.subsystems.migrations", index)
+				object, err := objectValue(item, migrationPath)
+				if err != nil {
+					return nil, err
+				}
+				if err := checkObjectFields(object, migrationPath, []string{"id", "from", "to", "target"}); err != nil {
+					return nil, err
+				}
+				var migration Migration
+				if migration.ID, err = stringField(object, migrationPath, "id"); err != nil {
+					return nil, err
+				}
+				if migration.From, err = intField(object, migrationPath, "from"); err != nil {
+					return nil, err
+				}
+				if migration.To, err = intField(object, migrationPath, "to"); err != nil {
+					return nil, err
+				}
+				if migration.Target, err = stringField(object, migrationPath, "target"); err != nil {
+					return nil, err
+				}
+				manifest.Subsystems.Migrations = append(manifest.Subsystems.Migrations, migration)
+			}
+		}
+	}
 	return manifest, nil
 }
 
@@ -335,6 +507,44 @@ func checkObjectFields(object map[string]any, path string, fields []string) erro
 		}
 	}
 	return nil
+}
+
+func checkObjectFieldsOptional(object map[string]any, path string, required, optional []string) error {
+	known := make(map[string]bool, len(required)+len(optional))
+	for _, field := range required {
+		known[field] = true
+	}
+	for _, field := range optional {
+		known[field] = true
+	}
+	keys := make([]string, 0, len(object))
+	for key := range object {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if !known[key] {
+			return errorAt(childPath(path, key), "manifest.unknown-field", "unknown field %q", key)
+		}
+	}
+	for _, field := range required {
+		if _, present := object[field]; !present {
+			return errorAt(childPath(path, field), "manifest.missing-field", "field %q is missing", field)
+		}
+	}
+	return nil
+}
+
+func boolField(object map[string]any, path, key string) (bool, error) {
+	value, present := object[key]
+	if !present {
+		return false, errorAt(childPath(path, key), "manifest.missing-field", "field %q is missing", key)
+	}
+	typed, ok := value.(bool)
+	if !ok {
+		return false, errorAt(childPath(path, key), "manifest.type", "field %q is not a boolean", key)
+	}
+	return typed, nil
 }
 
 func stringField(object map[string]any, path, key string) (string, error) {
@@ -487,6 +697,123 @@ func validateFiles(files []File) error {
 		}
 	}
 	return nil
+}
+
+func validateManifestVersion(version int64, kind string) error {
+	switch version {
+	case ManifestVersionV1:
+		return nil
+	case ManifestVersionV2:
+		if kind != KindAppBundle {
+			return errorAt("$.kind", "manifest.version-kind", "manifest_version 2 is defined for %q only", KindAppBundle)
+		}
+		return nil
+	default:
+		return errorAt("$.manifest_version", "manifest.version", "manifest_version %d is not 1 or 2", version)
+	}
+}
+
+var unitNameRE = regexp.MustCompile(`^bittern-bundle-[a-z0-9][a-z0-9-]{0,48}\.(service|timer)$`)
+var migrationIDRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+func validateSubsystems(subsystems *Subsystems, files []File, compatibility Compatibility) error {
+	if subsystems == nil {
+		return nil
+	}
+	if len(subsystems.Units) == 0 && len(subsystems.Migrations) == 0 {
+		return errorAt("$.subsystems", "manifest.subsystems-empty", "subsystems declares no units or migrations")
+	}
+	fileByPath := make(map[string]File, len(files))
+	for _, file := range files {
+		fileByPath[file.Path] = file
+	}
+	previousPath := ""
+	for index, unit := range subsystems.Units {
+		unitPath := indexPath("$.subsystems.units", index)
+		if !unitNameRE.MatchString(unit.Name) {
+			return errorAt(childPath(unitPath, "name"), "manifest.unit-name", "unit name %q is not bittern-bundle-<name>.service or .timer", unit.Name)
+		}
+		if err := validateFilePath(unit.Source, childPath(unitPath, "source")); err != nil {
+			return err
+		}
+		source, present := fileByPath[unit.Source]
+		if !present {
+			return errorAt(childPath(unitPath, "source"), "manifest.unit-source", "unit source %q is not in files", unit.Source)
+		}
+		if source.SHA256 != unit.SHA256 {
+			return errorAt(childPath(unitPath, "sha256"), "manifest.unit-digest", "unit sha256 %s does not match file %s", unit.SHA256, source.SHA256)
+		}
+		if source.Mode != unit.Mode {
+			return errorAt(childPath(unitPath, "mode"), "manifest.unit-mode", "unit mode %s does not match file mode %s", unit.Mode, source.Mode)
+		}
+		if unit.Mode != "0644" {
+			return errorAt(childPath(unitPath, "mode"), "manifest.unit-mode", "unit mode %q is not 0644", unit.Mode)
+		}
+		if unit.Owner != "root:root" {
+			return errorAt(childPath(unitPath, "owner"), "manifest.unit-owner", "unit owner %q is not root:root", unit.Owner)
+		}
+		if !sha256RE.MatchString(unit.SHA256) {
+			return errorAt(childPath(unitPath, "sha256"), "manifest.unit-digest", "unit sha256 is not a lowercase SHA-256")
+		}
+		wantPath := "/etc/systemd/system/" + unit.Name
+		if unit.Path != wantPath {
+			return errorAt(childPath(unitPath, "path"), "manifest.unit-path", "unit path %q is not %q", unit.Path, wantPath)
+		}
+		if previousPath != "" {
+			switch {
+			case unit.Path == previousPath:
+				return errorAt(childPath(unitPath, "path"), "manifest.duplicate-unit", "unit path %q appears twice", unit.Path)
+			case unit.Path < previousPath:
+				return errorAt(childPath(unitPath, "path"), "manifest.unsorted-units", "unit path %q is out of byte order after %q", unit.Path, previousPath)
+			}
+		}
+		previousPath = unit.Path
+	}
+	previousID := ""
+	for index, migration := range subsystems.Migrations {
+		migrationPath := indexPath("$.subsystems.migrations", index)
+		if !migrationIDRE.MatchString(migration.ID) {
+			return errorAt(childPath(migrationPath, "id"), "manifest.migration-id", "migration id %q is not lowercase ASCII with hyphens", migration.ID)
+		}
+		if migration.From < 0 || migration.To < 0 {
+			return errorAt(migrationPath, "manifest.migration-version", "a migration version is negative")
+		}
+		if migration.To <= migration.From {
+			return errorAt(childPath(migrationPath, "to"), "manifest.migration-version", "migration to %d is not greater than from %d", migration.To, migration.From)
+		}
+		if migration.From < compatibility.SchemaMin {
+			return errorAt(childPath(migrationPath, "from"), "manifest.migration-schema", "migration from %d is below schema_min %d", migration.From, compatibility.SchemaMin)
+		}
+		if migration.To > compatibility.SchemaMax {
+			return errorAt(childPath(migrationPath, "to"), "manifest.migration-schema", "migration to %d is above schema_max %d", migration.To, compatibility.SchemaMax)
+		}
+		if err := validateMigrationTarget(migration.Target); err != nil {
+			return err
+		}
+		if previousID != "" {
+			switch {
+			case migration.ID == previousID:
+				return errorAt(childPath(migrationPath, "id"), "manifest.duplicate-migration", "migration id %q appears twice", migration.ID)
+			case migration.ID < previousID:
+				return errorAt(childPath(migrationPath, "id"), "manifest.unsorted-migrations", "migration id %q is out of byte order after %q", migration.ID, previousID)
+			}
+		}
+		previousID = migration.ID
+	}
+	return nil
+}
+
+func validateMigrationTarget(value string) error {
+	if value == "appliance.yaml" {
+		return nil
+	}
+	if strings.HasPrefix(value, "bittern-data:") {
+		name := strings.TrimPrefix(value, "bittern-data:")
+		if migrationIDRE.MatchString(name) {
+			return nil
+		}
+	}
+	return errorAt("$.subsystems.migrations", "manifest.migration-target", "migration target %q is not appliance.yaml or bittern-data:<name>", value)
 }
 
 func validateFilePath(value, path string) error {

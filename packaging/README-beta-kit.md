@@ -40,6 +40,11 @@ path.
 The kit contains no manifest and no signature. It never carries a release anchor. The update helper
 uses the test anchor only for bench bundles signed by the CI test key.
 
+The units in this table are the fixed kit baseline. A signed app bundle may also declare a bounded
+`bittern-bundle-*` service or timer in its manifest; the update transaction installs, enables, or
+disables that unit and rolls it back with the rest of the transaction. A helper or launcher unit fix
+therefore ships as an app update, not as a new kit.
+
 ## Prepare
 
 Download `bittern-beta-kit.tar.gz` and `SHA256SUMS` from the same published release. Do not pipe a

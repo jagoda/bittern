@@ -147,9 +147,11 @@ func TestUpdatePowerCutBeforeVerifyFiles(t *testing.T)    { powerCutInstallCase(
 func TestUpdatePowerCutBeforePromote(t *testing.T)        { powerCutInstallCase(t, StepPromote) }
 func TestUpdatePowerCutBeforeBackupConfig(t *testing.T)   { powerCutInstallCase(t, StepBackupConfig) }
 func TestUpdatePowerCutBeforeBackupData(t *testing.T)     { powerCutInstallCase(t, StepBackupData) }
+func TestUpdatePowerCutBeforeSnapshot(t *testing.T)       { powerCutInstallCase(t, StepSnapshot) }
 func TestUpdatePowerCutBeforeStopFrigate(t *testing.T)    { powerCutInstallCase(t, StepStopFrigate) }
 func TestUpdatePowerCutBeforeStopAgent(t *testing.T)      { powerCutInstallCase(t, StepStopAgent) }
 func TestUpdatePowerCutBeforeActivate(t *testing.T)       { powerCutInstallCase(t, StepActivate) }
+func TestUpdatePowerCutBeforeSubsystems(t *testing.T)     { powerCutInstallCase(t, StepSubsystems) }
 func TestUpdatePowerCutBeforeMigrate(t *testing.T)        { powerCutInstallCase(t, StepMigrate) }
 func TestUpdatePowerCutBeforeEnsureImage(t *testing.T)    { powerCutInstallCase(t, StepEnsureImage) }
 func TestUpdatePowerCutBeforeApplyConfig(t *testing.T)    { powerCutInstallCase(t, StepApplyConfig) }
@@ -173,6 +175,9 @@ func TestUpdatePowerCutDuringRollbackBeforeStopAgent(t *testing.T) {
 }
 func TestUpdatePowerCutDuringRollbackBeforePointer(t *testing.T) {
 	powerCutRollbackCase(t, StepRollbackPointer)
+}
+func TestUpdatePowerCutDuringRollbackBeforeRestoreSubsystems(t *testing.T) {
+	powerCutRollbackCase(t, StepRollbackSubsystems)
 }
 func TestUpdatePowerCutDuringRollbackBeforeRestoreConfig(t *testing.T) {
 	powerCutRollbackCase(t, StepRollbackConfig)

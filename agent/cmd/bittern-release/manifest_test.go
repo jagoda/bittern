@@ -71,7 +71,7 @@ func TestManifestBuildsCanonicalManifest(t *testing.T) {
 	if !bytes.Equal(roundTrip, canonical) {
 		t.Fatal("the built manifest is not canonical")
 	}
-	if manifest.Product != release.Product || manifest.ManifestVersion != release.ManifestVersion {
+	if manifest.Product != release.Product || manifest.ManifestVersion != release.ManifestVersionV1 {
 		t.Fatalf("product = %q, manifest_version = %d", manifest.Product, manifest.ManifestVersion)
 	}
 	if manifest.Kind != release.KindAppBundle || manifest.Version != "1.2.3" || manifest.Generation != 4 ||

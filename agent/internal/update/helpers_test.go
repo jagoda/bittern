@@ -40,6 +40,7 @@ type tarEntry struct {
 type bundleSpec struct {
 	generation    int64
 	files         map[string]fileSpec
+	units         []bundleUnit
 	archiveExtra  []tarEntry
 	archiveRemove []string
 	mutate        func(*release.Manifest)
@@ -47,6 +48,17 @@ type bundleSpec struct {
 	noncanonical  bool
 	signature     []byte
 	signer        ed25519.PrivateKey
+}
+
+type bundleUnit struct {
+	name    string
+	source  string
+	content []byte
+	enabled bool
+	reload  *bool
+	mode    string
+	owner   string
+	path    string
 }
 
 type fakeSystem struct {
@@ -67,6 +79,8 @@ type fakeSystem struct {
 	// pointer and the active bundle's manifest version.
 	restartVersion func(unit string) string
 	runningVersion map[string]string
+	unitRoot       string
+	daemonReloads  int
 }
 
 func newFakeSystem() *fakeSystem {
@@ -110,6 +124,26 @@ func (f *fakeSystem) RestartUnit(unit string) error {
 		return f.restartHook(unit)
 	}
 	return nil
+}
+
+func (f *fakeSystem) DaemonReload() error {
+	f.calls = append(f.calls, "daemon-reload")
+	f.daemonReloads++
+	return nil
+}
+
+func (f *fakeSystem) UnitEnabled(unit string) (bool, error) {
+	f.calls = append(f.calls, "is-enabled:"+unit)
+	if f.unitRoot == "" {
+		return false, nil
+	}
+	for _, target := range []string{"multi-user.target", "timers.target"} {
+		link := filepath.Join(f.unitRoot, "etc/systemd/system", target+".wants", unit)
+		if info, err := os.Lstat(link); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (f *fakeSystem) WaitUnitActive(unit string, timeout time.Duration) error {
@@ -291,6 +325,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	env.options = Options{
 		StateRoot:        stateRoot,
+		LiveRoot:         root,
 		ConfigPath:       configPath,
 		FrigateConfig:    frigateConfig,
 		TrustImageDir:    trustDir,
@@ -305,7 +340,11 @@ func newTestEnv(t *testing.T) *testEnv {
 		MinFreeBytes:     1,
 		HealthTimeout:    5 * time.Minute,
 		BaselineBinary:   baselineBinary,
+		UnitOwnerUID:     os.Getuid(),
+		UnitOwnerGID:     os.Getgid(),
+		UnitVerifier:     UnitVerifierFunc(func(string, []byte) error { return nil }),
 	}
+	system.unitRoot = root
 	env.applier = &testConfigApplier{env: env, system: newTestApplySystem()}
 	env.options.ConfigApplier = env.applier
 	system.restartHook = func(unit string) error {
@@ -389,7 +428,7 @@ func (e *testEnv) writeBundle(t *testing.T, dir string, spec bundleSpec) (*relea
 		spec.files = defaultFiles()
 	}
 	manifest := &release.Manifest{
-		ManifestVersion: release.ManifestVersion,
+		ManifestVersion: release.ManifestVersionV1,
 		Kind:            release.KindAppBundle,
 		Product:         release.Product,
 		Version:         fmt.Sprintf("0.1.%d", spec.generation),
@@ -426,6 +465,43 @@ func (e *testEnv) writeBundle(t *testing.T, dir string, spec bundleSpec) (*relea
 			SHA256: hex.EncodeToString(digest[:]),
 			Mode:   fmt.Sprintf("%04o", mode.Perm()),
 		})
+	}
+	if len(spec.units) > 0 {
+		manifest.ManifestVersion = release.ManifestVersionV2
+		manifest.Subsystems = &release.Subsystems{}
+		for _, unit := range spec.units {
+			source := unit.source
+			if source == "" {
+				source = bundleUnitSourceDir + "/" + unit.name
+			}
+			content := unit.content
+			if content == nil {
+				content = spec.files[source].data
+			}
+			digest := sha256.Sum256(content)
+			mode := unit.mode
+			if mode == "" {
+				mode = "0644"
+			}
+			owner := unit.owner
+			if owner == "" {
+				owner = "root:root"
+			}
+			unitPath := unit.path
+			if unitPath == "" {
+				unitPath = "/etc/systemd/system/" + unit.name
+			}
+			manifest.Subsystems.Units = append(manifest.Subsystems.Units, release.Unit{
+				Name:    unit.name,
+				Source:  source,
+				Path:    unitPath,
+				Mode:    mode,
+				Owner:   owner,
+				SHA256:  hex.EncodeToString(digest[:]),
+				Enabled: unit.enabled,
+				Reload:  unit.reload,
+			})
+		}
 	}
 	entries := make([]tarEntry, 0, len(paths)+len(spec.archiveExtra))
 	for _, path := range paths {

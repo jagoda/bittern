@@ -21,10 +21,11 @@ Group=root
 UMask=0077
 StateDirectory=bittern
 
-# The transaction writes its own state under /var/lib/bittern and, during the apply-config
-# step, the apply target map's live files under /etc. The fixed target map is the allowlist;
-# /etc is writable because an atomic replacement creates its temporary file beside the target.
-# The live appliance.yaml is still written by the agent after commit, not by this helper.
+# The transaction writes its own state under /var/lib/bittern, the apply target map's live files
+# under /etc, and the declared /etc/systemd/system/bittern-bundle-* unit files with their wants
+# links. The fixed apply target map and the unit allowlist are the code-enforced boundary; /etc is
+# writable because an atomic replacement creates its temporary file beside the target. The live
+# appliance.yaml is still written by the agent after commit, not by this helper.
 ReadWritePaths=/etc /var/lib/bittern
 
 # The helper needs to see /dev/dri and /sys/firmware for the read-only base fingerprint, so
